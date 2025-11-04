@@ -185,7 +185,6 @@ class ReportController extends Controller
         $projectTemplateData = $projectTemplate->getProjectTemplateData;
         $templateHeadsCount = count($projectTemplate->getTemplate->getTemplateHeads);
         $projectTemplateRowIds = $projectTemplate->getProjectTemplateData->pluck('id')->unique()->values()->toArray();
-//        dd($projectTemplateRowIds);
 
         foreach ($activity_questions_array as $activityQuestions) {
 
