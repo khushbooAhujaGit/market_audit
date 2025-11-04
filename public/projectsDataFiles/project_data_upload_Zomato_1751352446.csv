@@ -1,0 +1,10 @@
+res_id,distr_id,name,city,latitude,longitude,zipcode,address,res_id_1,distr_id_1,name_1,city_1,latitude_1,longitude_1,zipcode_1,address_1
+2,60000000,Fujiya,New Delhi,28.60155314,77.18610451,0,"12/48, Malcha Marg Market, Chanakyapuri, New Delhi",50,60000000,Fujiya,New Delhi,28.60155314,77.18610451,0,"12/48, Malcha Marg Market, Chanakyapuri, New Delhi"
+3,60000000,Berco's,New Delhi,28.632011697800003,77.22144663,0,"E-42 & 43, Inner Circle, Connaught Place, New Delhi",55,60000000,Berco's,New Delhi,28.632011697800003,77.22144663,0,"E-42 & 43, Inner Circle, Connaught Place, New Delhi"
+4,60000000,Diva - The Italian Restaurant,New Delhi,28.534088082399997,77.24318359,0,"M-8A, M Block Market, Greater Kailash (GK) 2, New Delhi",64,60000000,Diva - The Italian Restaurant,New Delhi,28.534088082399997,77.24318359,0,"M-8A, M Block Market, Greater Kailash (GK) 2, New Delhi"
+5,60000000,Drums of Heaven,New Delhi,28.55791929,77.20603567,0,"S-14, Green Park Extension, Green Park, New Delhi",65,60000000,Drums of Heaven,New Delhi,28.55791929,77.20603567,0,"S-14, Green Park Extension, Green Park, New Delhi"
+6,60000000,Embassy,New Delhi,28.633704071300002,77.22125083,0,"11-D, Connaught Place, New Delhi",66,60000000,Embassy,New Delhi,28.633704071300002,77.22125083,0,"11-D, Connaught Place, New Delhi"
+7,60000000,Naivedyam,New Delhi,28.55484659,77.19505101,0,"Shop 1, Hauz Khas Village, New Delhi",89,60000000,Naivedyam,New Delhi,28.55484659,77.19505101,0,"Shop 1, Hauz Khas Village, New Delhi"
+8,60000000,Veg Gulati,New Delhi,28.60780727,77.22988386,110003,"8, Pandara Road Market, New Delhi",103,60000000,Veg Gulati,New Delhi,28.60780727,77.22988386,110003,"8, Pandara Road Market, New Delhi"
+9,60000000,Kwality,New Delhi,28.629819605399998,77.21736263,0,"7, Regal Building, Connaught Place, New Delhi",121,60000000,Kwality,New Delhi,28.629819605399998,77.21736263,0,"7, Regal Building, Connaught Place, New Delhi"
+10,60000000,Lazeez Affaire,New Delhi,28.60223135,77.18610618,0,"6/48, Malcha Marg Market, Chanakyapuri, New Delhi",122,60000000,Lazeez Affaire,New Delhi,28.60223135,77.18610618,0,"6/48, Malcha Marg Market, Chanakyapuri, New Delhi"

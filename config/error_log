@@ -1,0 +1,4 @@
+[03-Jul-2024 19:53:44 America/Chicago] PHP Fatal error:  Uncaught Error: Call to undefined function env() in /home2/tnbtt6gl/marketaudit.tnbttech.com/config/database.php:18
+Stack trace:
+#0 {main}
+  thrown in /home2/tnbtt6gl/marketaudit.tnbttech.com/config/database.php on line 18
