@@ -31,7 +31,15 @@ class VerifierController extends Controller
         $userId = Auth::id();
         $my_verifications = Verifier::where('user_id', $userId)
             ->with('projectTemplateInfo')->orderBy('id', 'DESC')->get();
-//        {{ $my_verifications->links() }}
+        // {{ $my_verifications->links() }}
+        //     $my_verifications = Verifier::where('user_id', $userId)
+        // ->with([
+        //     'projectTemplateInfo.activity',                // eager load activity
+        //     'projectTemplateInfo.activityGroup.get_group_activities.activityName', // eager load group activities + activityName
+        // ])
+        // ->orderBy('id', 'DESC')
+        // ->paginate(10);
+
         return view('masters.verifiers.user_verifications', compact('my_verifications'));
     }
 
@@ -46,23 +54,22 @@ class VerifierController extends Controller
             ->distinct()
             ->get()
             ->pluck('id');
-//        dd($uniqueRowIds, $activity_group_info->id, $a);
         $data_to_verify_Ids = TempUserActivityAnswersData::whereIn('row_id', $uniqueRowIds)
             ->where('activity_id', $a)
-//            ->where('activity_group_name_id', $activity_group_info->id)
+            // ->where('activity_group_name_id', $activity_group_info->id)
             ->where('status', 0) // this is to only get pending answers
             ->select('row_id')
             ->distinct()
             ->get()
             ->pluck('row_id');
-//         dd($data_to_verify_Ids, $activity_group_info->id, $a);
+        // dd($data_to_verify_Ids, $activity_group_info->id);
         $verification_data = [];
         foreach ($data_to_verify_Ids as $verify_id) {
 //            $verify_data = ProjectTemplateNameValue::with('getDataOfRows')->where('row_id', $verify_id)->first();
             $verify_data = ProjectTemplateNameValuesNew::find($verify_id);
             $template_name_values = [];
             $json_data = json_decode($verify_data->template_data_json);
-            foreach($json_data as $key => $value){
+            foreach ($json_data as $key => $value) {
                 $templateHeadName = TemplateNameHead::find($key);
                 $template_name_values[] = [
                     'name' => $templateHeadName->template_head_name,
@@ -106,7 +113,7 @@ class VerifierController extends Controller
             $verify_data = ProjectTemplateNameValuesNew::find($verify_id);
             $template_name_values = [];
             $json_data = json_decode($verify_data->template_data_json);
-            foreach($json_data as $key => $value){
+            foreach ($json_data as $key => $value) {
                 $templateHeadName = TemplateNameHead::find($key);
                 $template_name_values[] = [
                     'name' => $templateHeadName->template_head_name,
@@ -138,7 +145,7 @@ class VerifierController extends Controller
 
         $template_name_values = [];
         $json_data = json_decode($related_values->template_data_json);
-        foreach($json_data as $key => $value){
+        foreach ($json_data as $key => $value) {
             $templateHeadName = TemplateNameHead::find($key);
             $template_name_values[] = [
                 'name' => $templateHeadName->template_head_name,
@@ -352,7 +359,7 @@ class VerifierController extends Controller
                             if (!empty($value) && $value1->user_answer != $value) {
                                 $value1->user_answer = $value;
                                 $value1->edited_by_verifier = 1;
-                            }else{
+                            } else {
                                 $value1->edited_by_verifier = 0;
                             }
                             $value1->status = $new_status;
@@ -365,8 +372,7 @@ class VerifierController extends Controller
                                 unset($related_questions[$index]);
                             }
                         }
-                    }
-                    else {
+                    } else {
 //                        echo '<pre>';
 //                        echo 'non subjective'.$user_answer_get->id;
                         if ($user_answer_get) {
@@ -374,7 +380,7 @@ class VerifierController extends Controller
                             if (!empty($value) && $user_answer_get->user_answer != $value) {
                                 $user_answer_get->user_answer = $value;
                                 $user_answer_get->edited_by_verifier = 1;
-                            }else{
+                            } else {
                                 $user_answer_get->edited_by_verifier = 1;
                             }
                             $user_answer_get->status = $new_status;
@@ -535,15 +541,341 @@ class VerifierController extends Controller
     }
 
 
+    public function activity_answer_verifyOldd(Request $request)
+    {
+        $group_id = null;
+        $group_or_single = 0;
+        if ($request->has('activity_group_id')) {
+            $group_or_single = 1;
+            $group_id = $request->activity_group_id;
+        }
+        $userId = Auth::id();
+        $new_status = "";
+        $row_id = $request->row_id;
+//        dd($row_id);
+        $a_id = $request->activity_id;
+
+        //khushboo 18-06-2025
+        //answer pdf create
+        $projectTemplateValue = ProjectTemplateNameValuesNew::where('id', $row_id)->get();
+        $projectTemplate = ProjectTemplate::find($projectTemplateValue[0]->project_template_id);
+        $projectTemplateHeaderId = $projectTemplate->main_header;
+        $projectTemplateValueData = ProjectTemplateNameValuesNew::where('id', $row_id)
+            ->select(
+                DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$projectTemplateHeaderId}\"')) as value")
+            )
+//            ->where('template_name_head_id', $projectTemplateHeaderId)
+            ->first();
+        //answer pdf create
+        //khushboo 18-06-2025
+
+        $activity_info = Activity::findOrFail($a_id);
+        $related_questions = Question::where('activity_id', $activity_info->id)->pluck('id')->toArray();
+        $g_id = $group_id ? $group_id : 0;
+
+        $verifier_remark = $request->remark;
+        //khushboo 10-06-25
+        if ($request->remark == 'other' && isset($request->other_remark) && empty($request->other_remark)) {
+            redirect()->back()->with('error', 'Please Add Other Remark Text');
+        }
+        //khushboo 10-06-25
+
+        $baseDirectory = 'activityAnswerImages/'; // this is the base directory where all the project directories will be kept
+
+        $get_project_template_value_row_info = ProjectTemplateNameValuesNew::find($row_id);
+//        dd($get_project_template_value_row_info->getProjectTemplateData->getProject);
+
+        $projectName = $get_project_template_value_row_info->getProjectTemplateData->getProject->project_name;
+        $projectId = $get_project_template_value_row_info->getProjectTemplateData->getProject->id;
+
+        $projectDirectory = $baseDirectory . $projectName . '/';
+        $this->checkAndCreateDirectory($projectDirectory);
+        // Get the current month and year
+        $currentMonthYear = Carbon::now()->format('FY');
+        // Create directory for the current month and year if it doesn't exist
+        $projectMonthYearDirectory = $projectDirectory . $currentMonthYear;
+        $message = "";
+        if ($request->has('approve')) {
+            // Handle the approval logic
+            $new_status = 5; // this means the the answer user filled is verified by the verifier
+            $message = "Verified Successfully";
+        }
+
+        // Check if the "reject" button was clicked
+        if ($request->has('reject')) {
+            $message = "Rejected Successfully";
+            // Handle the rejection logic
+            $new_status = 4; // this means the the answer user filled is rejected by the verifier
+        }
+
+        //khushboo 10-06-25 (create new remark)
+
+        if ($request->has('other_remark') && !empty($request->other_remark)) {
+
+
+            $checkifRemarkExist = RemarkMaster::where('project_id', $projectId)->where('remark', 'LIKE', $request->other_remark)->exists();
+            if (!$checkifRemarkExist) {
+
+                $newRemark = RemarkMaster::create([
+                    'remark' => $request->other_remark,
+                    'status' => 1,
+                    'project_id' => $projectId,
+                ]);
+
+                $verifier_remark = $newRemark->id;
+            }
+
+        }
+        $auditDate = null;
+
+        //khushboo 10-06-25
+
+        $parameters = $request->except(['activity_id', 'activity_group_id', 'row_id', '_token', 'reject', 'approve', 'activity_group_name_id', 'sequence', 'remark']);
+        foreach ($parameters as $key => $value) {
+            if (!is_object($value)) {
+                if (!empty($value)) {
+                    $user_answer_get = TempUserActivityAnswersData::where("row_id", $row_id)
+                        ->where("activity_id", $a_id)
+                        ->where(function ($query) use ($g_id) {
+                            if ($g_id == 0) {
+                                $query->whereNull('activity_group_name_id')
+                                    ->orWhere('activity_group_name_id', 0);
+                            } else {
+                                $query->where('activity_group_name_id', $g_id);
+                            }
+                        })
+                        ->where('question_id', $key)->first();
+
+                    $check_questionType = Question::find($key);
+//                    dd($key);
+//                    dd($check_questionType->question_type);
+                    if (!empty($check_questionType)) {
+                        if ($check_questionType->question_type == "Date") {
+                            if (isset($value)) {
+                                $value = \Carbon\Carbon::parse($value)->format('d/m/Y');
+                            }
+                        } elseif ($check_questionType->question_type == "Multi select") {
+                            $value = implode(',', $value);
+                        } elseif ($check_questionType->question_type == "Audio") {
+                            if (strpos($value, 'data:audio/') === 0) {
+                                $get_privous_audio = TempUserActivityAnswersData::where('row_id', $row_id)
+                                    ->where('activity_id', $activity_info->id)
+                                    ->where('question_id', $key)
+                                    ->first();
+                                if ($get_privous_audio) {
+                                    $previousAudioPath = public_path($get_privous_audio->user_answer);
+                                    if (File::exists($previousAudioPath)) {
+                                        File::delete($previousAudioPath);
+                                    }
+                                }
+                                $audioData = $value;
+                                $audioBlob = base64_decode(explode(',', $audioData)[1]);
+                                $audioFileName = uniqid() . '.wav';
+                                $audioFilePath = $projectMonthYearDirectory . '/' . $audioFileName;
+                                // Save the audio file
+                                file_put_contents(public_path($audioFilePath), $audioBlob);
+                                // Set user_answer to the file path
+                                $value = $audioFilePath;
+                            } else {
+                                $parsed_url = parse_url($value);
+                                // The path will start with /activityAnswerImages, so we extract that part
+                                $relative_path = substr($parsed_url['path'], strpos($parsed_url['path'], 'activityAnswerImages'));
+                                $value = $relative_path;
+                            }
+                        }
+
+                    }
+
+                    if (!empty($check_questionType) && $check_questionType->question_type == "Subjective") {
+                        $user_answer_get = TempUserActivityAnswersData::where("row_id", $row_id)
+                            ->where("activity_id", $a_id)
+                            ->where(function ($query) use ($g_id) {
+                                if ($g_id == 0) {
+                                    $query->whereNull('activity_group_name_id')
+                                        ->orWhere('activity_group_name_id', 0);
+                                } else {
+                                    $query->where('activity_group_name_id', $g_id);
+                                }
+                            })
+                            ->where('question_id', $key)->get();
+
+                        foreach ($user_answer_get as $key1 => $value1) {
+
+                            if ($value1->user_answer !== $value) {
+                                $value1->user_answer = $value;
+                                $value1->edited_by_verifier = 1;
+                            }
+                            $value1->status = $new_status;
+                            $value1->remark = $verifier_remark;
+                            $value1->verified_by = $userId;
+                            $value1->save();
+                            // Remove the question ID from the related questions array
+                            if (($index = array_search($key, $related_questions)) !== false) {
+                                unset($related_questions[$index]);
+                            }
+                        }
+                    } else {
+                        if ($user_answer_get) {
+
+                            if ($user_answer_get->user_answer !== $value) {
+                                $user_answer_get->user_answer = $value;
+                                $user_answer_get->edited_by_verifier = 1;
+                            }
+                            $user_answer_get->status = $new_status;
+                            $user_answer_get->remark = $verifier_remark;
+                            $user_answer_get->verified_by = $userId;
+                            $user_answer_get->save();
+                            // Remove the question ID from the related questions array
+                            if (($index = array_search($key, $related_questions)) !== false) {
+                                unset($related_questions[$index]);
+                            }
+                        }
+                    }
+
+                }
+            }
+        }
+        // dd($new_status);
+        foreach ($related_questions as $re_quest) {
+
+//            dd($row_id, $a_id, $g_id, $re_quest);
+            $user_answer_count = TempUserActivityAnswersData::where("row_id", $row_id)
+                ->where("activity_id", $a_id)
+                ->where(function ($query) use ($g_id) {
+                    if ($g_id == 0) {
+                        $query->whereNull('activity_group_name_id')
+                            ->orWhere('activity_group_name_id', 0);
+                    } else {
+                        $query->where('activity_group_name_id', $g_id);
+                    }
+                })
+                ->where('question_id', $re_quest)->count();
+            if ($user_answer_count == 1) {
+
+                $user_answer_get = TempUserActivityAnswersData::where("row_id", $row_id)
+                    ->where("activity_id", $a_id)
+                    ->where(function ($query) use ($g_id) {
+                        if ($g_id == 0) {
+                            $query->whereNull('activity_group_name_id')
+                                ->orWhere('activity_group_name_id', 0);
+                        } else {
+                            $query->where('activity_group_name_id', $g_id);
+                        }
+                    })
+                    ->where('question_id', $re_quest)->first();
+
+                $auditDate = $user_answer_get->created_at;
+
+                if ($request->hasFile($re_quest)) {
+
+                    // this is to remove the previous file from the folder when verifier is updating the file
+                    $folder = "answer";
+                    $previousImagePath = public_path('answer/' . basename($user_answer_get->user_answer));
+                    if (File::exists($previousImagePath)) {
+                        File::delete($previousImagePath);
+                    }
+                    $answer_image = $request->file($re_quest);
+                    $file_name = 'file_' . time() . rand(0, 999) . '.' . $answer_image->getClientOriginalExtension();
+                    $answer_image->move(public_path($folder), $file_name);
+                    $answer_image_url = url('/') . '/' . $folder . '/' . $file_name;
+                    $user_answer_get->user_answer = $answer_image_url;
+                    $user_answer_get->status = $new_status;
+                    $user_answer_get->remark = $verifier_remark;
+                    $user_answer_get->verified_by = $userId;
+                    $user_answer_get->edited_by_verifier = 1;
+                    $user_answer_get->save();
+                } else {
+//                dd($user_answer_get->status);
+//                print_r($user_answer_get);
+                    $user_answer_get->status = $new_status;
+                    $user_answer_get->remark = $verifier_remark;
+                    $user_answer_get->verified_by = $userId;
+                    $user_answer_get->save();
+                }
+
+            } else if ($user_answer_count > 1) {
+
+                $user_answer_get = TempUserActivityAnswersData::where("row_id", $row_id)
+                    ->where("activity_id", $a_id)
+                    ->where(function ($query) use ($g_id) {
+                        if ($g_id == 0) {
+                            $query->whereNull('activity_group_name_id')
+                                ->orWhere('activity_group_name_id', 0);
+                        } else {
+                            $query->where('activity_group_name_id', $g_id);
+                        }
+                    })
+                    ->where('question_id', $re_quest)->get();
+
+                $auditDate = $user_answer_get[0]->created_at;
+
+                foreach ($user_answer_get as $key1 => $value1) {
+
+                    if ($request->hasFile($re_quest)) {
+
+                        // this is to remove the previous file from the folder when verifier is updating the file
+                        $folder = "answer";
+                        $previousImagePath = public_path('answer/' . basename($user_answer_get->user_answer));
+                        if (File::exists($previousImagePath)) {
+                            File::delete($previousImagePath);
+                        }
+                        $answer_image = $request->file($re_quest);
+                        $file_name = 'file_' . time() . rand(0, 999) . '.' . $answer_image->getClientOriginalExtension();
+                        $answer_image->move(public_path($folder), $file_name);
+                        $answer_image_url = url('/') . '/' . $folder . '/' . $file_name;
+                        $value1->user_answer = $answer_image_url;
+                        $value1->status = $new_status;
+                        $value1->remark = $verifier_remark;
+                        $value1->verified_by = $userId;
+                        $value1->edited_by_verifier = 1;
+                        $value1->save();
+                    } else {
+//                dd($user_answer_get->status);
+//                print_r($user_answer_get);
+                        $value1->status = $new_status;
+                        $value1->remark = $verifier_remark;
+                        $value1->verified_by = $userId;
+                        $value1->save();
+                    }
+
+                }
+
+            }
+
+
+        }
+
+        try {
+
+            $this->storeAnswerPdf($row_id, $projectTemplateValueData->value, $a_id, $auditDate);
+
+        } catch (\Exception $e) {
+//            dd($e->getMessage());
+        }
+
+
+//        dd('gjnhg');
+
+        if ($group_or_single == 1) {
+            $params = Session::get('group_verification_rerender');
+            return redirect(route('activityGroup.verification.view', $params))->with('message', $message);
+        }
+        $params = Session::get('activity_verification_rerender');
+        return redirect(route('activity.verification.view', $params))->with('message', $message);
+
+        return back()->with(['message' => $message]);
+    }
+
+
     public function storeAnswerPdf($r, $v, $a, $auditDate)
     {
 
 //        $related_values = ProjectTemplateNameValue::where('row_id', $r)->where('value', $v)->get();
         $related_values = ProjectTemplateNameValuesNew::where('id', $r)
 //            ->where('value', $v)
-            ->where('template_data_json', 'like', '%"'.$v.'"%')
+            ->where('template_data_json', 'like', '%"' . $v . '"%')
             ->get();
-//        dd($related_values);
+        dd($related_values);
 
         $projectTemplateData = ProjectTemplate::with(['getMainHeader', 'getSubHeader'])->where('id', $related_values[0]->project_template_id)->first();
 
@@ -579,14 +911,12 @@ class VerifierController extends Controller
                 'value' => $v
             ]);
 
-
             // Define base directory
             $baseDirectory = 'activityAnswerImages/';
 
             // Get project name
             $projectTemp = ProjectTemplateNameValuesNew::find($r);
             $projectName = $projectTemp->getProjectTemplateData->getProject->project_name;
-
 
             // Build path: activityAnswerImages/{projectName}/
             $projectDirectory = $baseDirectory . $projectName . '/';
@@ -635,7 +965,7 @@ class VerifierController extends Controller
 
     private function ensureWritableDirectory(string $absPath, int $mode = 0777): void
     {
-        if (! File::isDirectory($absPath)) {
+        if (!File::isDirectory($absPath)) {
             // recursive = true, force = true
             File::makeDirectory($absPath, $mode, true, true);
         }
@@ -733,7 +1063,7 @@ class VerifierController extends Controller
 //            ->where('value', $v)
             // ->where('template_data_json', 'like', '%"'.$v.'"%')
             //  ->whereJsonContains('template_data_json', $v)
-            ->where('template_data_json', 'like', '%'.addslashes($v).'%')
+            ->where('template_data_json', 'like', '%' . addslashes($v) . '%')
             ->get();
 
 
@@ -762,6 +1092,12 @@ class VerifierController extends Controller
             $auditTime = $user_responses[0]->created_at;
             $auditTime = Carbon::parse($auditTime)->format('H:i A');
 
+            $templateJson = json_decode($related_values[0]->template_data_json, true);
+
+            $mainHeaderValue = $templateJson[$projectTemplateData->main_header] ?? null;
+            $subHeaderValue  = $templateJson[$projectTemplateData->sub_header] ?? null;
+
+
             $pdf = Pdf::loadView('masters.pdf_templates.verify_template', [
                 'projectTemplateData' => $projectTemplateData,
                 'related_questions' => $related_questions,
@@ -769,7 +1105,9 @@ class VerifierController extends Controller
                 'auditDate' => $auditDate,
                 'auditTime' => $auditTime,
                 'user_responses' => $user_responses,
-                'value' => $v
+                'value' => $v,
+                'main_header' => $mainHeaderValue,
+                'sub_header' => $subHeaderValue
             ]);
 
 
@@ -867,6 +1205,7 @@ class VerifierController extends Controller
 
     }
 
+
     public function exportAnswerPdfs(Request $request)
     {
         $projectData = Project::find($request->project_id);
@@ -932,93 +1271,17 @@ class VerifierController extends Controller
                             continue;
                         }
 
+
+                        // Check date range
+                        // // if (!empty($startDate) && !empty($endDate)) {
+                        // if ($fileDate->between($startDate, $endDate)) {
+                        //     // if ($fileDate <= $startDate || $fileDate >= $endDate) {
+                        //         continue;
+                        //     // }
+                        // }
                         // Skip file if it's outside the date range
                         if (!$fileDate->between($startDate, $endDate)) continue;
 
-                        $zip->addFile($file->getRealPath(), $fileName);
-                        $filesAdded = true;
-                    }
-
-                }
-            }
-
-            $zip->close();
-
-            if ($filesAdded && File::exists($zipPath)) {
-                return response()->download($zipPath)->deleteFileAfterSend(true);
-            }
-
-            return response()->json(['error' => 'No PDFs matched your filters.'], 404);
-        }
-
-        return response()->json(['error' => 'Could not create zip file.'], 500);
-
-    }
-
-
-    public function exportAnswerPdfsOld(Request $request)
-    {
-        $projectData = Project::find($request->project_id);
-        $projectTemplateInfo = ProjectTemplate::find($request->project_template_id);
-        $rowIds = ProjectTemplateNameValuesNew::where('project_template_id', $projectTemplateInfo->id)->pluck('id')->toArray();
-
-        $endDate = $request->end_date;
-        $startDate = $request->start_date;
-//        dd(empty($startDate));
-
-        if (empty($rowIds)) {
-            return response()->json(['error' => 'No row IDs provided.'], 422);
-        }
-
-        $zip = new ZipArchive();
-        $zipFileName = 'All_PDFs_' . now()->format('Ymd_His') . '.zip';
-        $zipPath = public_path('zips/' . $zipFileName);
-
-        // Ensure zip directory exists
-        if (!File::exists(public_path('zips'))) {
-            File::makeDirectory(public_path('zips'), 0755, true);
-        }
-
-        $filesAdded = false;
-        if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true) {
-
-            foreach ($rowIds as $rowId) {
-
-                $projectName = $projectData->project_name;
-                $sanitizedProjectName = str_replace(' ', '-', $projectName);
-//                $sanitizedProjectName = Str::slug($projectName);
-                $folderPath = public_path("activityAnswerImages/{$projectName}/" . now()->format('FY') . "/answerPdfs/");
-
-                if (!File::exists($folderPath)) continue;
-
-                $pdfFiles = File::files($folderPath);
-//                dd($pdfFiles);
-
-                foreach ($pdfFiles as $file) {
-
-                    $addToZip = true;
-                    $fileName = $file->getFilename();
-//                    dd($sanitizedProjectName);
-                    $pattern = '/^Audit-' . preg_quote($sanitizedProjectName, '/') . '_(\d+)_([\d]{2}-[\d]{2}-[\d]{4})\.pdf$/';
-
-                    if (preg_match($pattern, $fileName, $matches)) {
-                        $matchedRowId = $matches[1];
-                        $rawDate = $matches[2]; // e.g. 11-06-2025
-
-                        // Check if row ID matches
-                        if ($matchedRowId != $rowId) {
-                            continue;
-                        }
-
-                        // Convert date from DD-MM-YYYY to Y-m-d
-                        $fileDate = \Carbon\Carbon::createFromFormat('d-m-Y', $rawDate)->format('Y-m-d');
-
-                        // Check date range
-                        if (!empty($startDate) && !empty($endDate)) {
-                            if ($fileDate <= $startDate || $fileDate >= $endDate) {
-                                continue;
-                            }
-                        }
 
                         $zip->addFile($file->getRealPath(), $fileName);
                         $filesAdded = true;

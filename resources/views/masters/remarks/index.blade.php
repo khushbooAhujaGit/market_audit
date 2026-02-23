@@ -6,6 +6,9 @@
         <div class="col-sm-12">
             <div class="card">
                 <div class="card-header">
+                    <a href="{{route('remark.export')}}">
+                        <button class="btn btn-primary ms-2 float-end">Export</button>
+                    </a>
                     <h4>Remarks <a href="{{route('remark.create')}}"><button class = "btn btn-primary float-end">Create</button></a></h4>
                 </div>
                 <div class="card-body">

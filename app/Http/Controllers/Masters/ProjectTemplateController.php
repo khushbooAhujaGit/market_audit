@@ -21,11 +21,6 @@ class ProjectTemplateController extends Controller
     {
         $projectTemplate = ProjectTemplate::with('getTemplate.getTemplateHeads')->where('project_id', $request->p_id)
             ->where('template_name_id', $request->t_id)->first();
-
-        //check if data exists on project_template_name_values_new
-        $head_data_exists = ProjectTemplateNameValuesNew::where('project_template_id', $projectTemplate->id)->exists();
-        //check if data exists on project_template_name_values_new
-
         $project_templates_count = ProjectTemplate::where('project_id', $request->p_id)
             ->count();
 //        $project_template_main_headers = ProjectTemplateNameValue::where('project_template_id', $projectTemplate->id)
@@ -36,6 +31,10 @@ class ProjectTemplateController extends Controller
 //            ->where('template_name_head_id', $projectTemplate->sub_header)
 //            ->orderBy("row_id")
 //            ->get();
+
+        //check if data exists on project_template_name_values_new
+        $head_data_exists = ProjectTemplateNameValuesNew::where('project_template_id', $projectTemplate->id)->exists();
+        //check if data exists on project_template_name_values_new
 
         $project_template_main_headers = ProjectTemplateNameValuesNew::where('project_template_id', $projectTemplate->id)
             ->select(

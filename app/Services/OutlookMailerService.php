@@ -10,8 +10,10 @@ class OutlookMailerService
     protected $clientId;
     protected $clientSecret;
     protected $tenantId;
+
     protected $authority;
     protected $tokenUrl;
+
     protected $scope;
 
     public function __construct()

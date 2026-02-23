@@ -69,7 +69,7 @@ class TaskController extends Controller
         }
     }
 
-    public function getAllActivity($row_id, $user_id, $is_outlet_assigned = 0)
+    public function getAllActivity($row_id, $user_id, $is_outlet_assigned=0)
     {
 
         try {
@@ -84,7 +84,7 @@ class TaskController extends Controller
                 ->first();
 
             $template_name_id = $projectTemplateData->template_name_id;
-            $data_add_on = $projectTemplateData->data_add_on == 1 ? true : false;
+            $data_add_on = $projectTemplateData->data_add_on==1?true:false;
 
             $getHeadValues = DB::table('project_template_name_values_new')
                 ->where('id', $row_id)
@@ -102,7 +102,7 @@ class TaskController extends Controller
 
 
             //khushboo 07-07-2025
-
+            
             $distinct_data_assignIds = UserActivityDataAssign::where('user_id', $user)
                 ->where('project_template_id', $projectTemplateData->id)
                 ->distinct('data_assign_id')
@@ -115,20 +115,20 @@ class TaskController extends Controller
                 ->where('project_template_id', $projectTemplateData->id)
                 ->whereIn("id", $distinct_data_assignIds)
                 ->get();
-
-            $checkOutletAssign = DataAssign::with('getProjectTemplate', 'templateName', 'activityName', 'getActivityGroup')
+                
+            $checkOutletAssign =  DataAssign::with('getProjectTemplate', 'templateName', 'activityName', 'getActivityGroup')
                 ->where('project_id', $projectTemplateData->project_id)
                 ->whereIn("id", $distinct_data_assignIds)
                 ->where('is_outlet_assigned', 1)
                 ->get();
-
+                
             // dd($checkOutletAssign);
-            if (!empty($checkOutletAssign)) {
-
-                $data_assign_info = UserActivityDataAssign::with('projectTemplateData', 'activityInfo')
-                    ->where('project_template_id', $projectTemplateData->id)
-                    ->get();
-
+            if(!empty($checkOutletAssign)){
+                
+                $data_assign_info = UserActivityDataAssign::with('projectTemplateData','activityInfo')
+                ->where('project_template_id', $projectTemplateData->id)
+                ->get();
+                
             }
             // dd($data_assign_info);
 
@@ -137,7 +137,7 @@ class TaskController extends Controller
                 ->where('project_template_id', $projectTemplateData->id)
                 ->distinct('activity_id')
                 ->pluck('activity_id')->toArray();
-            // dd($distinct_data_assign_activity_Ids);
+                // dd($distinct_data_assign_activity_Ids);
 
             if (
                 $projectInfo->is_otp_required == 1 &&
@@ -149,9 +149,9 @@ class TaskController extends Controller
                     $otpRequiredStatus = true;
                 }
             }
-
+            
             $groupActivity = null;
-            if ($projectTemplateData->activityType == 1) {
+            if($projectTemplateData->activityType == 1){
                 $groupActivity = $projectTemplateData->activity_group_name_id_or_activity_id;
             }
             // dd($data_assign_info);
@@ -160,7 +160,7 @@ class TaskController extends Controller
                 $sequence = null;
                 // dd($assigned_data);
                 if (isset($assigned_data->activity_group_id)) {
-//                    $groupActivity = $assigned_data->activity_group_id;
+                    // $groupActivity = $assigned_data->activity_group_id;
                     $group_activity_info = ActivityGroupPivot::where('activity_id', $assigned_data->activity_id)
                         ->where('activity_group_id', $assigned_data->activity_group_id)
                         ->first();
@@ -168,22 +168,22 @@ class TaskController extends Controller
                 }
                 $group_name = $assigned_data->getActivityGroup ? $assigned_data->getActivityGroup->activity_group_name : null;
                 $is_master_temp = $assigned_data->getProjectTemplate && $assigned_data->getProjectTemplate->is_master ? $assigned_data->getProjectTemplate->is_master : $assigned_data->projectTemplateData->is_master;
-
+                
                 $current_template_name =
-                    $assigned_data->templateName ?
-                        $assigned_data->templateName->template_name :
-                        $assigned_data->projectTemplateData->getTemplate->template_name;
+                $assigned_data->templateName ? 
+                $assigned_data->templateName->template_name : 
+                    $assigned_data->projectTemplateData->getTemplate->template_name;
 
-
-                $current_activity_name =
-                    $assigned_data->activityName ?
-                        $assigned_data->activityName->activity_name :
-                        $assigned_data->activityInfo->activity_name;
-
+                                
+                $current_activity_name = 
+                $assigned_data->activityName ?
+                $assigned_data->activityName->activity_name :
+                    $assigned_data->activityInfo->activity_name;
+                
                 $exists = false;
-
+                
                 // dd($activity, $current_template_name, $current_activity_name);
-
+                
                 foreach ($userAssignedActivities as $activity) {
                     if ($activity['template_name'] == $current_template_name && $activity['activity_name'] == $current_activity_name) {
                         $exists = true;
@@ -202,10 +202,17 @@ class TaskController extends Controller
                     ->whereIn('question_id', $totalQuestionsIdsArray)
                     // ->where('user_id', $user_id)
                     ->count();
+                // $getAnsweredQuestionsCount = DB::table('temp_user_activity_answers_data')
+                //     ->where('activity_id', $assigned_data->activity_id)
+                //     ->where('row_id', $row_id)
+                //     // ->where('user_id', $user_id)
+                //     ->count();
+                    
 
-                if ($getAnsweredQuestionsCount > 0 || $totalQuestions == $getAnsweredQuestionsCount) {
+                if ($totalQuestions == $getAnsweredQuestionsCount) {
                     $is_activity_answered = true;
                     $getAllQuestionIds = Question::where('activity_id', $assigned_data->activity_id)->pluck('id')->toArray();
+                    
                     //otp verified status
                     $lastQuestionAnswered = DB::table('temp_user_activity_answers_data')
                         ->where('activity_id', $assigned_data->activity_id)
@@ -213,17 +220,20 @@ class TaskController extends Controller
                         ->where('row_id', $row_id)
                         // ->where('user_id', $user_id)
                         ->orderBy('id', 'DESC')->first();
+                        
+                        
                     //rejected status
                     $rejectedAnswersCount = TempUserActivityAnswersData::where('row_id', $row_id)
                         ->where('activity_id', $assigned_data->activity_id)
                         ->whereIn('question_id', $getAllQuestionIds)
                         ->where('status', 4)
                         ->count();
+
                     if (!empty($lastQuestionAnswered->mobile_otp) && ($lastQuestionAnswered->otp_verified_status == 1) && ($projectInfo->is_otp_required == 1)) {
                         $status = 'completed';
-                    } else if (($projectInfo->is_otp_required == 1)) {
+                    } else if(($projectInfo->is_otp_required == 1)){
                         $status = 'Awaiting OTP Verify';
-                    } else {
+                    }else {
                         $status = 'completed';
                     }
                     if ($rejectedAnswersCount > 0) {
@@ -258,7 +268,7 @@ class TaskController extends Controller
                         'is_master' => $is_master_temp,
                         'activity_id' => $assigned_data->activity_id,
                         'activity_name' => $current_activity_name,
-                        'group_id' => $groupActivity ?? null,
+                        'group_id' => $groupActivity??null,
                         'group_name' => $group_name,
                         'sequence' => (string)$sequence,
                         'otp_required' => $otpRequiredStatus,
@@ -326,11 +336,13 @@ class TaskController extends Controller
 //                    }
 //                }
             }
-
-
+            
+            
             $userAssignedActivities = collect($userAssignedActivities)->sortBy([['is_master', 'desc'], ['sequence', 'asc']])->values()->toArray();
 
 
+            
+            
             return response([
                 'status' => 200,
                 'message' => 'success',
@@ -351,258 +363,23 @@ class TaskController extends Controller
         }
     }
 
-
-    public function getAllActivity_Old($row_id, $user_id, $is_outlet_assigned)
-    {
-
-        try {
-
-            $user = $user_id;
-            $userAssignedActivities = [];
-            $groupActivity = null;
-            $projectTemplateNameValue = ProjectTemplateNameValuesNew::find($row_id);
-            $projectTemplateData = ProjectTemplate::find($projectTemplateNameValue->project_template_id);
-            $projectInfo = Project::find($projectTemplateData->project_id);
-            $project_master_template = ProjectTemplate::where('project_id', $projectTemplateData->project_id)
-                ->where('is_master', 1)
-                ->first();
-
-            $template_name_id = $projectTemplateData->template_name_id;
-            $data_add_on = $projectTemplateData->data_add_on = 1 ? true : false;
-
-            $getHeadValues = DB::table('project_template_name_values_new')
-                ->where('id', $row_id)
-                ->select(
-                    DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$projectTemplateData->main_header}\"')) as head_value")
-                )
-                ->get();
-
-            $distributor_value = $getHeadValues[0]->head_value;
-
-            $project_other_templates = ProjectTemplate::with('activity', 'activityGroup', 'getTemplate')
-                ->where('project_id', $projectTemplateData->project_id)
-                ->where('id', '!=', $project_master_template->id)
-                ->get();
-
-
-            //khushboo 07-07-2025
-            $distinct_data_assignIds = UserActivityDataAssign::where('user_id', $user)
-                ->where('project_template_id', $projectTemplateData->id)
-                ->distinct('data_assign_id')
-                ->pluck('data_assign_id');
-            //khushboo 07-07-2025
-
-            $data_assign_info = DataAssign::with('getProjectTemplate', 'templateName', 'activityName', 'getActivityGroup')
-                ->where('project_id', $projectTemplateData->project_id)
-                ->where('project_template_id', $projectTemplateData->id)
-                ->whereIn("id", $distinct_data_assignIds)
-                ->get();
-
-            $otpRequiredStatus = false;
-            $distinct_data_assign_activity_Ids = UserActivityDataAssign::where('user_id', $user)
-                ->where('project_template_id', $projectTemplateData->id)
-                ->distinct('activity_id')
-                ->pluck('activity_id')->toArray();
-
-            if (
-                $projectInfo->is_otp_required == 1 &&
-                !empty($projectTemplateData->activity_otp_required_ids)
-            ) {
-                $otpRequiredIds = json_decode($projectTemplateData->activity_otp_required_ids, true);
-
-                if (!empty($otpRequiredIds) && count(array_intersect($distinct_data_assign_activity_Ids, $otpRequiredIds)) > 0) {
-                    $otpRequiredStatus = true;
-                }
-            }
-
-            foreach ($data_assign_info as $assigned_data) {
-
-                $sequence = null;
-                if (isset($assigned_data->activity_group_id)) {
-                    $groupActivity = $assigned_data->activity_group_id;
-                    $group_activity_info = ActivityGroupPivot::where('activity_id', $assigned_data->activity_id)
-                        ->where('activity_group_id', $assigned_data->activity_group_id)
-                        ->first();
-                    $sequence = !empty($group_activity_info) ? $group_activity_info->sequence : 1;
-                }
-                $group_name = $assigned_data->getActivityGroup ? $assigned_data->getActivityGroup->activity_group_name : null;
-                $is_master_temp = $assigned_data->getProjectTemplate->is_master ? $assigned_data->getProjectTemplate->is_master : 0;
-                $current_template_name = $assigned_data->templateName->template_name;
-                $current_activity_name = $assigned_data->activityName->activity_name;
-                $exists = false;
-                foreach ($userAssignedActivities as $activity) {
-                    if ($activity['template_name'] == $current_template_name && $activity['activity_name'] == $current_activity_name) {
-                        $exists = true;
-                        break; // Exit loop if a match is found
-                    }
-                }
-
-                $is_activity_answered = false;
-                $status = 'pending';
-                $totalQuestions = Question::where('activity_id', $assigned_data->activity_id)->count();
-                $getAnsweredQuestionsCount = DB::table('temp_user_activity_answers_data')
-                    ->where('activity_id', $assigned_data->activity_id)
-                    ->where('row_id', $row_id)
-                    ->where('user_id', $user_id)
-                    ->count();
-
-                if ($totalQuestions == $getAnsweredQuestionsCount) {
-                    $is_activity_answered = true;
-                    $getAllQuestionIds = Question::where('activity_id', $assigned_data->activity_id)->pluck('id')->toArray();
-                    //otp verified status
-                    $lastQuestionAnswered = DB::table('temp_user_activity_answers_data')
-                        ->where('activity_id', $assigned_data->activity_id)
-                        ->whereIn('question_id', $getAllQuestionIds)
-                        ->where('row_id', $row_id)
-                        ->where('user_id', $user_id)
-                        ->orderBy('id', 'DESC')->first();
-                    //rejected status
-                    $rejectedAnswersCount = TempUserActivityAnswersData::where('row_id', $row_id)
-                        ->where('activity_id', $assigned_data->activity_id)
-                        ->whereIn('question_id', $getAllQuestionIds)
-                        ->where('status', 4)
-                        ->count();
-
-                    if (!empty($lastQuestionAnswered->mobile_otp) && ($lastQuestionAnswered->otp_verified_status == 1)) {
-                        $status = 'completed';
-                    } else if ($rejectedAnswersCount > 0) {
-                        $status = "rejected";
-                    } else {
-                        $status = 'Awaiting OTP Verify';
-                    }
-
-                }
-
-                $is_distributor_assign = false;
-                if ($projectTemplateData->is_master == 1) {
-                    $getAuditCommonIds = DB::table('user_audit_assigns')->where('row_id', $row_id)
-                        ->distinct('common_id')
-                        ->pluck('common_id')
-                        ->toArray();
-
-                    $getActivities = DB::table('user_activity_data_assigns')
-                        ->where('project_template_id', $projectTemplateData->id)
-                        ->whereIn('common_id', $getAuditCommonIds)
-                        ->distinct('activity_id')
-                        ->pluck('activity_id')->toArray();
-
-                    if (count($getActivities) > 0) {
-                        $is_distributor_assign = true;
-                    }
-                }
-
-                if (!$exists) {
-                    $userAssignedActivities[] = [
-                        'template_name_id' => $assigned_data->template_name_id,
-                        'template_name' => $assigned_data->templateName->template_name,
-                        'is_master' => $is_master_temp,
-                        'activity_id' => $assigned_data->activity_id,
-                        'activity_name' => $assigned_data->activityName->activity_name,
-                        'group_id' => $assigned_data->activity_group_id,
-                        'group_name' => $group_name,
-                        'sequence' => (string)$sequence,
-                        'otp_required' => $otpRequiredStatus,
-                        'status' => $status,
-                        'is_activity_answered' => $is_activity_answered,
-                        'is_distributor_assign' => $is_distributor_assign
-                    ];
-                }
-
-//                if($projectTemplateData->is_master == 0){
-//
-//                }
-//                if ($assigned_data->is_outlet_assigned) {
-//                    foreach ($project_other_templates as $other_project_template_info) {
-//                        if ($other_project_template_info->activityType) {
-//                            $group_info = ActivityGroup::with('get_group_activities.getActivityInfo')->find($other_project_template_info->activity_group_name_id_or_activity_id);
-//                            foreach ($group_info->get_group_activities as $group_activity_info) {
-//                                $current_template_name = $other_project_template_info->getTemplate->template_name;
-//                                $current_activity_name = $group_activity_info->getActivityInfo->activity_name;
-//                                $exists = false;
-//                                foreach ($userAssignedActivities as $activity) {
-//                                    if ($activity['template_name'] == $current_template_name && $activity['activity_name'] == $current_activity_name) {
-//                                        $exists = true;
-//                                        break; // Exit loop if a match is found
-//                                    }
-//                                }
-//
-//                                if (!$exists) {
-//                                    $userAssignedActivities[] = [
-//                                        'template_name_id' => $other_project_template_info->getTemplate->id,
-//                                        'template_name' => $other_project_template_info->getTemplate->template_name,
-//                                        'is_master' => 0,
-//                                        'activity_id' => $group_activity_info->activity_id,
-//                                        'activity_name' => $group_activity_info->getActivityInfo->activity_name,
-//                                        'group_id' => $group_info->id, // group id
-//                                        'group_name' => $group_info->activity_group_name,
-//                                        'sequence' => $group_activity_info->sequence
-//                                    ];
-//                                }
-//                            }
-//                        } else {
-//                            $current_template_name = $other_project_template_info->getTemplate->template_name;
-//                            $current_activity_name = $other_project_template_info->activity->activity_name;
-//                            $exists = false;
-//                            foreach ($userAssignedActivities as $activity) {
-//                                if ($activity['template_name'] == $current_template_name && $activity['activity_name'] == $current_activity_name) {
-//                                    $exists = true;
-//                                    break; // Exit loop if a match is found
-//                                }
-//                            }
-//
-//                            if (!$exists) {
-//                                $userAssignedActivities[] = [
-//                                    'template_name_id' => $other_project_template_info->getTemplate->id,
-//                                    'template_name' => $other_project_template_info->getTemplate->template_name,
-//                                    'is_master' => 0,
-//                                    'activity_id' => $other_project_template_info->activity->id,
-//                                    'activity_name' => $other_project_template_info->activity->activity_name,
-//                                    'group_id' => null,
-//                                    'group_name' => null,
-//                                    'sequence' => null
-//                                ];
-//                            }
-//                        }
-//                    }
-//                }
-            }
-            $userAssignedActivities = collect($userAssignedActivities)->sortBy([['is_master', 'desc'], ['sequence', 'asc']])->values()->toArray();
-
-            return response([
-                'status' => 200,
-                'message' => 'success',
-                'row_id' => $row_id,
-                'add_outlet' => $data_add_on,
-                'project_id' => $projectInfo->id,
-                'template_name_id' => $template_name_id,
-                'is_outlet_assigned' => $is_outlet_assigned,
-                'distributor_value' => $distributor_value,
-                'data' => $userAssignedActivities
-            ], 200);
-        } catch (\Throwable $th) {
-            return response([
-                'status' => 401,
-                'message' => $th->getMessage(),
-            ], 401);
-        }
-    }
-
     public function projectDistributorData(Request $request)
     {
         $startTime = microtime(true);
+        
         $user = $request->user_id;
         $project_data_arr = [];
 
+        $project_data_completed_arr = [];
         $project_template_details = DB::table('project_templates')->where('project_id', $request->project_id)
             ->get();
+
         $project_temp_info = DB::table('project_templates')->where('project_id', $request->project_id)
             ->where('is_master', 1)
             ->first();
+            // dd($project_temp_info, $request->all());
+            
         $template_name_id = $project_temp_info->template_name_id;
-        $can_edit_data = false;
-        if ($project_temp_info->can_edit_data == 1) {
-            $can_edit_data = true;
-        }
 
         //khushboo 17-05-25
         $add_outlet = false;
@@ -627,6 +404,7 @@ class TaskController extends Controller
         }
         //khushboo 07-04-2025
 
+
         // dd($request->project_id, $request->template_id);
         $main_header_id = $project_temp_info->main_header;
         $sub_header_id = $project_temp_info->sub_header;
@@ -635,25 +413,26 @@ class TaskController extends Controller
         $totalproject = 0;
 
         $isOutletAssigned = 0;
-
+        
         $distributorsValueNotAssigned = [];
         $row_renderred_arr = [];
         $project_template_details = collect($project_template_details)
-            ->sortByDesc(function ($item) {
-                return $item->is_master; // 1 first, then 0
-            })
-            ->values(); // reset keys
-
+        ->sortByDesc(function ($item) {
+            return $item->is_master; // 1 first, then 0
+        })
+        ->values(); // reset keys
+        
         $project_temp_child_info_Ids = DB::table('project_templates')
             ->where('project_id', $project_temp_info->project_id)
             ->where('is_master', 0)->pluck('id')->toArray();
-
-
+            
+        
         $childProjectTemplatesData = DB::table('project_template_name_values_new')
             ->whereIn('project_template_id', $project_temp_child_info_Ids)->get();
-
+            // dd($project_template_details);
         foreach ($project_template_details as $tempKey => $tempData) {
 
+ 
             $getDataAssignIds = DB::table('data_assigns')->where('project_id', $request->project_id)
                 ->where('template_name_id', $tempData->template_name_id)
                 ->distinct('id')
@@ -663,7 +442,7 @@ class TaskController extends Controller
                 ->where('template_name_id', $tempData->template_name_id)
                 ->where('is_outlet_assigned', 1)
                 ->exists();
-
+                
 
             $getDataAssignTemplateHeadIds = DB::table('data_assigns')->where('project_id', $request->project_id)
                 ->where('template_name_id', $tempData->template_name_id)
@@ -680,7 +459,7 @@ class TaskController extends Controller
                 ->distinct('common_id')
                 ->pluck('common_id')
                 ->toArray();
-
+                
             $activitiesids = DB::table('user_activity_data_assigns')->where('user_id', $user)
                 ->whereIn('data_assign_id', $getDataAssignIds)
                 ->where('project_template_id', $tempData->id)
@@ -690,7 +469,7 @@ class TaskController extends Controller
 
             $getRowIds = DB::table('user_audit_assigns')->whereIn('common_id', $dataAssignCommonIds)
                 ->distinct('row_id')->pluck('row_id')->toArray();
-            // dd($getRowIds);
+                // dd($checkingIfProjectAssigned, $getDataAssignIds, $user);
 
             if ($checkingIfProjectAssigned) {
 
@@ -746,7 +525,7 @@ class TaskController extends Controller
                             $distributorsValueNotAssigned = array_merge($distributorsValueNotAssigned, $nonMatching->values()->toArray());
 
                         }
-
+                        
                         $project_templates_data = ProjectTemplate::where('project_id', $request->project_id)
                             ->where('is_master', 1)
                             ->first();
@@ -819,28 +598,28 @@ class TaskController extends Controller
                     // dd($templateHeads, $jsonData);
                     foreach ($jsonData as $templateNameHeadId => $value) {
                         // if (isset($templateHeads[$templateNameHeadId])) {
+                            
+                            $head = $templateHeads[$templateNameHeadId];
+                            // dd($head, $value);
 
-                        $head = $templateHeads[$templateNameHeadId] ?? null;
-//                         dd($head, $value);
-
-                        $allTemplateValues[$row->project_template_id][] = (object)[
-                            'row_id' => $row->row_id,
-                            'project_template_id' => $row->project_template_id,
-                            'template_name_head_id' => $templateNameHeadId,
-                            'template_data_json' => $row->template_data_json,
-                            'value' => $value,
-                            'head_id' => $templateNameHeadId,
-                            'head_template_name_id' => $head->template_name_id ?? "",
-                            'template_head_name' => $head->template_head_name ?? "",
-                            'head_created_at' => $head->created_at ?? "",
-                            'head_updated_at' => $head->updated_at ?? "",
-                            'head_deleted_at' => $head->deleted_at ?? "",
-                        ];
+                            $allTemplateValues[$row->project_template_id][] = (object)[
+                                'row_id' => $row->row_id,
+                                'project_template_id' => $row->project_template_id,
+                                'template_name_head_id' => $templateNameHeadId,
+                                'template_data_json' => $row->template_data_json,
+                                'value' => $value,
+                                'head_id' => $templateNameHeadId,
+                                'head_template_name_id' => $head->template_name_id,
+                                'template_head_name' => $head->template_head_name,
+                                'head_created_at' => $head->created_at,
+                                'head_updated_at' => $head->updated_at,
+                                'head_deleted_at' => $head->deleted_at,
+                            ];
                         // }
                     }
                 }
 
-//                 dd($allTemplateValues);
+                // dd($allTemplateValues);
                 // Group by row_id from all project templates
                 $allTemplateValuesFlat = collect($allTemplateValues)->flatMap(function ($group) {
                     return $group;
@@ -848,7 +627,7 @@ class TaskController extends Controller
 
                 $rowGroupedValues = $allTemplateValuesFlat->groupBy('row_id');
                 // dd($projectTemplateHeadsAssigned, $allTemplateValues);
-
+                
                 foreach ($projectTemplateHeadsAssigned as $assigned_value_info) {
                     $template_id = $assigned_value_info['project_template_id'];
                     // echo $assigned_value_info['head_value'];
@@ -912,11 +691,11 @@ class TaskController extends Controller
                         // ->whereIn('question_id', $getAllQuestionIds)
                         ->get()
                         ->groupBy('row_id'); // group it for faster per-row access
-
+                      
                     // dd($projectDataArr);
                     foreach ($projectDataArr as $projectData) {
-
-
+                        
+                            
                         if (!in_array($projectData->row_id, $row_renderred_arr)) {
                             $row_renderred_arr[] = $projectData->row_id;
 
@@ -928,7 +707,7 @@ class TaskController extends Controller
                             //     ->pluck('question_id')
                             //     ->unique()
                             //     ->count();
-
+                            
                             $answeredCount = DB::table('temp_user_activity_answers_data')
                                 ->whereIn('activity_id', $activitiesids)
                                 ->whereIn('row_id', $all_row_ids)
@@ -936,20 +715,20 @@ class TaskController extends Controller
                                 ->pluck('question_id')
                                 ->unique()
                                 ->count();
-
+                                
 
                             $allAnswered = $answeredCount === $totalQuestions;
                             $otpVerificationDone = false;
 
                             // if ($allAnswered) {
-                            $lastQuestionAnswered = $filteredAnswers
-                                ->sortByDesc('id')
-                                ->first();
+                                $lastQuestionAnswered = $filteredAnswers
+                                    ->sortByDesc('id')
+                                    ->first();
 
-                            if (!empty($lastQuestionAnswered->mobile_otp) && $lastQuestionAnswered->otp_verified_status == 1) {
-                                $otpVerificationDone = true;
-                                $allAnswered = true;
-                            }
+                                if (!empty($lastQuestionAnswered->mobile_otp) && $lastQuestionAnswered->otp_verified_status == 1) {
+                                    $otpVerificationDone = true;
+                                    $allAnswered = true;
+                                }
                             // }
 
                             $get_row_header = $rowGroupedValues[$projectData->row_id]
@@ -972,7 +751,7 @@ class TaskController extends Controller
                             $projectStatus = "pending";
                             if ($allAnswered && $otpVerificationDone && ($otpRequiredStatus == 1)) {
                                 $projectStatus = "completed";
-                                // } else if ($allAnswered && !$otpVerificationDone && ($otpRequiredStatus == 1)) {
+                            // } else if ($allAnswered && !$otpVerificationDone && ($otpRequiredStatus == 1)) {
                                 // $projectStatus = "Awaiting OTP Verify";
                             } else if ($allAnswered) {
                                 $projectStatus = "completed";
@@ -1023,27 +802,27 @@ class TaskController extends Controller
                                 $totalcompletedproject++;
                             }
 
-
+                            
                             $is_distributor_assign = true;
-                            if (in_array($assigned_value_info['head_value'], $distributorsValueNotAssigned)) {
+                            if(in_array($assigned_value_info['head_value'], $distributorsValueNotAssigned)){
                                 $is_distributor_assign = false;
                             }
-
+                            
                             $tempjsondata = json_decode($projectData->template_data_json, true);
 
-                            // get only values, ignore keys
-                            $allValues = array_values($tempjsondata);
+            // get only values, ignore keys
+            $allValues = array_values($tempjsondata);
+            
+            
+            $exists = $childProjectTemplatesData
+                    ->whereIn('project_template_id', $project_temp_child_info_Ids)
+                    ->contains(function ($item) use ($allValues) {
+                        $json = json_decode($item->template_data_json, true);
+                        return count(array_intersect($allValues, $json)) > 0;
+                    });
 
-
-                            $exists = $childProjectTemplatesData
-                                ->whereIn('project_template_id', $project_temp_child_info_Ids)
-                                ->contains(function ($item) use ($allValues) {
-                                    $json = json_decode($item->template_data_json, true);
-                                    return count(array_intersect($allValues, $json)) > 0;
-                                });
-
-                            // dd($exists); // true or false
-
+            // dd($exists); // true or false
+                
 
                             $project_data_arr[] = [
                                 'data_item' => (array)$projectData + [
@@ -1056,491 +835,6 @@ class TaskController extends Controller
                                 'latitude' => $latitudeValue,
                                 'longitude' => $longitudeValue,
                                 'is_outlet_assigned' => $isOutletAssigned && $exists ? 1 : 0,
-                                'is_distributor_assign' => $is_distributor_assign
-                            ];
-                        }
-                    }
-                }
-            }
-        }
-
-        if ($totalcompletedproject == $totalproject) {
-            $add_outlet = false;
-        }
-
-        Session::put('project_dist_activity', ['project' => $request->project_id]);
-        if (Session::has('project_outlet_activity')) {
-            Session::forget('project_outlet_activity');
-        }
-        $endTime = microtime(true);
-        $executionTime = $endTime - $startTime;
-
-        if (empty($project_data_arr)) {
-            return response([
-                'status' => 401,
-                'message' => 'success',
-                'data' => $project_data_arr,
-            ], 401);
-        }
-
-        $project_data_arr = collect($project_data_arr);
-        // Now you can use the where method
-        if ($request->status) {
-            $project_data_arr = $project_data_arr->where('status', $request->status);
-        }
-
-        if ($request->keyword) {
-            $project_data_arr = $project_data_arr->filter(function ($item) use ($request) {
-                return strpos(strtolower($item['main_header']), strtolower($request->keyword)) !== false ||
-                    strpos(strtolower($item['sub_header']), strtolower($request->keyword)) !== false;
-            });
-        }
-
-        $distributors_collection = collect($project_data_arr);
-        $currentPage = request()->get('page', 1);
-        $perPage = 10;
-        $currentPageItems = $distributors_collection->slice(($currentPage - 1) * $perPage, $perPage)->values();
-        $paginatedDistributors = new LengthAwarePaginator(
-            $currentPageItems,
-            $distributors_collection->count(),
-            $perPage,
-            $currentPage,
-            ['path' => request()->url(), 'query' => request()->except('_token')]
-        );
-
-        // for empty or partial data
-        if ($project_temp_info->with_data == 0) {
-            $add_outlet = true;
-        }
-
-        return response([
-            'status' => 200,
-            'message' => 'success',
-            'project_id' => $request->project_id,
-            'template_id' => $template_name_id,
-            'data' => $paginatedDistributors,
-            'otp_required_status' => (string)$otpRequiredStatus,
-            'add_outlet' => $add_outlet,
-            'can_edit_data' => $can_edit_data
-        ], 200);
-
-    }
-
-
-    public function projectDistributorDataOld09September(Request $request)
-    {
-        $startTime = microtime(true);
-        $row_renderred_arr = [];
-        $user = $request->user_id;
-        $project_data_arr = [];
-
-        $project_data_completed_arr = [];
-        $project_template_details = DB::table('project_templates')->where('project_id', $request->project_id)
-            ->get();
-
-        $project_temp_info = DB::table('project_templates')->where('project_id', $request->project_id)
-            ->where('is_master', 1)
-            ->first();
-
-        $template_name_id = $project_temp_info->template_name_id;
-
-        //khushboo 17-05-25
-        $add_outlet = false;
-        if ($project_temp_info->data_add_on == 1) {
-            $add_outlet = true;
-        }
-        //khushboo 17-05-25
-
-        //khushboo 07-04-2025
-        $otpRequiredStatus = 0;
-        $projectInfo = Project::findOrFail($request->project_id);
-
-        if (
-            $projectInfo->is_otp_required == 1 &&
-            !empty($project_temp_info->activity_otp_required_ids)
-        ) {
-            $otpRequiredIds = json_decode($project_temp_info->activity_otp_required_ids, true);
-
-//            if (!empty($otpRequiredIds) && in_array($project_temp_info->activity_group_name_id_or_activity_id, $otpRequiredIds)) {
-            $otpRequiredStatus = 1;
-//            }
-        }
-        //khushboo 07-04-2025
-
-
-        // dd($request->project_id, $request->template_id);
-        $main_header_id = $project_temp_info->main_header;
-        $sub_header_id = $project_temp_info->sub_header;
-
-        $totalcompletedproject = 0;
-        $totalproject = 0;
-
-        $isOutletAssigned = 0;
-        $distributorsValueNotAssigned = [];
-        $project_template_details = collect($project_template_details)
-            ->sortByDesc(function ($item) {
-                return $item->is_master; // 1 first, then 0
-            })
-            ->values(); // reset keys
-
-        foreach ($project_template_details as $tempKey => $tempData) {
-
-            $getDataAssignIds = DB::table('data_assigns')->where('project_id', $request->project_id)
-                ->where('template_name_id', $tempData->template_name_id)
-                ->distinct('id')
-                ->pluck('id');
-
-            $OutletAssignedExists = DB::table('data_assigns')->where('project_id', $request->project_id)
-                ->where('template_name_id', $tempData->template_name_id)
-                ->where('is_outlet_assigned', 1)
-                ->exists();
-
-            $getDataAssignTemplateHeadIds = DB::table('data_assigns')->where('project_id', $request->project_id)
-                ->where('template_name_id', $tempData->template_name_id)
-                ->distinct('template_name_head_id')
-                ->pluck('template_name_head_id');
-
-            $checkingIfProjectAssigned = DB::table('user_activity_data_assigns')->where('user_id', $user)
-                ->whereIn('data_assign_id', $getDataAssignIds)
-                ->exists();
-
-            $dataAssignCommonIds = DB::table('user_activity_data_assigns')->where('user_id', $user)
-                ->whereIn('data_assign_id', $getDataAssignIds)
-                ->distinct('common_id')
-                ->pluck('common_id')
-                ->toArray();
-
-            $getRowIds = DB::table('user_audit_assigns')->whereIn('common_id', $dataAssignCommonIds)
-                ->distinct('row_id')->pluck('row_id')->toArray();
-
-            if ($checkingIfProjectAssigned) {
-
-                $projectTemplateHeadsAssigned = [];
-                //khushboo 05-07-25
-                if (!empty($getDataAssignTemplateHeadIds)) {
-                    foreach ($getDataAssignTemplateHeadIds as $headId) {
-
-                        $templateMainHeaderId = $tempData->master_head_id;
-                        if ($tempData->is_master == 0) {
-
-                            $getHeadValues = DB::table('project_template_name_values_new')
-                                ->where('project_template_id', $project_temp_info->id)
-                                ->select(
-                                    DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$templateMainHeaderId}\"')) as head_value")
-                                )
-                                ->distinct('head_value')
-                                ->get();
-
-                            if (!empty($getHeadValues)) {
-                                $isOutletAssigned = 1;   // ✅ set true only here
-                            }
-                        } else {
-
-                            $getHeadValues = DB::table('project_template_name_values_new')
-                                ->whereIn('id', $getRowIds)
-                                ->select(
-                                    DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$headId}\"')) as head_value")
-                                )
-                                ->distinct('head_value')
-                                ->get();
-//                            dd($getHeadValues);
-
-                            $getAllMasterRowHeads = DB::table('project_template_name_values_new')
-                                ->select(
-                                    DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$headId}\"')) as head_value")
-                                )
-                                ->distinct('head_value')
-                                ->get();
-
-                            $onlyInHeadValues = $getHeadValues->pluck('head_value')->filter()->diff(
-                                $getAllMasterRowHeads->pluck('head_value')->filter()
-                            );
-
-                            $onlyInMaster = $getAllMasterRowHeads->pluck('head_value')->filter()->diff(
-                                $getHeadValues->pluck('head_value')->filter()
-                            );
-
-                            // Combined non-matching values
-                            $nonMatching = $onlyInHeadValues->merge($onlyInMaster)->unique();
-
-                            // convert collection → array and merge
-                            $distributorsValueNotAssigned = array_merge($distributorsValueNotAssigned, $nonMatching->values()->toArray());
-
-                        }
-
-                        $project_templates_data = ProjectTemplate::where('project_id', $request->project_id)
-                            ->where('is_master', 1)
-                            ->first();
-
-                        if (count($getHeadValues) > 0) {
-                            foreach ($getHeadValues as $headValue) {
-//                                dd($headValue->head_value);
-                                if ($headValue->head_value) {
-                                    $projectTemplateHeadsAssigned[] = [
-                                        'project_template_id' => $project_templates_data->id,
-                                        'head_id' => $tempData->is_master == 0 ? $templateMainHeaderId : $headId,
-                                        'head_value' => $headValue->head_value, // Add more fields if needed
-                                    ];
-                                }
-                            }
-                        }
-                    }
-                }
-                //khushboo 05-07-25
-                $projectTemplateIDs = array_column($projectTemplateHeadsAssigned, 'project_template_id');
-//                dd($projectTemplateIDs);
-
-                if ($tempData->is_master == 1) {
-
-                    $allTemplates = DB::table('project_template_name_values_new')
-                        ->select('id as row_id', 'project_template_id', 'template_data_json')
-                        ->whereIn('project_template_id', $projectTemplateIDs)
-                        ->get();
-
-                    if ($OutletAssignedExists) {
-                        $isOutletAssigned = 1;
-                    }
-
-                } else if ($tempData->is_master == 0) {
-
-                    $templateHeadValues = array_column($projectTemplateHeadsAssigned, 'head_value');
-
-                    $mainHeaderValues = DB::table('project_template_name_values_new')
-                        ->where(function ($query) use ($templateHeadValues) {
-                            foreach ($templateHeadValues as $value) {
-                                $query->orWhereRaw("JSON_SEARCH(template_data_json, 'one', ?) IS NOT NULL", [$value]);
-                            }
-                        })
-                        ->pluck(DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"$templateMainHeaderId\"')) as main_header_value"));
-
-                    $allTemplates = DB::table('project_template_name_values_new')
-                        ->select('*', 'id as row_id')
-                        ->whereIn('project_template_id', $projectTemplateIDs)
-                        ->where(function ($query) use ($mainHeaderValues) {
-                            foreach ($mainHeaderValues as $value) {
-                                $query->orWhereRaw("JSON_SEARCH(template_data_json, 'one', ?) IS NOT NULL", [$value]);
-                            }
-                        })
-                        ->get();
-//                    dd($allTemplates, $projectTemplateIDs, $mainHeaderValues);
-
-                }
-
-                $templateHeads = DB::table('template_name_heads')
-                    ->select('id', 'template_name_id', 'template_head_name', 'created_at', 'updated_at', 'deleted_at')
-                    ->get()
-                    ->keyBy('id');
-
-                $allTemplateValues = [];
-//                dd($allTemplates);
-
-                foreach ($allTemplates as $row) {
-                    $jsonData = json_decode($row->template_data_json, true);
-
-                    foreach ($jsonData as $templateNameHeadId => $value) {
-                        if (isset($templateHeads[$templateNameHeadId])) {
-                            $head = $templateHeads[$templateNameHeadId];
-
-                            $allTemplateValues[$row->project_template_id][] = (object)[
-                                'row_id' => $row->row_id,
-                                'project_template_id' => $row->project_template_id,
-                                'template_name_head_id' => $templateNameHeadId,
-                                'value' => $value,
-                                'head_id' => $templateNameHeadId,
-                                'head_template_name_id' => $head->template_name_id,
-                                'template_head_name' => $head->template_head_name,
-                                'head_created_at' => $head->created_at,
-                                'head_updated_at' => $head->updated_at,
-                                'head_deleted_at' => $head->deleted_at,
-                            ];
-                        }
-                    }
-                }
-
-//                dd($allTemplateValues);
-                // Group by row_id from all project templates
-                $allTemplateValuesFlat = collect($allTemplateValues)->flatMap(function ($group) {
-                    return $group;
-                });
-
-                $rowGroupedValues = $allTemplateValuesFlat->groupBy('row_id');
-//                print_r($projectTemplateHeadsAssigned);
-                foreach ($projectTemplateHeadsAssigned as $assigned_value_info) {
-                    $template_id = $assigned_value_info['project_template_id'];
-                    $templateValues = collect($allTemplateValues[$template_id] ?? []);
-//                    dd($templateValues);
-                    $activities = [];
-
-                    if ($tempData->activityType == 0) {
-                        $activities[] = $tempData->activity_group_name_id_or_activity_id;
-                    } elseif ($tempData->activityType == 1) {
-                        $activities = array_merge(
-                            $activities,
-                            DB::table('activity_group_pivots')->where('activity_group_id', $tempData->activity_group_name_id_or_activity_id)
-                                ->pluck('activity_id')
-                                ->toArray()
-                        );
-                    }
-//                    dd($activities);
-                    $previous_sequence_answered_rows = [];
-                    foreach ($activities as $activityId) {
-
-                        $rows_in_templates = $templateValues->pluck('row_id')->unique()->toArray();
-                        $get_previous_sequence_answered = DB::table('temp_user_activity_answers_data')
-                            ->where('activity_id', $activityId)
-                            ->whereIn('row_id', $rows_in_templates)
-                            ->distinct('row_id')
-                            ->pluck('row_id')->toArray();
-                        if (empty($previous_sequence_answered_rows)) {
-                            // For the first iteration, just set the array
-                            $previous_sequence_answered_rows = $get_previous_sequence_answered;
-                        } else {
-                            // For subsequent iterations, keep only common values between the arrays
-                            $previous_sequence_answered_rows = array_intersect($previous_sequence_answered_rows, $get_previous_sequence_answered);
-                        }
-                    }
-
-                    $previous_sequence_answered_rows = array_unique($previous_sequence_answered_rows);
-
-                    $projectDataArr = $templateValues
-                        ->where('template_name_head_id', $assigned_value_info['head_id'])
-                        ->whereIn('row_id', $previous_sequence_answered_rows)
-                        ->where('value', $assigned_value_info['head_value']);
-
-                    if ($projectDataArr->IsEmpty()) {
-                        $projectDataArr = collect($templateValues)
-                            ->where('template_name_head_id', $assigned_value_info['head_id'])
-                            ->where('value', $assigned_value_info['head_value']);
-                    }
-
-                    $getAllQuestionIds = DB::table('questions')
-                        ->whereIn('activity_id', $activities)
-                        ->pluck('id')
-                        ->toArray();
-
-                    $all_row_ids = array_column($projectDataArr->toArray(), 'row_id');
-
-                    $allTemplateActivityAnswers = DB::table('temp_user_activity_answers_data')
-                        ->where('activity_id', $request->activity_id)
-                        ->whereIn('row_id', $all_row_ids)
-                        ->get()
-                        ->groupBy('row_id'); // group it for faster per-row access
-
-                    foreach ($projectDataArr as $projectData) {
-
-                        if (!in_array($projectData->row_id, $row_renderred_arr)) {
-                            $row_renderred_arr[] = $projectData->row_id;
-
-                            $totalQuestions = count($getAllQuestionIds);
-
-                            $filteredAnswers = $allTemplateActivityAnswers[$projectData->row_id] ?? collect();
-
-                            $answeredCount = $filteredAnswers
-                                ->pluck('question_id')
-                                ->unique()
-                                ->count();
-
-                            $allAnswered = $answeredCount === $totalQuestions;
-                            $otpVerificationDone = false;
-
-//                            if ($allAnswered) {
-                            $lastQuestionAnswered = $filteredAnswers
-                                ->sortByDesc('id')
-                                ->first();
-
-                            if (!empty($lastQuestionAnswered->mobile_otp) && $lastQuestionAnswered->otp_verified_status == 1) {
-                                $otpVerificationDone = true;
-                                $allAnswered = true;
-                            }
-//                            }
-
-                            $get_row_header = $rowGroupedValues[$projectData->row_id]
-                                ->firstWhere('template_name_head_id', $main_header_id);
-
-                            $main_header = null;
-                            if ($get_row_header) {
-                                $main_header = $get_row_header->value;
-                            }
-
-                            $get_row_sub_header = $rowGroupedValues[$projectData->row_id]
-                                ->firstWhere('template_name_head_id', $sub_header_id);
-
-                            $sub_header = null;
-                            if ($get_row_sub_header) {
-                                $sub_header = $get_row_sub_header->value;
-                            }
-
-                            //khushboo 02-05-2025
-                            $projectStatus = "pending";
-                            if ($allAnswered && $otpVerificationDone && ($otpRequiredStatus == 1)) {
-                                $projectStatus = "completed";
-//                            } else if ($allAnswered && !$otpVerificationDone && ($otpRequiredStatus == 1)) {
-//                                $projectStatus = "Awaiting OTP Verify";
-                            } else if ($allAnswered) {
-                                $projectStatus = "completed";
-                            }
-                            //khushboo 02-05-2025
-
-                            $get_head_name = [
-                                'id' => $projectData->head_id,
-                                'template_name_id' => $projectData->head_template_name_id,
-                                'template_head_name' => $projectData->template_head_name,
-                                'created_at' => $projectData->head_created_at,
-                                'updated_at' => $projectData->head_updated_at,
-                                'deleted_at' => $projectData->head_deleted_at,
-                            ];
-
-                            //khushboo 28-06-25
-                            $latitudeValue = null;
-                            $longitudeValue = null;
-
-                            $latitudeHeadData = DB::table('template_name_heads')
-                                ->where('template_name_id', $project_temp_info->template_name_id)
-                                ->whereIn('template_head_name', ['Latitude', 'Longitude', 'latitude', 'longitude', 'lat', 'long', 'Lat', 'Long'])
-                                ->first();
-
-                            $longitudeHeadData = DB::table('template_name_heads')
-                                ->where('template_name_id', $project_temp_info->template_name_id)
-                                ->whereIn('template_head_name', ['Latitude', 'Longitude', 'latitude', 'longitude', 'lat', 'long', 'Lat', 'Long'])
-                                ->first();
-
-                            $latitudeHeaders = ['Latitude', 'latitude', 'lat', 'Lat'];
-                            $longitudeHeaders = ['Longitude', 'longitude', 'long', 'Long'];
-
-                            $latitudeValue = optional(
-                                $rowGroupedValues[$projectData->row_id] ?? collect()
-                            )->first(function ($item) use ($latitudeHeaders) {
-                                return in_array($item->template_head_name, $latitudeHeaders);
-                            })?->value;
-
-                            $longitudeValue = optional(
-                                $rowGroupedValues[$projectData->row_id] ?? collect()
-                            )->first(function ($item) use ($longitudeHeaders) {
-                                return in_array($item->template_head_name, $longitudeHeaders);
-                            })?->value;
-
-                            //khushboo 28-06-25
-                            $totalproject++;
-                            if ($projectStatus == 'completed') {
-                                $totalcompletedproject++;
-                            }
-
-                            $is_distributor_assign = true;
-                            if (in_array($assigned_value_info['head_value'], $distributorsValueNotAssigned)) {
-                                $is_distributor_assign = false;
-                            }
-
-                            $project_data_arr[] = [
-                                'data_item' => (array)$projectData + [
-                                        'get_head_name' => $get_head_name,
-                                        'get_data_of_rows' => $rowGroupedValues[$projectData->row_id] ?? collect()
-                                    ],
-                                'status' => $projectStatus,
-                                'main_header' => $main_header,
-                                'sub_header' => $sub_header,
-                                'latitude' => $latitudeValue,
-                                'longitude' => $longitudeValue,
-                                'is_outlet_assigned' => $isOutletAssigned,
                                 'is_distributor_assign' => $is_distributor_assign
                             ];
                         }
@@ -2057,454 +1351,7 @@ class TaskController extends Controller
         ]);
     }
 
-
     public function myProjectsDistributorOutletsData(Request $request, $rowId, $distributor_value, $userId)
-    {
-//         dd($userId);
-        $projectTemplateNameValue = ProjectTemplateNameValuesNew::find($rowId);
-        $projectTemplateId = $projectTemplateNameValue->project_template_id;
-        $projectTemplate = ProjectTemplate::find($projectTemplateId);
-        $user = User::find($userId);
-
-        $project = Project::find($projectTemplate->project_id);
-
-        $childTemplatesData = ProjectTemplate::where('project_id', $projectTemplate->project_id)
-            ->where('is_master', 0)
-            ->get();
-
-        $can_edit_data = false;
-
-        $childTemplatesIds = ProjectTemplate::where('project_id', $projectTemplate->project_id)
-            ->where('is_master', 0)
-            ->pluck('id')->toArray();
-
-        $childTempOwnRefIds = ProjectTemplate::where('project_id', $projectTemplate->project_id)
-            ->where('is_master', 0)
-            ->pluck('own_reference_head_id')->toArray();
-
-        //khushboo 17-05-2025
-        $add_outlet = false;
-        //khushboo 17-05-2025
-
-        //khushboo 07-04-2025
-        $otpRequiredStatus = 0;
-        // $projectInfo = Project::findOrFail($project->id);
-        // dd($project->is_otp_required, $projectTemplate->activity_otp_required_ids);
-        if (($project->is_otp_required == 1) && !empty($projectTemplate->activity_otp_required_ids) && !empty(json_decode($projectTemplate->activity_otp_required_ids))) {
-            $otpRequiredStatus = 1;
-        }
-        //khushboo 07-04-2025
-
-        $row_renderred_arr = [];
-        $project_data_arr = [];
-        $previous_sequence_answered_rows = [];
-        $is_to_check_previous_submitted = 0;
-        $group_session_id = null;
-
-        $activities = [];
-        foreach ($childTemplatesData as $childTemp) {
-
-            // for empty or partial template data
-            if ($childTemp->can_edit_data == 1) {
-                $can_edit_data = true;
-            }
-
-            if ($childTemp->data_add_on == 1 || $childTemp->with_data == 0) {
-                $add_outlet = true;
-            }
-
-            if ($childTemp->activityType == 0) {
-                $activities[] = $childTemp->activity_group_name_id_or_activity_id;
-            } elseif ($childTemp->activityType == 1) {
-                $activities = array_merge(
-                    $activities,
-                    DB::table('activity_group_pivots')->where('activity_group_id', $childTemp->activity_group_name_id_or_activity_id)
-                        ->pluck('activity_id')
-                        ->toArray()
-                );
-            }
-        }
-
-        $rows_in_templates = DB::table('project_template_name_values_new')
-            ->whereIn('project_template_id', $childTemplatesIds)
-            ->pluck('id')
-            ->toArray();
-
-        $allTemplates = DB::table('project_template_name_values_new')
-            ->select('id as row_id', 'project_template_id', 'template_data_json')
-            ->whereIn('project_template_id', $childTemplatesIds)
-            ->get();
-
-        $templateHeads = DB::table('template_name_heads')
-            ->get()
-            ->keyBy('id');
-
-        $allTemplateNamesValues = [];
-        foreach ($allTemplates as $row) {
-            $jsonData = json_decode($row->template_data_json, true);
-            foreach ($jsonData as $headId => $value) {
-                if (isset($templateHeads[$headId])) {
-                    $head = $templateHeads[$headId];
-                    $allTemplateNamesValues[] = (object)[
-                        'row_id' => $row->row_id,
-                        'project_template_id' => $row->project_template_id,
-                        'template_name_head_id' => $headId,
-                        'template_data_json' => $row->template_data_json,
-                        'value' => $value,
-                        'head_id' => $headId,
-                        'head_template_name_id' => $head->template_name_id,
-                        'template_head_name' => $head->template_head_name,
-                        'head_created_at' => $head->created_at,
-                        'head_updated_at' => $head->updated_at,
-                        'head_deleted_at' => $head->deleted_at,
-                    ];
-                }
-            }
-        }
-
-        $allTemplateNamesValues = collect($allTemplateNamesValues);
-        $allTemplateGroupedByRow = $allTemplateNamesValues->groupBy('row_id');
-
-        $childDataAssignIds = DB::table('data_assigns')->whereIn('project_template_id', $childTemplatesIds)
-            ->where('is_outlet_assigned', 1)
-            ->pluck('id')->toArray();
-
-        $get_project_template_assigned_data = DB::table('user_activity_data_assigns')->where('user_id', $user->id)
-            ->whereIn('data_assign_id', $childDataAssignIds)
-            ->whereIn('project_template_id', $childTemplatesIds)
-            ->get();
-
-        $dataAssignCommonIds = DB::table('user_activity_data_assigns')->where('user_id', $user->id)
-            ->whereIn('project_template_id', $childTemplatesIds)
-            ->whereIn('activity_id', $activities)
-            ->distinct('common_id')
-            ->pluck('common_id');
-
-        $get_distinct_data_assigned_ids = $get_project_template_assigned_data->pluck('data_assign_id')->unique();
-
-        $getRowIds = DB::table('user_audit_assigns')->whereIn('common_id', $dataAssignCommonIds)
-            ->distinct('row_id')
-            ->pluck('row_id');
-
-        $is_to_check_previous_submitted = 1;
-
-        // the below will return as the row_id which are answered in the previous sequece
-        foreach ($activities as $previous_sequence_activity) {
-            $get_previous_sequence_answered = DB::table('temp_user_activity_answers_data')
-                ->whereIn("row_id", $rows_in_templates)
-                ->where('activity_id', $previous_sequence_activity)
-                ->distinct('row_id')
-                ->pluck('row_id')->toArray();
-
-            if (empty($previous_sequence_answered_rows)) {
-                // For the first iteration, just set the array
-                $previous_sequence_answered_rows = $get_previous_sequence_answered;
-            } else {
-                // For subsequent iterations, keep only common values between the arrays
-                $previous_sequence_answered_rows = array_intersect($previous_sequence_answered_rows, $get_previous_sequence_answered);
-            }
-        }
-
-//        $outlet_items = $allTemplateNamesValues
-//            ->whereIn('project_template_id', $childTemplatesIds)
-//            ->where('template_name_head_id', $childTempOwnRefIds)
-//            ->where('value', $distributor_value);
-
-        $checkPrentOutletAssign = DB::table('data_assigns')->where('project_template_id', $projectTemplate->id)
-            ->where('is_outlet_assigned', 1)
-            ->exists();
-
-        $getChildTemplateAssignedIds = [];
-
-        if ($checkPrentOutletAssign) {
-
-            $parentDataAssignIds = DB::table('data_assigns')->where('project_template_id', $projectTemplate->id)
-                ->where('is_outlet_assigned', 1)
-                ->pluck('id')->toArray();
-
-//            dd($parentDataAssignIds, $projectTemplate->id);
-            $dataAssignCommonIdsnew = DB::table('user_activity_data_assigns')->where('user_id', $userId)
-                ->whereIn('data_assign_id', $parentDataAssignIds)
-                ->distinct('common_id')
-                ->pluck('common_id');
-
-            $getChildTemplateAssignedIds = DB::table('user_activity_data_assigns')->where('user_id', $userId)
-                ->whereIn('data_assign_id', $parentDataAssignIds)
-                ->distinct('project_template_id')
-                ->pluck('project_template_id')->toArray();
-
-            $getRowIdsnew = DB::table('user_audit_assigns')->whereIn('common_id', $dataAssignCommonIdsnew)
-                ->distinct('row_id')
-                ->pluck('row_id');
-
-//            dd($getRowIds);
-
-            $outlet_items = $allTemplateNamesValues
-                ->whereIn('row_id', $getRowIdsnew)
-                ->whereIn('project_template_id', $childTemplatesIds)
-                ->filter(function ($item) use ($distributor_value) {
-                    $json = json_decode($item->template_data_json, true);
-                    // check if distributor_value exists anywhere in JSON values
-                    return in_array($distributor_value, $json, true);
-                });
-
-//            dd($outlet_items, $childTemplatesIds, $getRowIds, $distributor_value, $allTemplateNamesValues);
-
-        }
-        else {
-
-            $outlet_items = $allTemplateNamesValues
-                ->whereIn('row_id', $getRowIds)
-                ->whereIn('project_template_id', $childTemplatesIds)
-                ->whereIn('template_name_head_id', $childTempOwnRefIds)
-                ->filter(function ($item) use ($distributor_value) {
-                    $json = json_decode($item->template_data_json, true);
-                    // check if distributor_value exists anywhere in JSON values
-                    return in_array($distributor_value, $json, true);
-                });
-        }
-
-        // dd($outlet_items->IsEmpty());
-        if ($checkPrentOutletAssign && $outlet_items->IsEmpty()) {
-
-            $outlet_items = $allTemplateNamesValues
-                ->whereIn('row_id', $getRowIds)
-                ->whereIn('project_template_id', $childTemplatesIds)
-                ->whereIn('template_name_head_id', $childTempOwnRefIds)
-                ->filter(function ($item) use ($distributor_value) {
-                    $json = json_decode($item->template_data_json, true);
-                    // check if distributor_value exists anywhere in JSON values
-                    return in_array($distributor_value, $json, true);
-                });
-
-            // dd($outlet_items, $getRowIds);
-
-        }
-
-        //outlet assign data with different head value
-        if ($outlet_items->IsEmpty()) {
-
-            $tempjsondata = json_decode($projectTemplateNameValue->template_data_json, true);
-
-            // get only values, ignore keys
-            $allValues = array_values($tempjsondata);
-
-            $outlet_items = $allTemplateNamesValues
-                ->whereIn('row_id', $getRowIds)
-                ->whereIn('project_template_id', $childTemplatesIds)
-                ->whereIn('template_name_head_id', $childTempOwnRefIds)
-                ->filter(function ($item) use ($allValues) {
-                    $json = json_decode($item->template_data_json, true);
-
-                    // check if any value from $allValues exists in this row's JSON
-                    return count(array_intersect($allValues, $json)) > 0;
-                });
-
-        }
-
-        $outlet_items = $outlet_items->values(); // Re-index the collection
-
-        $projectCompletedStatus = 0;
-        $auditCompleteCounts = 0;
-
-        $allAnswers = collect(DB::table('temp_user_activity_answers_data')
-            ->whereIn('row_id', $getRowIds)
-            ->get());
-
-        foreach ($outlet_items as $outlet_item) {
-            if (!in_array($outlet_item->row_id, $row_renderred_arr)) {
-                $row_renderred_arr[] = $outlet_item->row_id;
-
-                // Attach get_head_name to the data_item
-                $outlet_item->get_head_name = $templateHeads[$outlet_item->template_name_head_id] ?? null;
-
-                $headRows = $allTemplateGroupedByRow[$outlet_item->row_id] ?? collect();
-                $outlet_item->get_data_of_rows = $headRows->map(function ($row) use ($templateHeads) {
-                    $rowCopy = clone $row; // prevent recursive reference
-                    $rowCopy->get_head_name = $templateHeads[$row->template_name_head_id] ?? null;
-                    return $rowCopy;
-                })->values();
-
-                $check_if_answered = $allAnswers->where('row_id', $outlet_item->row_id)
-//                    ->where('activity_id', $activity->id)
-                    ->isNotEmpty();
-
-                $row_group = $allTemplateGroupedByRow[$outlet_item->row_id] ?? collect();
-
-                $templateNameData = DB::table('project_templates')->where('id', $outlet_item->project_template_id)->first();
-
-                //khushboo 02-05-2025
-                $getAllQuestionIds = DB::table('questions')
-                    ->whereIn('activity_id', $activities)
-                    ->pluck('id')
-                    ->toArray();
-
-                $getAllRequiredQuestionIds = DB::table('questions')
-                    ->whereIn('activity_id', $activities)
-                    ->where('answer_type', 1)
-                    ->pluck('id')
-                    ->toArray();
-
-                $totalQuestions = count($getAllRequiredQuestionIds);
-//                 dd($totalQuestions);
-
-                $answeredCount = $allAnswers->where('row_id', $outlet_item->row_id)
-                    ->whereIn('activity_id', $activities)
-                    ->whereIn('question_id', $getAllRequiredQuestionIds)
-                    ->unique('question_id')
-                    ->count('question_id');
-
-                // $allAnswered = $answeredCount === $totalQuestions;
-                $allAnswered = false;
-                // dd($answeredCount, $totalQuestions);
-//                dd($totalQuestions, $answeredCount);
-                if ($answeredCount === $totalQuestions) {
-                    $allAnswered = true;
-                }
-
-                // dd($totalQuestions,);
-                // $allAnswered = true;
-                $otpVerificationDone = false;
-                // if ($allAnswered) {
-                $lastQuestionAnswered = $allAnswers->where('row_id', $outlet_item->row_id)
-//                        ->where('activity_id', $activity->id)
-                    ->whereIn('question_id', $getAllQuestionIds)
-                    ->whereNotNull('mobile_otp')
-                    ->sortByDesc('id')
-                    ->first();
-//                     dd($lastQuestionAnswered);
-                if (!empty($lastQuestionAnswered) && !empty($lastQuestionAnswered->mobile_otp) && ($lastQuestionAnswered->otp_verified_status == 1)) {
-                    $otpVerificationDone = true;
-                    $allAnswered = true;
-                }
-                // }
-
-
-                $projectStatus = "pending";
-                if ($allAnswered && $otpVerificationDone && ($otpRequiredStatus == 1)) {
-                    $projectStatus = "completed";
-                    // } else if ($allAnswered && !$otpVerificationDone && ($otpRequiredStatus == 1)) {
-                    // $projectStatus = "Awaiting OTP Verify";
-                } else if ($allAnswered) {
-                    $projectStatus = "completed";
-                }
-                //khushboo 02-05-2025
-
-                if ($projectStatus == "completed") {
-                    $projectCompletedStatus++;
-                }
-
-
-                $main_header = optional($row_group->firstWhere('template_name_head_id', $templateNameData->main_header))->value;
-                $sub_header = optional($row_group->firstWhere('template_name_head_id', $templateNameData->sub_header))->value;
-
-                $checkIfExists = ClosedAudits::whereIn('project_template_id', $childTemplatesIds)
-                    ->where('main_header', $main_header)
-                    ->where('sub_header', $sub_header)
-                    ->whereIn('activity_id', $activities)
-                    ->where('row_id', $outlet_item->row_id)
-                    ->where('user_id', $user->id)
-                    ->where('distributor_value', $distributor_value)
-                    ->exists();
-
-                if ($checkIfExists) {
-                    $projectStatus = "completed";
-                    $auditCompleteCounts++;
-                }
-
-                $project_data_arr[] = [
-                    'data_item' => $outlet_item,
-                    'project_id' => $project->id,
-                    'template_id' => $templateNameData->template_name_id,
-                    'status' => $projectStatus,
-                    'main_header' => $main_header,
-                    'sub_header' => $sub_header,
-                    'add_outlet' => $templateNameData->data_add_on = 1 ? true : false,
-                ];
-            }
-        }
-
-        $projectTemplateNames = [];
-        if (!empty($getChildTemplateAssignedIds)) {
-            foreach ($childTemplatesData as $childData) {
-                if (($childData->with_data == 0 || $childData->data_add_on == 1) && in_array($childData->id, $getChildTemplateAssignedIds)) {
-                    $projectTemplateNames[] = [
-                        'template_id' => $childData->getTemplate->id,
-                        'project_id' => $childData->project_id,
-                        'template_name' => $childData->getTemplate->template_name
-                    ];
-                }
-            }
-        }
-
-        if (Session::has('project_activity')) {
-            Session::forget('project_activity');
-        }
-
-        $masterPorjectTemplate = ProjectTemplate::where('project_id', $projectTemplate->project_id)
-            ->where('is_master', 1)->first();
-
-        $minimumCount = $masterPorjectTemplate->min_completion;
-        // dd($projectTemplate);
-        $showCLoseAuditOption = false;
-        $IsAuditClosed = false;
-
-//         dd($projectCompletedStatus, (int) $minimumCount);
-        if ($minimumCount && $projectCompletedStatus > 0 && $projectCompletedStatus >= (int)$minimumCount) {
-            $showCLoseAuditOption = true;
-        }
-
-        if ($auditCompleteCounts > 0) {
-            $showCLoseAuditOption = false;
-        }
-
-        $project_data_arr = collect($project_data_arr);
-
-        // Now you can use the where method
-        if ($request->status) {
-            $project_data_arr = $project_data_arr->where('status', $request->status);
-        }
-        if ($request->keyword) {
-            $project_data_arr = $project_data_arr->filter(function ($item) use ($request) {
-                return strpos(strtolower($item['main_header']), strtolower($request->keyword)) !== false ||
-                    strpos(strtolower($item['sub_header']), strtolower($request->keyword)) !== false;
-            });
-        }
-
-        $distributors_collection = collect($project_data_arr);
-        $currentPage = request()->get('page', 1);
-        $perPage = 10;
-        $currentPageItems = $distributors_collection->slice(($currentPage - 1) * $perPage, $perPage)->values();
-        $paginatedDistributors = new LengthAwarePaginator(
-            $currentPageItems,
-            $distributors_collection->count(),
-            $perPage,
-            $currentPage,
-            ['path' => request()->url(), 'query' => request()->query()]
-        );
-
-        $childTemplatesNameIds = ProjectTemplate::where('project_id', $projectTemplate->project_id)
-            ->where('is_master', 0)
-            ->pluck('template_name_id')->toArray();
-
-        return response([
-            'status' => 200,
-            'message' => 'sucesss',
-            'project_id' => $project->id,
-            'template_id' => $childTemplatesNameIds[0],
-            'distributor_value' => $distributor_value,
-            'otp_required_status' => $otpRequiredStatus,
-            'add_outlet' => $add_outlet,
-            'show_audit_close_button' => $showCLoseAuditOption,
-            'data' => $paginatedDistributors,
-            'can_edit_data' => $can_edit_data,
-            'template_names' => $projectTemplateNames
-
-        ], 200);
-    }
-
-
-    public function myProjectsDistributorOutletsDataOldSept10(Request $request, $rowId, $distributor_value, $userId)
     {
 //         dd($userId);
         $projectTemplateNameValue = ProjectTemplateNameValuesNew::find($rowId);
@@ -2624,6 +1471,7 @@ class TaskController extends Controller
             ->whereIn('activity_id', $activities)
             ->distinct('common_id')
             ->pluck('common_id');
+        
 
         $get_distinct_data_assigned_ids = $get_project_template_assigned_data->pluck('data_assign_id')->unique();
 
@@ -2659,7 +1507,7 @@ class TaskController extends Controller
             ->where('is_outlet_assigned', 1)
             ->exists();
 
-        if ($checkPrentOutletAssign) {
+        if($checkPrentOutletAssign){
 
             $parentDataAssignIds = DB::table('data_assigns')->where('project_template_id', $projectTemplate->id)
                 ->where('is_outlet_assigned', 1)
@@ -2689,7 +1537,7 @@ class TaskController extends Controller
 
 //            dd($outlet_items, $childTemplatesIds, $getRowIds, $distributor_value, $allTemplateNamesValues);
 
-        } else {
+        }else{
 
             $outlet_items = $allTemplateNamesValues
                 ->whereIn('row_id', $getRowIds)
@@ -2702,8 +1550,8 @@ class TaskController extends Controller
                 });
         }
 
-//        dd($outlet_items->IsEmpty());
-        if ($checkPrentOutletAssign && $outlet_items->IsEmpty()) {
+        // dd($outlet_items->IsEmpty());
+        if($checkPrentOutletAssign && $outlet_items->IsEmpty()){
 
             $outlet_items = $allTemplateNamesValues
                 ->whereIn('row_id', $getRowIds)
@@ -2715,64 +1563,41 @@ class TaskController extends Controller
                     return in_array($distributor_value, $json, true);
                 });
 
-//            dd($outlet_items, $getRowIds);
-        }
-
-        //for master main header mapped
-        if ($outlet_items->IsEmpty()) {
-
-//            $getDistributorOutletValue = DB::table('project_template_name_values_new')
-//                ->whereIn('row_id', $getRowIds)
-//                ->where('project_template_id', $projectTemplate->id)
-//                ->select(
-//                    DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$projectTemplateData->main_header}\"')) as head_value")
-//                )
-//                ->get();
-
-            $outlet_items = $allTemplateNamesValues
-                ->whereIn('row_id', $getRowIds)
-                ->whereIn('project_template_id', $childTemplatesIds)
-                ->whereIn('template_name_head_id', $childTempOwnRefIds)
-                ->filter(function ($item) use ($distributor_value) {
-                    $json = json_decode($item->template_data_json, true);
-                    // check if distributor_value exists anywhere in JSON values
-                    return in_array($distributor_value, $json, true);
-                });
+            // dd($outlet_items, $getRowIds);
 
         }
-
+       
         //outlet assign data with different head value
-        if ($outlet_items->IsEmpty()) {
-
-
+        if($outlet_items->IsEmpty()){
+            
+            
             $tempjsondata = json_decode($projectTemplateNameValue->template_data_json, true);
 
             // get only values, ignore keys
             $allValues = array_values($tempjsondata);
-
-
+            
+            
             $outlet_items = $allTemplateNamesValues
-                ->whereIn('row_id', $getRowIds)
-                ->whereIn('project_template_id', $childTemplatesIds)
-                ->whereIn('template_name_head_id', $childTempOwnRefIds)
-                ->filter(function ($item) use ($allValues) {
-                    $json = json_decode($item->template_data_json, true);
+            ->whereIn('row_id', $getRowIds)
+            ->whereIn('project_template_id', $childTemplatesIds)
+            ->whereIn('template_name_head_id', $childTempOwnRefIds)
+            ->filter(function ($item) use ($allValues) {
+                $json = json_decode($item->template_data_json, true);
 
-                    // check if any value from $allValues exists in this row's JSON
-                    return count(array_intersect($allValues, $json)) > 0;
+                // check if any value from $allValues exists in this row's JSON
+                return count(array_intersect($allValues, $json)) > 0;
                 });
-
+            
         }
-
-//        dd($outlet_items, $previous_sequence_answered_rows);
-
-//        if ($is_to_check_previous_submitted && !empty($previous_sequence_answered_rows)) {
-//            $outlet_items = $outlet_items->whereIn('row_id', $previous_sequence_answered_rows);
-//        }
+        
+//  dd($outlet_items->IsEmpty());
+        // if ($is_to_check_previous_submitted && !empty($previous_sequence_answered_rows)) {
+        //     $outlet_items = $outlet_items->whereIn('row_id', $previous_sequence_answered_rows);
+        // }
 
         $outlet_items = $outlet_items->values(); // Re-index the collection
 
-//        dd($outlet_items);
+        // dd($outlet_items);
 
         $projectCompletedStatus = 0;
         $auditCompleteCounts = 0;
@@ -2802,52 +1627,61 @@ class TaskController extends Controller
                     ->isNotEmpty();
 
                 $row_group = $allTemplateGroupedByRow[$outlet_item->row_id] ?? collect();
+                
+                $templateNameData = DB::table('project_templates')->where('id', $outlet_item->project_template_id)->first();
 
                 //khushboo 02-05-2025
                 $getAllQuestionIds = DB::table('questions')
-//                    ->where('activity_id', $activity->id)
+                    ->whereIn('activity_id', $activities)
+                    ->pluck('id')
+                    ->toArray();
+                    
+                $getAllRequiredQuestionIds = DB::table('questions')
+                    ->whereIn('activity_id', $activities)
+                    ->where('answer_type', 1)
                     ->pluck('id')
                     ->toArray();
 
-                $totalQuestions = count($getAllQuestionIds);
+                $totalQuestions = count($getAllRequiredQuestionIds);
 //                 dd($totalQuestions);
 
                 $answeredCount = $allAnswers->where('row_id', $outlet_item->row_id)
-//                    ->where('activity_id', $activity->id)
-                    ->whereIn('question_id', $getAllQuestionIds)
+                    ->whereIn('activity_id', $activities)
+                    ->whereIn('question_id', $getAllRequiredQuestionIds)
                     ->unique('question_id')
                     ->count('question_id');
 
                 // $allAnswered = $answeredCount === $totalQuestions;
                 $allAnswered = false;
+                // dd($answeredCount, $totalQuestions);
 //                dd($totalQuestions, $answeredCount);
                 if ($answeredCount === $totalQuestions) {
                     $allAnswered = true;
                 }
 
-                // dd($answeredCount, $totalQuestions);
+                // dd($totalQuestions,);
                 // $allAnswered = true;
                 $otpVerificationDone = false;
-//                if ($allAnswered) {
-                $lastQuestionAnswered = $allAnswers->where('row_id', $outlet_item->row_id)
+                // if ($allAnswered) {
+                    $lastQuestionAnswered = $allAnswers->where('row_id', $outlet_item->row_id)
 //                        ->where('activity_id', $activity->id)
-                    ->whereIn('question_id', $getAllQuestionIds)
-                    ->whereNotNull('mobile_otp')
-                    ->sortByDesc('id')
-                    ->first();
+                        ->whereIn('question_id', $getAllQuestionIds)
+                        ->whereNotNull('mobile_otp')
+                        ->sortByDesc('id')
+                        ->first();
 //                     dd($lastQuestionAnswered);
-                if (!empty($lastQuestionAnswered) && !empty($lastQuestionAnswered->mobile_otp) && ($lastQuestionAnswered->otp_verified_status == 1)) {
-                    $otpVerificationDone = true;
-                    $allAnswered = true;
-                }
-//                }
+                    if (!empty($lastQuestionAnswered) && !empty($lastQuestionAnswered->mobile_otp) && ($lastQuestionAnswered->otp_verified_status == 1)) {
+                        $otpVerificationDone = true;
+                        $allAnswered = true;
+                    }
+                // }
 
-//                 dd($otpVerificationDone);
+                
                 $projectStatus = "pending";
                 if ($allAnswered && $otpVerificationDone && ($otpRequiredStatus == 1)) {
                     $projectStatus = "completed";
-//                } else if ($allAnswered && !$otpVerificationDone && ($otpRequiredStatus == 1)) {
-//                    $projectStatus = "Awaiting OTP Verify";
+                // } else if ($allAnswered && !$otpVerificationDone && ($otpRequiredStatus == 1)) {
+                    // $projectStatus = "Awaiting OTP Verify";
                 } else if ($allAnswered) {
                     $projectStatus = "completed";
                 }
@@ -2857,7 +1691,7 @@ class TaskController extends Controller
                     $projectCompletedStatus++;
                 }
 
-                $templateNameData = DB::table('project_templates')->where('id', $outlet_item->project_template_id)->first();
+                
 
                 $main_header = optional($row_group->firstWhere('template_name_head_id', $templateNameData->main_header))->value;
                 $sub_header = optional($row_group->firstWhere('template_name_head_id', $templateNameData->sub_header))->value;
@@ -2867,7 +1701,7 @@ class TaskController extends Controller
                     ->where('sub_header', $sub_header)
                     ->whereIn('activity_id', $activities)
                     ->where('row_id', $outlet_item->row_id)
-//                    ->where('user_id', $user->id)
+                    ->where('user_id', $user->id)
                     ->where('distributor_value', $distributor_value)
                     ->exists();
 
@@ -2883,7 +1717,7 @@ class TaskController extends Controller
                     'status' => $projectStatus,
                     'main_header' => $main_header,
                     'sub_header' => $sub_header,
-                    'add_outlet' => $templateNameData->data_add_on = 1 ? true : false,
+                    'add_outlet' => $templateNameData->data_add_on=1?true:false,
                 ];
             }
         }
@@ -2937,10 +1771,11 @@ class TaskController extends Controller
             ['path' => request()->url(), 'query' => request()->query()]
         );
 
+        
         $childTemplatesNameIds = ProjectTemplate::where('project_id', $projectTemplate->project_id)
             ->where('is_master', 0)
             ->pluck('template_name_id')->toArray();
-
+            
         return response([
             'status' => 200,
             'message' => 'sucesss',
@@ -3019,15 +1854,19 @@ class TaskController extends Controller
             $excludedKeys = ['user_id', 'row_id', 'activity_id', 'group_id', 'latitude', 'longitude'];
             $questionAnswers = collect($request->all())->except($excludedKeys);
 
+
             $submittedQuestionIds = array_map('intval', array_keys($questionAnswers->toArray()));
-            // dd($submittedQuestionIds);
-            // Get only **required** questions (answer_type == 1) for the given activity
+
+//        dd($submittedQuestionIds);
+// Get only **required** questions (answer_type == 1) for the given activity
             $requiredQuestions = Question::where('activity_id', $request->activity_id)
                 ->where('answer_type', 1)
                 ->get();
-            // Group required questions by type
+
+// Group required questions by type
             $requiredGroupedByType = $requiredQuestions->groupBy('question_type');
-            // Track missing question types
+
+// Track missing question types
             $missingTypes = [];
 
             foreach ($requiredGroupedByType as $type => $questions) {
@@ -3040,14 +1879,16 @@ class TaskController extends Controller
                     $missingTypes[] = $type;
                 }
             }
+
 //        dd($missingTypes);
-            if (!empty($missingTypes)) {
-                return response()->json([
-                    'status' => 422,
-                    'message' => 'Some required question types are missing from the submission.',
-                    'missing_question_types' => $missingTypes
-                ], 422);
-            }
+
+        if (!empty($missingTypes)) {
+            return response()->json([
+                'status' => 422,
+                'message' => 'Some required question types are missing from the submission.',
+                'missing_question_types' => $missingTypes
+            ], 422);
+        }
             $imagesToProcess = [];
 
 //        dd($questionAnswers);
@@ -3161,7 +2002,7 @@ class TaskController extends Controller
                         })
                         ->where('question_id', $questionId)
 //                    ->where('user_answer', 'LIKE', $user_answer)
-//                        ->where('user_id', $userId)
+                        // ->where('user_id', $userId)
                         ->count();
 //                dd($checkCountOfExistingData);
 
@@ -3174,8 +2015,9 @@ class TaskController extends Controller
                             })
                             ->where('question_id', $questionId)
 //                        ->where('user_answer', 'LIKE', $user_answer)
-//                            ->where('user_id', $userId)
+                            // ->where('user_id', $userId)
                             ->first();
+
 
                         $subjectiveAnswer = $checkSubjectiveExistingData->user_answer;
 
@@ -3254,7 +2096,7 @@ class TaskController extends Controller
                                 ->orWhere('activity_group_name_id', $request->group_id);
                         })
                         ->where('question_id', $questionId)
-//                        ->where('user_id', $userId)
+                        // ->where('user_id', $userId)
                         ->exists();
 
                     if (!$checkIfExists) {
@@ -3279,7 +2121,7 @@ class TaskController extends Controller
                                     ->orWhere('activity_group_name_id', $request->group_id);
                             })
                             ->where('question_id', $questionId)
-//                            ->where('user_id', $userId)
+                            // ->where('user_id', $userId)
                             ->update([
                                 'user_answer' => $user_answer,
                                 'same_answer_id' => $last_sequence,
@@ -3308,11 +2150,11 @@ class TaskController extends Controller
 //        dd($imagesToProcess);
             if (!empty($imagesToProcess)) {
 
-                dispatch(new ConvertAuditorSelfiesToGeoSelfies($imagesToProcess));
+                // dispatch(new ConvertAuditorSelfiesToGeoSelfies($imagesToProcess));
 //                ConvertAuditorSelfiesToGeoSelfies::dispatch($file_path, $latitude, $longitude, $answer, $projectMonthYearDirectory, $userDetails);
-//            dispatch(new ConvertAuditorSelfiesToGeoSelfies($imagesToProcess));
-//                $job = new ConvertAuditorSelfiesToGeoSelfies($imagesToProcess);
-//                $job->handle();
+            dispatch(new ConvertAuditorSelfiesToGeoSelfies($imagesToProcess));
+                // $job = new ConvertAuditorSelfiesToGeoSelfies($imagesToProcess);
+                // $job->handle();
 
             }
 
@@ -3494,7 +2336,7 @@ class TaskController extends Controller
                     })
                     ->where('question_id', $questionId)
 //                    ->where('user_answer', 'LIKE', $user_answer)
-                    ->where('user_id', $userId)
+                    // ->where('user_id', $userId)
                     ->count();
 //                dd($checkCountOfExistingData);
 //                echo $checkCountOfExistingData;
@@ -3507,7 +2349,7 @@ class TaskController extends Controller
                         })
                         ->where('question_id', $questionId)
 //                        ->where('user_answer', 'LIKE', $user_answer)
-                        ->where('user_id', $userId)
+                        // ->where('user_id', $userId)
                         ->first();
 
                     $subjectiveAnswer = $checkSubjectiveExistingData->user_answer;
@@ -3586,7 +2428,7 @@ class TaskController extends Controller
                             ->orWhere('activity_group_name_id', $request->group_id);
                     })
                     ->where('question_id', $questionId)
-                    ->where('user_id', $userId)
+                    // ->where('user_id', $userId)
                     ->exists();
 
                 if (!$checkIfExists) {
@@ -3611,7 +2453,7 @@ class TaskController extends Controller
                                 ->orWhere('activity_group_name_id', $request->group_id);
                         })
                         ->where('question_id', $questionId)
-                        ->where('user_id', $userId)
+                        // ->where('user_id', $userId)
                         ->update([
                             'user_answer' => $user_answer,
                             'same_answer_id' => $last_sequence,
@@ -3909,7 +2751,7 @@ class TaskController extends Controller
     }
 
 
-    public function storeTemplateHeaderValues(Request $request)
+    public function storeTemplateHeaderValuesOld(Request $request)
     {
 
         $request->validate(
@@ -3932,23 +2774,13 @@ class TaskController extends Controller
                 // dd($projectTemplateHeaders);
                 ksort($projectRowData);
 
-                /**
-                 * ðŸ”¹ Normalize request keys
-                 * Map both original and normalized
-                 */
-                $normalizedRowData = [];
-                foreach ($projectRowData as $key => $val) {
-                    $normalizedKey = strtolower(str_replace(' ', '_', trim($key)));
-                    $normalizedRowData[$normalizedKey] = $val;
-                }
-
+                // Create dynamic rules: each key must be required and not empty
                 $rules = [];
-                foreach ($normalizedRowData as $key => $value) {
+                foreach ($projectRowData as $key => $value) {
                     $rules[$key] = 'required';
                 }
-
-                // Validate
-                $validator = Validator::make($normalizedRowData, $rules);
+// Validate
+                $validator = Validator::make($projectRowData, $rules);
 
                 if ($validator->fails()) {
                     return response()->json([
@@ -3961,291 +2793,20 @@ class TaskController extends Controller
                 $is_template_master = $projectTemplateInfo->is_master;
                 $get_header_id = "";
                 $get_header_value = "";
-                $templateDataJson = [];
+                // $headerDetails = [];
 
-                //for linking outlet with distributor
-                $matchedMasterId = null;
-                $masterTemplateValuesData = null;
-                if ($projectTemplateInfo->is_master == 0) {
-                    $masterHeadId = $projectTemplateInfo->master_head_id;
-                    $masterData = ProjectTemplate::where('project_id', $projectTemplateInfo->project_id)->where('is_master', 1)->first();
-                    $masterTemplateValuesData = DB::table('project_template_name_values_new')
-                        ->where('project_template_id', $masterData->id)
-                        ->select('id', 'template_data_json')
-                        ->get()
-                        ->map(function ($row) use ($masterHeadId) {
-                            $json = json_decode($row->template_data_json, true);
-                            return [
-                                'id' => $row->id,  // keep the row id
-                                'value' => $json[$masterHeadId] ?? null // keep only matched key value
-                            ];
-                        });
-                }
-                //for linking outlet with distributor
-
-                foreach ($projectTemplateHeaders as $headId => $projectData) {
-                    $headerName = $projectData->template_head_name;
-                    // ðŸ”¹ Normalize header name (same as request key normalization)
-                    $headerKey = strtolower(str_replace(' ', '_', trim($headerName)));
-                    $value = $normalizedRowData[$headerKey] ?? null;
-                    // Store first non-empty header as reference
-                    if (empty($get_header_id) && !empty($value)) {
-                        $get_header_id = $projectData->id;
-                        $get_header_value = $value;
-                    }
-                    $templateDataJson[$projectData->id] = $value;
-                    //link outlet with distributor
-                    if ($projectTemplateInfo->is_master == 0) {
-                        $found = collect($masterTemplateValuesData)->firstWhere('value', $projectData);
-                        if ($found) {
-                            $matchedMasterId = $found['id'];
-                        }
-                    }
-                }
-
-                // Insert single row with JSON data
-                $projectTemplateNameValues = ProjectTemplateNameValuesNew::create([
-                    'project_template_id' => $projectTemplateInfo->id,
-                    'template_data_json' => json_encode($templateDataJson),
-                    'distributor_id' => $matchedMasterId
-                ]);
-
-//                dd($projectTemplateNameValues->id);
-                $projectInfo = Project::find($projectTemplateInfo->project_id);
-                $templateNameInfo = TemplateName::find($projectTemplateInfo->template_name_id);
-                $companyId = $projectInfo->company_id;
-                $zoneId = $projectInfo->zone_id;
-                $unitId = $projectInfo->unit_id;
-
-                $activityGroupId = $request->activity_group_id;
-                $activity_id = $request->activity_id;
-                $activityIdsArr = [];
-
-                if ($activityGroupId) {
-                    $group_activities = ActivityGroupPivot::where('activity_group_id', $activityGroupId)->get();
-                    foreach ($group_activities as $group_activity) {
-                        $activityIdsArr[] = $group_activity->activity_id;
-                    }
-                } else if ($activity_id) {
-                    $activityIdsArr[] = $activity_id;
-                } else {
-//                    return response()->json(['status' => 401, 'message' => 'activity_id or activity_group_id not found']);
-                    if ($projectTemplateInfo->activityType == 0) {
-                        $activityIdsArr[] = $projectTemplateInfo->activity_group_name_id_or_activity_id;
-                    } elseif ($projectTemplateInfo->activityType == 1) {
-                        $activityIdsArr = array_merge(
-                            $activityIdsArr,
-                            DB::table('activity_group_pivots')->where('activity_group_id', $projectTemplateInfo->activity_group_name_id_or_activity_id)
-                                ->pluck('activity_id')
-                                ->toArray()
-                        );
-                    }
-                }
-
-                $checkOutletAssign = null;
-                if ($projectTemplateInfo->is_master == 1) {
-
-                    $activity_group_name_id_or_activity_id = $projectTemplateInfo->activity_group_name_id_or_activity_id;
-                    $checkOutletAssign = DataAssign::where('project_id', $projectTemplateInfo->project_id)
-                        ->where('template_name_id', $projectTemplateInfo->template_name_id)
-                        ->where('template_name_head_id', $projectTemplateInfo->main_header)
-                        ->where('project_template_id', $projectTemplateInfo->id)
-                        ->where('is_outlet_assigned', 1)
-                        ->where(function ($query) use ($activity_group_name_id_or_activity_id) {
-                            $query->where('activity_id', $activity_group_name_id_or_activity_id)
-                                ->orWhere('activity_group_id', $activity_group_name_id_or_activity_id);
-                        })
-                        ->exists();
-                }
-
-
-                foreach ($activityIdsArr as $activity) {
-
-//                if ($checkOutletAssign) {
-                    if ($projectTemplateInfo->with_data == 1) {
-
-                        $dataAssign = DataAssign::create([
-                            'company_id' => $companyId,
-                            'zone_id' => $zoneId,
-                            'unit_id' => $unitId,
-                            'project_id' => $projectInfo->id,
-                            'activity_id' => $activity,
-                            'template_name_id' => $templateNameInfo->id,
-                            'project_template_id' => $projectTemplateInfo->id,
-                            'activity_group_id' => $activityGroupId,
-                            'template_name_head_id' => $get_header_id,
-                            'is_outlet_assigned' => 0
-                        ]);
-
-                        $rowIds = DB::table('project_template_name_values_new')
-                            ->where('project_template_id', $projectTemplateInfo->id)
-                            ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"$get_header_id\"')) = ?", [trim($get_header_value)])
-                            ->pluck('id')
-                            ->toArray();
-
-                        $this->assignUserActivityAndAuditRows(
-                            $dataAssign->id,
-                            $request->user_id,
-                            $projectTemplateInfo->id,
-                            $activity,
-                            $activityGroupId,
-                            $rowIds
-                        );
-
-                    }
-                    else{
-
-                        $getDataAssign = DB::table('data_assigns')->where('project_id', $projectInfo->id)
-                            ->where('activity_id', $activity)
-                            ->where('template_name_id', $templateNameInfo->id)
-                            ->where('project_template_id', $projectTemplateInfo->id)
-                            ->where('template_name_head_id', $get_header_id)
-                            ->orderBy('id', 'desc')
-                            ->first();
-
-                        if (!empty($getDataAssign)) {
-
-                            $getCommonId = DB::table('user_activity_data_assigns')->where('data_assign_id', $getDataAssign->id)
-                                ->where('project_template_id', $projectTemplateInfo->id)
-                                ->where('user_id', $request->user_id)
-                                ->where('activity_id', $activity)
-                                ->pluck('common_id')->toArray();
-
-                            // add row ids on user auditor assign table
-                            DB::table('user_audit_assigns')->insert([
-                                'row_id' => $projectTemplateNameValues->id,
-                                'common_id' => $getCommonId[0]
-                            ]);
-
-                        }
-                        else {
-
-                            //if mapped with is outlet assigned
-                            $master_project_template = ProjectTemplate::where('project_id', $projectInfo->id)
-                                ->where('is_master', 1)->first();
-
-                            $activityOrGroupMaster = $projectTemplateInfo->activityType;
-                            $activity_group_name_id_or_activity_id_master = $projectTemplateInfo->activity_group_name_id_or_activity_id;
-                            $activityIdsArrMaster = [];
-                            $activityGroupIdMaster = null;
-                            if ($activityOrGroupMaster == 1) {
-                                $activityGroupId = $activity_group_name_id_or_activity_id_master;
-                                $group_activities = ActivityGroupPivot::where('activity_group_id', $activity_group_name_id_or_activity_id_master)->get();
-                                foreach ($group_activities as $group_activity) {
-                                    $activityIdsArrMaster[] = $group_activity->activity_id;
-                                }
-                            } else {
-                                $activityGroupId = null;
-                                $activityIdsArrMaster[] = $activity_group_name_id_or_activity_id_master;
-                            }
-
-                            //get master data assign ids
-                            $checkOutletAssignData = DB::table('data_assigns')->where('project_id', $projectInfo->id)
-                                ->whereIn('activity_id', $activityIdsArrMaster)
-                                ->where('template_name_id', $master_project_template->template_name_id)
-                                ->where('project_template_id', $master_project_template->id)
-//                            ->where('template_name_head_id', $get_header_id)
-                                ->where('is_outlet_assigned', 1)
-                                ->orderBy('id', 'desc')
-                                ->get();
-
-                            if (!$checkOutletAssignData->isEmpty()) {
-                                $masterDataAssignIds = $checkOutletAssignData->pluck('id')->toArray();
-
-                                //get child project template common ids linked with master data assign ids
-                                $getCommonIds = DB::table('user_activity_data_assigns')
-                                    ->whereIn('data_assign_id', $masterDataAssignIds)
-                                    ->where('project_template_id', $projectTemplateInfo->id)
-                                    ->where('user_id', $request->user_id)
-                                    ->where('activity_id', $activity)
-                                    ->pluck('common_id')->toArray();
-
-                                // add row ids on user auditor assign table
-                                foreach ($getCommonIds as $commonId) {
-                                    DB::table('user_audit_assigns')->insert([
-                                        'row_id' => $projectTemplateNameValues->id,
-                                        'common_id' => $commonId
-                                    ]);
-                                }
-                            }
-                        }
-
-                    }
-
-                }
-            }
-
-            return response()->json(['status' => 200, 'message' => 'Distributor Added Successfully']);
-        } catch (\Exception $e) {
-            dd($e->getMessage());
-            Log::info('Distributor not added' . $e->getMessage());
-            return response()->json(['status' => 401, 'message' => 'Something went wrong']);
-        }
-    }
-
-    public function storeTemplateHeaderValuesOldOctober(Request $request)
-    {
-
-        $request->validate(
-            [
-                'activity_id' => 'nullable|numeric',
-                'activity_group_id' => 'nullable|numeric',
-                'project_template_id' => 'required|numeric',
-                'user_id' => 'required|numeric'
-            ]
-        );
-
-        // dd(auth()->id());
-        try {
-            $projectTemplateInfo = ProjectTemplate::find($request->project_template_id);
-            if (!empty($projectTemplateInfo)) {
-                $projectTemplateInfoDetails = $projectTemplateInfo->getTemplate;
-                $projectTemplateHeaders = $projectTemplateInfoDetails->getTemplateHeads;
-
-                $projectRowData = $request->except(['project_template_id', 'activity_group_id', 'activity_id', 'user_id']);
-                // dd($projectTemplateHeaders);
-                ksort($projectRowData);
-
-                /**
-                 * ðŸ”¹ Normalize request keys
-                 * Map both original and normalized
-                 */
-                $normalizedRowData = [];
-                foreach ($projectRowData as $key => $val) {
-                    $normalizedKey = strtolower(str_replace(' ', '_', trim($key)));
-                    $normalizedRowData[$normalizedKey] = $val;
-                }
-
-                $rules = [];
-                foreach ($normalizedRowData as $key => $value) {
-                    $rules[$key] = 'required';
-                }
-
-                // Validate
-                $validator = Validator::make($normalizedRowData, $rules);
-
-                if ($validator->fails()) {
-                    return response()->json([
-                        'status' => 422,
-                        'message' => 'Validation error',
-                        'errors' => $validator->errors()
-                    ], 422);
-                }
-
-                $is_template_master = $projectTemplateInfo->is_master;
-                $get_header_id = "";
-                $get_header_value = "";
                 $templateDataJson = [];
 
                 foreach ($projectTemplateHeaders as $headId => $projectData) {
                     $headerName = $projectData->template_head_name;
 
-                    // ðŸ”¹ Normalize header name (same as request key normalization)
-                    $headerKey = strtolower(str_replace(' ', '_', trim($headerName)));
+                    if (array_key_exists($headerName, $projectRowData)) {
+                        $value = $projectRowData[$headerName];
+                    } else {
+                        $value = null;
+                    }
 
-                    $value = $normalizedRowData[$headerKey] ?? null;
-
-                    // Store first non-empty header as reference
+                    // Store the first non-empty header as reference
                     if (empty($get_header_id) && !empty($value)) {
                         $get_header_id = $projectData->id;
                         $get_header_value = $value;
@@ -4254,7 +2815,7 @@ class TaskController extends Controller
                     $templateDataJson[$projectData->id] = $value;
                 }
 
-                // Insert single row with JSON data
+// Insert single row with JSON data
                 DB::table('project_template_name_values_new')->insert([
                     'project_template_id' => $projectTemplateInfo->id,
                     'template_data_json' => json_encode($templateDataJson),
@@ -4273,14 +2834,16 @@ class TaskController extends Controller
                 $activityIdsArr = [];
 //            $activityGroupId = null;
                 if ($activityGroupId) {
+
                     $group_activities = ActivityGroupPivot::where('activity_group_id', $activityGroupId)->get();
                     foreach ($group_activities as $group_activity) {
                         $activityIdsArr[] = $group_activity->activity_id;
                     }
                 } else if ($activity_id) {
+
                     $activityIdsArr[] = $activity_id;
                 } else {
-//                    return response()->json(['status' => 401, 'message' => 'activity_id or activity_group_id not found']);
+                    // return response()->json(['status' => 401, 'message' => 'activity_id or activity_group_id not found']);
                     if ($projectTemplateInfo->activityType == 0) {
                         $activityIdsArr[] = $projectTemplateInfo->activity_group_name_id_or_activity_id;
                     } elseif ($projectTemplateInfo->activityType == 1) {
@@ -4348,16 +2911,15 @@ class TaskController extends Controller
 
             return response()->json(['status' => 200, 'message' => 'Distributor Added Successfully']);
         } catch (\Exception $e) {
-//            dd($e->getMessage());
+            // dd($e->getMessage());
             Log::info('Distributor not added' . $e->getMessage());
             return response()->json(['status' => 401, 'message' => 'Something went wrong']);
         }
     }
 
-
     //khushboo 16-05-2025
 
-    public function assignUserActivityAndAuditRows($dataAssignId, $userId, $templateId, $activityId, $activityGroupId, $rowIds)
+    private function assignUserActivityAndAuditRows($dataAssignId, $userId, $templateId, $activityId, $activityGroupId, $rowIds)
     {
         if (empty($rowIds)) return null;
 
@@ -4408,148 +2970,167 @@ class TaskController extends Controller
 
         return $commonId;
     }
-
-
-    public function getEditTemplateHeadersData($row_id)
+    
+    
+    public function storeTemplateHeaderValues(Request $request)
     {
 
+        $request->validate(
+            [
+                'activity_id' => 'nullable|numeric',
+                'activity_group_id' => 'nullable|numeric',
+                'project_template_id' => 'required|numeric',
+                'user_id' => 'required|numeric'
+            ]
+        );
+
+        // dd(auth()->id());
         try {
-
-            $projectTemplateNameValue = ProjectTemplateNameValuesNew::find($row_id);
-            $projectTemplateData = ProjectTemplate::find($projectTemplateNameValue->project_template_id);
-            $projectTemplateHeads = $projectTemplateData->getTemplate->getTemplateHeads->pluck('id', 'template_head_name');
-            $template_json_data = json_decode($projectTemplateNameValue->template_data_json, true);
-//            dd($template_json_data, $projectTemplateHeads);
-            // now you can safely map because $projectTemplateHeads is still a collection
-            $mapped = $projectTemplateHeads->map(function ($id, $name) use ($template_json_data) {
-                return [
-                    'id' => $id,
-                    'name' => $name,
-                    'value' => $template_json_data[$id] ?? "",
-                ];
-            })->values()->toArray();
-            $project = Project::find($projectTemplateData->project_id);
-            $template = TemplateName::find($projectTemplateData->template_name_id);
-            return response()->json([
-                'status' => 200,
-                'project_id' => $project->id,
-                'template_id' => $template->id,
-                'project_template_id' => $projectTemplateData->id,
-                'data' => $mapped
-            ]);
-        } catch (\Exception $e) {
-            return response()->json(['status' => 401, 'message' => $e->getMessage()]);
-        }
-    }
-
-    public function editTemplateHeaderValues(Request $request)
-    {
-
-        $validator = Validator::make($request->all(), [
-            'row_id'             => 'required',
-            'project_template_id'=> 'required',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'status' => 401,
-                'message' => $validator->errors()->first()
-            ], 401);
-        }
-
-        try{
-            $row_id = $request->row_id;
-            $excludedKeys = ['row_id', 'project_template_id', 'user_id'];
-            $row_data = collect($request->all())
-                ->except($excludedKeys)
-                ->map(function ($value) {
-                    return $value === null ? "" : $value; // replace null with ""
-                });
             $projectTemplateInfo = ProjectTemplate::find($request->project_template_id);
-            $projectTemplateInfoDetails = $projectTemplateInfo->getTemplate;
-            $projectTemplateHeaders = $projectTemplateInfoDetails->getTemplateHeads;
+            if (!empty($projectTemplateInfo)) {
+                $projectTemplateInfoDetails = $projectTemplateInfo->getTemplate;
+                $projectTemplateHeaders = $projectTemplateInfoDetails->getTemplateHeads;
 
-            $normalizedRowData = [];
-//            dd($row_data);
-            foreach ($row_data as $key => $val) {
-                $normalizedKey = strtolower(str_replace(' ', '_', trim($key)));
-                $normalizedRowData[$normalizedKey] = $val;
-            }
+                $projectRowData = $request->except(['project_template_id', 'activity_group_id', 'activity_id', 'user_id']);
+                // dd($projectTemplateHeaders);
+                ksort($projectRowData);
 
-//            dd($projectTemplateHeaders);
-            foreach ($projectTemplateHeaders as $headId => $projectData) {
-                $headerName = $projectData->template_head_name;
-
-                // ðŸ”¹ Normalize header name (same as request key normalization)
-                $headerKey = strtolower(str_replace(' ', '_', trim($headerName)));
-
-                $value = $normalizedRowData[$headerKey] ?? "";
-
-//                dd($normalizedRowData, $value, $headerKey);
-                // Store first non-empty header as reference
-                if (empty($get_header_id) && !empty($value)) {
-                    $get_header_id = $projectData->id;
-                    $get_header_value = $value;
+                /**
+                * 🔹 Normalize request keys
+                * Map both original and normalized
+                */
+                $normalizedRowData = [];
+                foreach ($projectRowData as $key => $val) {
+                    $normalizedKey = strtolower(str_replace(' ', '_', trim($key)));
+                    $normalizedRowData[$normalizedKey] = $val;
                 }
 
-                $templateDataJson[$projectData->id] = $value;
-            }
+                $rules = [];
+                foreach ($normalizedRowData as $key => $value) {
+                    $rules[$key] = 'required';
+                }
 
-            $templateJsonData = ProjectTemplateNameValuesNew::find($row_id);
-//            dd($templateJsonData, $row_data);
-            $templateJsonData->update([
-                'template_data_json' => json_encode($templateDataJson),
-            ]);
-            return response()->json(['status' => 200, 'message' => 'Data Updated Successfully']);
-        }catch(\Exception $e){
-            return response()->json(['status' => 401, 'message' => $e->getMessage()]);
-        }
-    }
+                // Validate
+                $validator = Validator::make($normalizedRowData, $rules);
 
-    public function getOutletTemplatesAvailable($row_id, $user_id)
-    {
-        $projectTemplateNameValue = ProjectTemplateNameValuesNew::find($row_id);
-        $projectTemplateId = $projectTemplateNameValue->project_template_id;
-        $projectTemplate = ProjectTemplate::find($projectTemplateId);
-        $project = Project::find($projectTemplate->project_id);
-        $childTemplatesData = ProjectTemplate::where('project_id', $projectTemplate->project_id)
-            ->where('is_master', 0)
-            ->get();
-        $checkPrentOutletAssign = DB::table('data_assigns')->where('project_template_id', $projectTemplate->id)
-            ->where('is_outlet_assigned', 1)
-            ->exists();
-        $getChildTemplateAssignedIds = [];
-        if ($checkPrentOutletAssign) {
-            $parentDataAssignIds = DB::table('data_assigns')->where('project_template_id', $projectTemplate->id)
-                ->where('is_outlet_assigned', 1)
-                ->pluck('id')->toArray();
-            $getChildTemplateAssignedIds = DB::table('user_activity_data_assigns')->where('user_id', $user_id)
-                ->whereIn('data_assign_id', $parentDataAssignIds)
-                ->distinct('project_template_id')
-                ->pluck('project_template_id')->toArray();
+                if ($validator->fails()) {
+                    return response()->json([
+                        'status' => 422,
+                        'message' => 'Validation error',
+                        'errors' => $validator->errors()
+                    ], 422);
+                }
 
-        }
+                $is_template_master = $projectTemplateInfo->is_master;
+                $get_header_id = "";
+                $get_header_value = "";
+                $templateDataJson = [];
 
-        $projectTemplateNames = [];
-        if (!empty($getChildTemplateAssignedIds)) {
-            foreach ($childTemplatesData as $childData) {
-                if (($childData->with_data == 0 || $childData->data_add_on == 1) && in_array($childData->id, $getChildTemplateAssignedIds)) {
-                    $projectTemplateNames[] = [
-                        'template_id' => $childData->getTemplate->id,
-                        'project_id' => $childData->project_id,
-                        'template_name' => $childData->getTemplate->template_name
-                    ];
+                foreach ($projectTemplateHeaders as $headId => $projectData) {
+                    $headerName = $projectData->template_head_name;
+
+                    // 🔹 Normalize header name (same as request key normalization)
+                    $headerKey = strtolower(str_replace(' ', '_', trim($headerName)));
+
+                    $value = $normalizedRowData[$headerKey] ?? null;
+
+                    // Store first non-empty header as reference
+                    if (empty($get_header_id) && !empty($value)) {
+                        $get_header_id = $projectData->id;
+                        $get_header_value = $value;
+                    }
+
+                    $templateDataJson[$projectData->id] = $value;
+                }
+
+// Insert single row with JSON data
+                DB::table('project_template_name_values_new')->insert([
+                    'project_template_id' => $projectTemplateInfo->id,
+                    'template_data_json' => json_encode($templateDataJson),
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
+
+                $projectInfo = Project::find($projectTemplateInfo->project_id);
+                $templateNameInfo = TemplateName::find($projectTemplateInfo->template_name_id);
+                $companyId = $projectInfo->company_id;
+                $zoneId = $projectInfo->zone_id;
+                $unitId = $projectInfo->unit_id;
+
+                $activityGroupId = $request->activity_group_id;
+                $activity_id = $request->activity_id;
+                $activityIdsArr = [];
+//            $activityGroupId = null;
+                if ($activityGroupId) {
+                    $group_activities = ActivityGroupPivot::where('activity_group_id', $activityGroupId)->get();
+                    foreach ($group_activities as $group_activity) {
+                        $activityIdsArr[] = $group_activity->activity_id;
+                    }
+                } else if ($activity_id) {
+                    $activityIdsArr[] = $activity_id;
+                } else {
+                    return response()->json(['status' => 401, 'message' => 'activity_id or activity_group_id not found']);
+                }
+
+                $checkOutletAssign = null;
+                if ($projectTemplateInfo->is_master == 1) {
+
+                    $activity_group_name_id_or_activity_id = $projectTemplateInfo->activity_group_name_id_or_activity_id;
+
+                    $checkOutletAssign = DataAssign::where('project_id', $projectTemplateInfo->project_id)
+                        ->where('template_name_id', $projectTemplateInfo->template_name_id)
+                        ->where('template_name_head_id', $projectTemplateInfo->main_header)
+                        ->where('project_template_id', $projectTemplateInfo->id)
+                        ->where('is_outlet_assigned', 1)
+                        ->where(function ($query) use ($activity_group_name_id_or_activity_id) {
+                            $query->where('activity_id', $activity_group_name_id_or_activity_id)
+                                ->orWhere('activity_group_id', $activity_group_name_id_or_activity_id);
+                        })
+                        ->exists();
+                }
+
+
+                foreach ($activityIdsArr as $activity) {
+
+//                if ($checkOutletAssign) {
+
+                    $dataAssign = DataAssign::create([
+                        'company_id' => $companyId,
+                        'zone_id' => $zoneId,
+                        'unit_id' => $unitId,
+                        'project_id' => $projectInfo->id,
+                        'activity_id' => $activity,
+                        'template_name_id' => $templateNameInfo->id,
+                        'project_template_id' => $projectTemplateInfo->id,
+                        'activity_group_id' => $activityGroupId,
+                        'template_name_head_id' => $get_header_id,
+                        'is_outlet_assigned' => 0
+                    ]);
+
+                    $rowIds = DB::table('project_template_name_values_new')
+                        ->where('project_template_id', $projectTemplateInfo->id)
+                        ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"$get_header_id\"')) = ?", [trim($get_header_value)])
+                        ->pluck('id')
+                        ->toArray();
+
+                    $this->assignUserActivityAndAuditRows(
+                        $dataAssign->id,
+                        $request->user_id,
+                        $projectTemplateInfo->id,
+                        $activity,
+                        $activityGroupId,
+                        $rowIds
+                    );
+
                 }
             }
+
+            return response()->json(['status' => 200, 'message' => 'Distributor Added Successfully']);
+        } catch (\Exception $e) {
+            dd($e->getMessage());
+            Log::info('Distributor not added' . $e->getMessage());
+            return response()->json(['status' => 401, 'message' => 'Something went wrong']);
         }
-
-        return response([
-            'status' => 200,
-            'message' => 'sucesss',
-            'project_id' => $project->id,
-            'template_names' => $projectTemplateNames
-        ], 200);
-
     }
 
 

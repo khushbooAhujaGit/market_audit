@@ -99,6 +99,7 @@ class ProjectDataImport2
                 ->get()
                 ->map(function($row) use ($masterHeadId) {
                     $json = json_decode($row->template_data_json, true);
+
                     return [
                         'id'    => $row->id,  // keep the row id
                         'value' => $json[$masterHeadId] ?? null // keep only matched key value
@@ -117,13 +118,12 @@ class ProjectDataImport2
                     if (!isset($templateHeadIds[$i])) continue;
 
                     $value = preg_replace('/[\/\\\\\'"]/', '', $value);
-//                    Log::info('Raw value: [' . $value . '] ASCII: ' . bin2hex($value));
                     $value = $this->sanitizeCsvValue($value);
 
                     $templateJson[$templateHeadIds[$i]] = $value !== '' ? $value : '';
                 }
 
-                // 🔎 Match against master values first for Mapping Distributor with Outlet
+                // ðŸ”Ž Match against master values first for Mapping Distributor with Outlet
                 $matchedMasterId = null;
                 if ($this->dataFilter == 1 && !empty($masterTemplateValuesData)) {
                     foreach ($templateJson as $csvValue) {
@@ -139,9 +139,6 @@ class ProjectDataImport2
                     $templateJson,
                     JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
                 );
-
-                // extra clean after encoding
-//                $json = preg_replace('/[\/\\\\\'"∕／]/u', '', $json);
 
                 // Step 5: Validate JSON before writing
                 if (
@@ -163,7 +160,7 @@ class ProjectDataImport2
             }
 
         } catch (\Exception $e) {
-            Log::info('error import -'.$e->getMessage());
+            Log::info('error import-'.$e->getMessage());
         } finally {
             fclose($inHandle);
             fclose($outHandle);
@@ -195,13 +192,15 @@ class ProjectDataImport2
         }
 
         $duration = microtime(true) - $startTime;
+         Log::info('import done- '.$duration);
         return [
             'success' => true,
             'message' => "Successfully uploaded using LOAD DATA INFILE in " . round($duration, 2) . " seconds"
         ];
     }
-
-    private function sanitizeCsvValue($value) {
+    
+    private function sanitizeCsvValue($value) 
+    {
         // Convert encoding
         $encoding = mb_detect_encoding($value, ['UTF-8', 'ISO-8859-1', 'Windows-1252'], true);
         if ($encoding !== 'UTF-8') {
@@ -227,29 +226,5 @@ class ProjectDataImport2
     }
 
 
-    private function sanitizeCsvValueOld($value) {
-        // 1. Convert to UTF-8
-        $encoding = mb_detect_encoding($value, ['UTF-8', 'ISO-8859-1', 'Windows-1252'], true);
-        if ($encoding !== 'UTF-8') {
-            $value = mb_convert_encoding($value, 'UTF-8', $encoding ?: 'ISO-8859-1');
-        }
-
-        // 2. Remove BOM
-        $value = preg_replace('/^\xEF\xBB\xBF/', '', $value);
-
-        // 3. Normalize accents (Café → Cafe)
-        $value = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value);
-
-        // 4. Remove /, \, single and double quotes
-        $value = preg_replace('/[\/\\\\\'"]/', '', $value);
-
-        // 5. Remove control characters except \n, \r, \t
-        $value = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $value);
-
-        // 6. Trim extra spaces
-        $value = trim($value);
-
-        return $value;
-    }
 
 }

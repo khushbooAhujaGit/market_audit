@@ -21,14 +21,14 @@ class DecryptRouteParams
                 $decryptedValue = EncryptHelper::decrypt($value);
                 // Set the decrypted value back into the route parameters
                 $route->setParameter($key, $decryptedValue);
-//                Log::info("Decrypted route parameter: {$key} => {$decryptedValue}");
+                Log::info("Decrypted route parameter: {$key} => {$decryptedValue}");
             } catch (\Exception $e) {
                 // Log the failure or leave the original value in case of decryption failure
-//                Log::warning("Failed to decrypt parameter {$key}: {$value}");
+                Log::warning("Failed to decrypt parameter {$key}: {$value}");
             }
         }
 
         return $next($request);
     }
-
+    
 }

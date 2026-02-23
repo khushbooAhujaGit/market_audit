@@ -34,6 +34,7 @@
                                         <td>{{optional($userProject->getUnit->getZone->getCompany)->company_name}}</td>
                                         <td>
                                             <ul class="action">
+                                                {{--                                                <li class="view"> <a href="{{route('user.project.assigned_activities', ['project'=>$userProject->id])}}"><i class="icon-eye text-secondary fs-5"></i></a></li>--}}
                                                 <li class="view"> <a href="{{route('user.project_master.data', ['project'=>$userProject->id])}}"><i class="icon-eye text-secondary fs-5"></i></a></li>
                                             </ul>
                                         </td>

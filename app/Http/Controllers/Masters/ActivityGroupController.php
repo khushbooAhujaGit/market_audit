@@ -45,6 +45,7 @@ class ActivityGroupController extends Controller
         }
         return  response()->json(['message' => "success"]);
     }
+
     public function activity_group_edit($id)
     {
         $activities = Activity::all();

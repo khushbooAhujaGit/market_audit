@@ -9,4 +9,8 @@ class PrivacyPolicyController extends Controller
     public function index(){
         return view('privacy_policy');
     }
+
+    public function datepicker(){
+        return view('datepicker');
+    }
 }

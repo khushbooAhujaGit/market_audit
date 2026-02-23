@@ -163,14 +163,6 @@
                                                                 Rquired</label>
                                                         </div>
                                                     </div>
-                                                    <div class="col-xl-3 col-sm-3 d-none" id="masterRequired" >
-                                                        <div class="form-check checkbox checkbox-primary mb-0">
-                                                            <input class="form-check-input" name="master_required"
-                                                                   id="master_required" type="checkbox">
-                                                            <label class="form-check-label" for="master_required">Master Data
-                                                                Rquired</label>
-                                                        </div>
-                                                    </div>
                                                     <div class="col-xl-4 col-sm-4">
                                                         <label class="form-label" for="data_get_helper">Project
                                                             Data<span class="txt-danger"></span></label>
@@ -296,13 +288,7 @@
                         },
                         success: function (response) {
                             if (response.message == "success") {
-                                // console.log(response);
                                 const pro_temp = response.projectTemplate;
-                                if(pro_temp.is_master == 0){
-                                    $('#masterRequired').removeClass('d-none');
-                                }else{
-                                    $('#masterRequired').removeClass('d-none');
-                                }
                                 if (pro_temp.activity_group_name_id_or_activity_id) {
                                     $("#activity_id").val('');
                                     $("#activity_group_name_id").val('');

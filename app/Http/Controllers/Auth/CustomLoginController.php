@@ -26,7 +26,14 @@ class CustomLoginController extends Controller
 
         if (Auth::attempt($credentials, $request->has('remember_me'))) {
             // Login successful, redirect to intended page
+//            dd('fghgfj');
             $request->session()->regenerate();
+            $user = Auth::user();
+            // 🔁 Role-based redirect
+            if ($user->hasRole('Auditor')) {
+                return redirect()->route('user.projects'); // 👈 auditor route
+            }
+
             return redirect()->intended('dashboard'); // Or your desired redirect route
         }
 

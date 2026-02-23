@@ -27,6 +27,7 @@ use App\Http\Controllers\RoleController;
 use App\Http\Controllers\PrivacyPolicyController;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Mail;
+use App\Http\Controllers\BackupController;
 
 
 /*
@@ -42,7 +43,7 @@ use Illuminate\Support\Facades\Mail;
 
 
 Route::get('/send-test-mail', function () {
-    $userInfo = (object) ['email' => 'rajsrajput1010@gmail.com']; // Replace with actual user email
+    $userInfo = (object)['email' => 'rajsrajput1010@gmail.com']; // Replace with actual user email
 
     // Sending plain text email
     Mail::raw('Thisis the testing mail ', function ($message) use ($userInfo) {
@@ -60,26 +61,37 @@ Route::get('clear', function () {
     return 'clear';
 });
 
+//Route::get('/datepicker', [PrivacyPolicyController::class, 'datepicker'])->name('datepicker');
+//backup routes 12-09-25
+Route::get('/backup/files', [BackupController::class, 'listFiles']);
+//backup routes 12-09-25
+
 Route::get('privacy_policy', [PrivacyPolicyController::class, 'index']);
 Route::resource('permissions', \App\Http\Controllers\PermissionController::class)->middleware('auth');
-Route::post("permission/delete", [PermissionController::class, 'destroy'])->name('permission.destroy');
+
 //Routes for permissions ends
 
 // Route for roles starts
-Route::resource('roles', \App\Http\Controllers\RoleController::class)->middleware('auth');
-Route::post('roles/delete', [RoleController::class, 'destroy'])->name('role.destroy');
-Route::get("roles/{roleId}/give-permissions", [RoleController::class, 'view_addPermissionToRole'])->middleware('auth');
-Route::put("role/give-permissions/{roleId}", [RoleController::class, 'addPermissionToRole'])->name('role.givePermissions');
+Route::middleware('permission:Role-Permission')->group(function () {
+    Route::resource('roles', \App\Http\Controllers\RoleController::class)->middleware('auth');
+    Route::post('roles/delete', [RoleController::class, 'destroy'])->name('role.destroy');
+    Route::get("roles/{roleId}/give-permissions", [RoleController::class, 'view_addPermissionToRole'])->middleware('auth');
+    Route::put("role/give-permissions/{roleId}", [RoleController::class, 'addPermissionToRole'])->name('role.givePermissions');
+    Route::post("permission/delete", [PermissionController::class, 'destroy'])->name('permission.destroy');
+});
 //Routes for roles ends
 
 // this is for logout route
 Route::get("/log-out", [\App\Http\Controllers\Auth\LoginController::class, "logout"])->name("logout-route");
 
 // Routes for Users starts
-Route::resource('users', UserController::class)->middleware('auth');
-Route::post('user/delete', [UserController::class, 'destroy'])->name('user.destroy');
-Route::get('user/upload_user', [UserController::class, 'view_user_upload'])->name('users.upload.view')->middleware('auth');
-Route::post('user/bluk_data_upload', [UserController::class, 'userUpload'])->name('user.blukUpload');
+Route::middleware('permission:Users')->group(function () {
+    Route::resource('users', UserController::class)->middleware('auth');
+    Route::post('user/delete', [UserController::class, 'destroy'])->name('user.destroy');
+    Route::get('user/upload_user', [UserController::class, 'view_user_upload'])->name('users.upload.view')->middleware('auth');
+    Route::post('user/bluk_data_upload', [UserController::class, 'userUpload'])->name('user.blukUpload');
+    Route::get('/user_export', [UserController::class, 'export'])->name('users.export');
+});
 Route::post('user/assign_data', [UserController::class, 'assignDataToUsers'])->name('assignToUsers.data');
 // Routes for Users ends
 
@@ -123,7 +135,6 @@ Route::prefix('activities')->group(function () {
                 });
             });
         });
-
         //khushboo 13-05-2025
         Route::get('export_activity', 'exportActivityData')->name('activities.export');
         //khushboo 13-05-2025
@@ -178,7 +189,6 @@ Route::prefix('templatenames')->group(function () {
 });
 
 
-
 Route::get('/', function () {
     return view('dashboard');
 })->middleware('auth');
@@ -196,7 +206,7 @@ Route::prefix('download_excel_format')->group(function () {
 // Routes to download the excel formats ends
 
 Auth::routes([
-     'login' => true,
+    'login' => true,
     'register' => false,
 ]);
 
@@ -205,40 +215,40 @@ Route::get('/home', [App\Http\Controllers\HomeController::class, 'index'])->name
 Route::get('/dashboard', [App\Http\Controllers\HomeController::class, 'index'])->name('dashboard');
 
 // route for companytype start
-Route::prefix('company_type')->group(function () {
-    Route::controller(CompanyTypeController::class)->group(function () {
-        Route::get('/', 'index')->name('company_type.list');
-        Route::get('/create', 'create')->name('company_type.create');
-        Route::post('/store', 'store')->name('company_type.store');
-        Route::get('/edit/{id}', 'edit')->name('company_type.edit');
-        Route::put('/update/{id}', 'update')->name('company_type.update');
-        Route::post('/destroy', 'destroy')->name('company_type.destroy');
+Route::middleware('permission:Company Types')->group(function () {
+    Route::prefix('company_type')->group(function () {
+        Route::controller(CompanyTypeController::class)->group(function () {
+            Route::get('/', 'index')->name('company_type.list');
+            Route::get('/create', 'create')->name('company_type.create');
+            Route::post('/store', 'store')->name('company_type.store');
+            Route::get('/edit/{id}', 'edit')->name('company_type.edit');
+            Route::put('/update/{id}', 'update')->name('company_type.update');
+            Route::post('/destroy', 'destroy')->name('company_type.destroy');
+        });
     });
 });
+
 // route for companytype end
 
-
 // route for company start
+
 Route::prefix('company')->group(function () {
     Route::controller(CompanyController::class)->group(function () {
-        Route::get('/', 'index')->name('companies.list');
-        Route::get('/create', 'create')->name('company.create');
-        Route::post('/store', 'store')->name('company.store');
-        Route::get('/edit/{id}', 'edit')->name('company.edit');
-
-        Route::put('/update/{id}', 'update')->name('company.update');
-        Route::post('/destroy', 'destroy')->name('company.destroy');
-
+        Route::middleware('permission:Companies')->group(function () {
+            Route::get('/', 'index')->name('companies.list');
+            Route::get('/create', 'create')->name('company.create');
+            Route::post('/store', 'store')->name('company.store');
+            Route::get('/edit/{id}', 'edit')->name('company.edit');
+            Route::put('/update/{id}', 'update')->name('company.update');
+            Route::post('/destroy', 'destroy')->name('company.destroy');
+        });
         //khushboo 17-04-25
         Route::get('/company_verification', 'companyVerificationPage')->name('company.verifyPage');
         Route::get('/pdf_report', 'pdfReportPage')->name('company.pdfReport');
         Route::post('/get_zone_data', 'getCompanyZoneData')->name('company.zoneData');
-
         Route::post('/get_unit_data', 'getCompanyUnitData')->name('company.unitData');
         Route::post('/get_project_data', 'getCompanyProjectData')->name('company.projectData');
-
         Route::post('/get_project_master_questions', 'getProjectTemplateActivityQuestion')->name('company.getQuestionData');
-
         Route::get('/test_page/{data}', 'testPage')->name('company.testPage');
         Route::post('/template_header_view_data', 'TemplateHeaderViewData')->name('company.getTemplateHeaderViewData');
         Route::get("/get_distributor_child_outlets/{id}/{templateid}", 'getDistributorOutletData')->name('getDistributorOutletData');
@@ -248,6 +258,8 @@ Route::prefix('company')->group(function () {
 
     });
 });
+
+
 // route for company ends
 Route::post('/get_project_master_activity', [CompanyController::class, 'getProjectTemplateActivity'])->name('company.projectActivity');
 Route::post('/get_distributor_data', [CompanyController::class, 'getDistributorData'])->name('company.getDistributors');
@@ -390,6 +402,7 @@ Route::prefix('remark')->group(function () {
         Route::get('/edit/{id}', 'edit')->name('remark.edit');
         Route::post('/destroy', 'destroy')->name('remark.destroy');
         Route::PUT('/update/{id}', 'update')->name('remark.update');
+        Route::get('/export', 'export')->name('remark.export');
     });
 });
 
@@ -402,9 +415,6 @@ Route::prefix('report')->group(function () {
         Route::post('/project_report', 'project_distributor_report')->name('project-distributor-report');
         Route::post('/download', 'get_report')->name('get_report.download');
         Route::get('get_report_mail/{project}/{template}/{activity?}', 'getReportMail')->name('getReportMail');
-        Route::get('/project_report_new', 'project_report_new')->name('project-report-new');
-        Route::post('/project_report_new', 'project_distributor_report_Updated')->name('project-distributor-report-new');
-        Route::post('/project/activity', 'get_project_activity')->name('get_project_activity');
     });
 });
 
@@ -416,12 +426,16 @@ Route::controller(TaskHandlerController::class)->group(function () {
     Route::get('my_project_row_activity/{row_id}/{activity}/{group_info?}', 'row_data_activity')->name('user.project.row_id.activity');
     Route::post('my_project_row_activity_answer', 'row_activity_answers')->name('user.rowId.activity.answers');
     Route::get('my_projects_distributor_outlets_data/{row_id}/{distributor_value}', 'userProjectActivityDistributorOutletData')->name('user.project.distributor.outlets');
+
     //khushboo 16-04-25
     Route::post('close_audit', 'closeAuditData')->name('closeAuditData');
     //khushboo 16-04-25
     Route::post('getTemplateHeadData', 'getTemplateHeadData')->name('getTemplateHeadData');
     Route::post('edit_project_data_template', 'edit_project_data_template')->name('edit_project_data_template');
-
+    Route::get('otp_verification_page/{row_id}/{activity}', 'otp_verification_page')->name('otp_verification_page');
+    Route::post('verify_otp', 'verify_otp')->name('verify_otp');
+    Route::post('resend_otp', 'resend_otp')->name('resend_otp');
+    Route::post('send_otp', 'send_otp')->name('send_otp');
 });
 
 
@@ -433,19 +447,16 @@ Route::controller(TaskHandlerController::class)->group(function () {
 // });
 
 
+// Route::controller(TaskHandlerController::class)->group(function () {
+//     Route::get('my_projects', 'userProjects')->name('user.projects');
+//     Route::get('my_project_distributor_data/{project}/{template?}/{activity?}/{group_info?}', 'userProjectMasterData')->name('user.project_master.data');
+//     Route::get('my_project_outlet_data/{type}/{project}/{template?}/{activity?}/{group_info?}', 'userProjectChildData')->name('user.project_child.data');
+//     Route::get('my_project_activities/{project}/{template?}', 'userProjectActivities')->name('user.project.assigned_activities');
+//     Route::get('my_project_row_activity/{row_id}/{activity}/{group_info?}', 'row_data_activity')->name('user.project.row_id.activity');
+//     Route::post('my_project_row_activity_answer', 'row_activity_answers')->name('user.rowId.activity.answers');
+//     Route::get('my_projects_distributor_outlets_data/{projectTemplate}/{activity}/{distributor_value}/{type}/{group_info?}', 'userProjectActivityDistributorOutletData')->name('user.project.distributor.outlets');
 
-//Route::controller(TaskHandlerController::class)->group(function () {
-//    Route::get('my_projects', 'userProjects')->name('user.projects');
-//    Route::get('my_project_distributor_data/{project}/{template?}/{activity?}/{group_info?}', 'userProjectMasterData')->name('user.project_master.data');
-//    Route::get('my_project_outlet_data/{type}/{project}/{template?}/{activity?}/{group_info?}', 'userProjectChildData')->name('user.project_child.data');
-//    Route::get('my_project_activities/{project}/{template?}', 'userProjectActivities')->name('user.project.assigned_activities');
-//    Route::get('my_project_row_activity/{row_id}/{activity}/{group_info?}', 'row_data_activity')->name('user.project.row_id.activity');
-//    Route::post('my_project_row_activity_answer', 'row_activity_answers')->name('user.rowId.activity.answers');
-//    Route::get('my_projects_distributor_outlets_data/{projectTemplate}/{activity}/{distributor_value}/{type}/{group_info?}', 'userProjectActivityDistributorOutletData')->name('user.project.distributor.outlets');
-//
-//    //khushboo 16-04-25
-//    Route::post('close_audit', 'closeAuditData')->name('closeAuditData');
-//    //khushboo 16-04-25
-//});
-
-
+//     //khushboo 16-04-25
+//     Route::post('close_audit', 'closeAuditData')->name('closeAuditData');
+//     //khushboo 16-04-25
+// });

@@ -60,10 +60,10 @@ class GenerateReportJob implements ShouldQueue
         $additionalHeaders = [];
         $show_auditor = 0;
         if (isset($this->request['auditor_details'])) {
-            $additionalVerifierHeaders = ['Auditor Name', 'Auditor Contact No.', 'Verifier Name', 'Status', 'Remark', 'Verification Date & Time'];
+            $additionalVerifierHeaders = ['Auditor Name', 'Auditor Contact No.', 'Verifier Name', 'Status', 'Remark', 'Verification Date & Time', 'latitude', 'longitude'];
             $show_auditor = 1;
         }else{
-            $additionalVerifierHeaders = ['Verifier Name', 'Status', 'Remark', 'Verification Date & Time'];
+            $additionalVerifierHeaders = ['Verifier Name', 'Status', 'Remark', 'Verification Date & Time', 'latitude', 'longitude'];
         }
 //        $additionalVerifierHeaders = ['Verifier Name', 'Status', 'Remark'];
         $show_user = 0;
@@ -87,6 +87,7 @@ class GenerateReportJob implements ShouldQueue
             $additionalHeaders[] = 'Time';
             $show_time = 1;
         }
+
 
         // this is to get the project and template head  to get the data of the project and template selected
         $projectTemplate = ProjectTemplate::where('project_id', $this->validated['project_id'])->where('template_name_id', $this->validated['template_name_id'])->first();
@@ -209,6 +210,7 @@ class GenerateReportJob implements ShouldQueue
             //khushboo 22-05-25
             $jsondata = json_decode($projectTemplate_data->template_data_json, true);
             foreach ($jsondata as $key => $value) {
+
                 if ($projectTemplate->is_master == 0 && !empty($checkOutletAssign) && $checkOutletAssign->is_outlet_assigned == 1) {
 
                     if (!empty($this->request->activity_id)) {
@@ -249,7 +251,9 @@ class GenerateReportJob implements ShouldQueue
 
                 }
                 else {
-                    if (in_array($value, $auditorAssignDataValues)) {
+
+                    // if (in_array($value, $auditorAssignDataValues)) {
+                        //   Log::info('key -'. json_encode($this->request->activity_id));
                         // dd($this->request->activity_id);
                         if (!empty($this->request->activity_id)) {
                             foreach ($this->request->activity_id as $activity) {
@@ -258,14 +262,15 @@ class GenerateReportJob implements ShouldQueue
 
                                 if (!isset($pdfFilePaths[$key])) {
                                     $pdfFile = $this->viewTemplateFile($projectTemplate_data->id, $value, $activity);
-
+                                    // Log::info('single -'. $pdfFile);
                                     if (isset($pdfFile->original['file_url'])) {
                                         $pdfFilePaths[$key] = $pdfFile->original['file_url'];
                                     }
                                 }
 
                             }
-                        } else if ($this->request->activity_group_name_id) {
+                        }
+                        else if ($this->request->activity_group_name_id) {
                             $activities = [];
                             $activityGroupId = $this->request->activity_group_name_id;
                             $group_activities = DB::table('activity_group_pivots')->where('activity_group_id', $this->request->activity_group_name_id)->get();
@@ -278,7 +283,7 @@ class GenerateReportJob implements ShouldQueue
 
                                 if (!isset($pdfFilePaths[$key])) {
                                     $pdfFile = $this->viewTemplateFile($projectTemplate_data->id, $value, $activity);
-
+                                    // Log::info('single -'. $pdfFile);
                                     if (isset($pdfFile->original['file_url'])) {
                                         $pdfFilePaths[$key] = $pdfFile->original['file_url'];
                                     }
@@ -286,7 +291,7 @@ class GenerateReportJob implements ShouldQueue
                             }
                         }
 
-                    }
+                    // }
 
                 }
             }
@@ -371,6 +376,11 @@ class GenerateReportJob implements ShouldQueue
                                 } else {
                                     $rowData[] = '';
                                 }
+
+                                // Latitude & Longitude from answer data
+                                $rowData[] = $user_answer->latitude ?? '';
+                                $rowData[] = $user_answer->longitude ?? '';
+
                                 $rowData[] = $user_answer->remark;
                                 if ($show_user) {
                                     if ($user_answer->getUser) {
@@ -447,6 +457,7 @@ class GenerateReportJob implements ShouldQueue
         //khushboo 23-05-25
 
 //        dd($pdfFilePaths);
+        // Log::info('pdf file path -'. json_encode($pdfFilePaths));
         $localPaths = [];
         if (count($pdfFilePaths) > 0) {
             foreach ($pdfFilePaths as $url) {
@@ -454,7 +465,7 @@ class GenerateReportJob implements ShouldQueue
                 $parsedUrl = parse_url($url, PHP_URL_PATH);
 
                 // Remove the base path if necessary
-                $relativePath = str_replace('/marketaudit_tnbttech/public/', '', $parsedUrl);
+                $relativePath = str_replace('/marketaudit/public/', '', $parsedUrl);
 
                 // Construct the full local path
                 $fullPath = public_path($relativePath);
@@ -489,7 +500,7 @@ class GenerateReportJob implements ShouldQueue
         // Mail::to($this->user->email)->send(new SendReportMail($filePath, $zipFilePath));
 
         $attachment = [$fullFilePath, $zipFilePath];
-        Log::info('attachment: ' . json_encode($attachment));
+        Log::info('attachment: ' . json_encode($attachment). $fullFilePath.'--'. $zipFilePath);
 
         if (file_exists(public_path('temp/' . $zipFileName))) {
             chmod(public_path('temp/' . $zipFileName), 0777);
@@ -531,17 +542,17 @@ class GenerateReportJob implements ShouldQueue
         //khushboo 22-05-25
         $folderPath = public_path('temp');
 
-        if (is_dir($folderPath)) {
-            $files = glob($folderPath . '/*'); // Get all files in the directory
+        // if (is_dir($folderPath)) {
+        //     $files = glob($folderPath . '/*'); // Get all files in the directory
 
-            if ($files) {
-                foreach ($files as $file) {
-                    if (is_file($file)) {
-                        unlink($file); // Delete the file
-                    }
-                }
-            }
-        }
+        //     if ($files) {
+        //         foreach ($files as $file) {
+        //             if (is_file($file)) {
+        //                 unlink($file); // Delete the file
+        //             }
+        //         }
+        //     }
+        // }
 
         // After sending the email, delete the file from 'public/testing'
         if (file_exists($fullFilePath)) {
@@ -556,7 +567,8 @@ class GenerateReportJob implements ShouldQueue
     public function viewTemplateFile($r, $v, $a, $g = null)
     {
 
-        $related_values = DB::table('project_template_name_values')->where('id', $r)->get();
+        $related_values = DB::table('project_template_name_values_new')->where('id', $r)->get();
+        // Log::info('data -'. json_encode($related_values));
 //        dd($related_values);
 
         $projectTemplateData = ProjectTemplate::with(['getMainHeader', 'getSubHeader'])->where('id', $related_values[0]->project_template_id)->first();
@@ -583,6 +595,11 @@ class GenerateReportJob implements ShouldQueue
             $auditTime = $user_responses[0]->created_at;
             $auditTime = Carbon::parse($auditTime)->format('H:i A');
 
+            $templateJson = json_decode($related_values[0]->template_data_json, true);
+
+            $mainHeaderValue = $templateJson[$projectTemplateData->main_header] ?? null;
+            $subHeaderValue  = $templateJson[$projectTemplateData->sub_header] ?? null;
+
             $pdf = Pdf::loadView('masters.pdf_templates.verify_template', [
                 'projectTemplateData' => $projectTemplateData,
                 'related_questions' => $related_questions,
@@ -590,7 +607,9 @@ class GenerateReportJob implements ShouldQueue
                 'auditDate' => $auditDate,
                 'auditTime' => $auditTime,
                 'user_responses' => $user_responses,
-                'value' => $v
+                'value' => $v,
+                'main_header' => $mainHeaderValue,
+                'sub_header' => $subHeaderValue
             ]);
 
 

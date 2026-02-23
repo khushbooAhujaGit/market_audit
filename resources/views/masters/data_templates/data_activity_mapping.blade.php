@@ -14,13 +14,13 @@
                                     <div class="col-12">
                                         <div class="tab-content dark-field" id="horizontal-wizard-tabContent">
                                             <div class="tab-pane fade show active" id="wizard-info" role="tabpanel"
-                                                 aria-labelledby="wizard-info-tab">
+                                                aria-labelledby="wizard-info-tab">
                                                 <div class="row">
                                                     <div class="col-xl-6 col-sm-6">
                                                         <label class="form-label" for="project_id">Select
                                                             Project</label>
                                                         <select class="form-select" id="project_id" name="project_id"
-                                                                required="">
+                                                            required="">
                                                             <option selected="" disabled="" value="">Choose...
                                                             </option>
                                                             @foreach ($projects as $project)
@@ -29,23 +29,23 @@
                                                             @endforeach
                                                         </select>
                                                         @error('project_id')
-                                                        <p class="text-red-500 text-xs mt-1">
-                                                            {{ $message }}
-                                                        </p>
+                                                            <p class="text-red-500 text-xs mt-1">
+                                                                {{ $message }}
+                                                            </p>
                                                         @enderror
                                                     </div>
                                                     <div class="col-xl-4 col-sm-4 d-none" id="master_temp_con">
                                                         <label class="form-label" for="master_template_id">Master
                                                             Template</label>
                                                         <select class="form-select" id="master_template_id"
-                                                                name="master_template_id" required="">
+                                                            name="master_template_id" required="">
                                                             <option selected="" disabled="" value="">Choose...
                                                             </option>
                                                         </select>
                                                         @error('master_template_id')
-                                                        <p class="text-red-500 text-xs mt-1">
-                                                            {{ $message }}
-                                                        </p>
+                                                            <p class="text-red-500 text-xs mt-1">
+                                                                {{ $message }}
+                                                            </p>
                                                         @enderror
                                                     </div>
                                                     <div class="col-xl-2 col-sm-2 mt-4 d-none" id="master_temp_btn_con">
@@ -53,9 +53,9 @@
                                                             Master
                                                         </button>
                                                         @error('make_pt_master')
-                                                        <p class="text-red-500 text-xs mt-1">
-                                                            {{ $message }}
-                                                        </p>
+                                                            <p class="text-red-500 text-xs mt-1">
+                                                                {{ $message }}
+                                                            </p>
                                                         @enderror
                                                     </div>
                                                 </div>
@@ -71,19 +71,19 @@
 
                                 <div class="modal_con">
                                     <div class="modal fade" id="errorMessage_modal" tabindex="-1" role="dialog"
-                                         aria-labelledby="errorMessage_modal" aria-hidden="true">
+                                        aria-labelledby="errorMessage_modal" aria-hidden="true">
                                         <div class="modal-dialog modal-dialog-centered" role="document">
                                             <div class="modal-content">
                                                 <div class="modal-body">
                                                     <div class="modal-toggle-wrapper">
                                                         <ul class="modal-img">
                                                             <li><img src="{{ url('assets/images/gif/danger.gif') }}"
-                                                                     alt="error"></li>
+                                                                    alt="error"></li>
                                                         </ul>
                                                         <h4 class="text-center pb-2">Ohh! Something went wrong!</h4>
                                                         <p class="text-center" id="error_message"></p>
                                                         <button class="btn btn-secondary d-flex m-auto" type="button"
-                                                                data-bs-dismiss="modal">Close
+                                                            data-bs-dismiss="modal">Close
                                                         </button>
                                                     </div>
                                                 </div>
@@ -104,14 +104,14 @@
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
     <script>
         $('#project_id').select2();
-        $(document).ready(function () {
+        $(document).ready(function() {
             // Add event listeners to the newly added select elements
-            $(".activity-select").change(function () {
+            $(".activity-select").change(function() {
                 const groupActivitySelect = $(this).closest('.row').find('.group-activity-select');
                 groupActivitySelect.val('').prop('selected', false); // Unselect the group activity
             });
 
-            $(".group-activity-select").change(function () {
+            $(".group-activity-select").change(function() {
                 const activitySelect = $(this).closest('.row').find('.activity-select');
                 activitySelect.val('').prop('selected', false); // Unselect the activity
             });
@@ -122,7 +122,6 @@
                 const masterTemplate = masterTemp;
                 const masterHeads = masterTemplate.get_template.get_template_heads;
                 projectTemplates.forEach(template => {
-                    // console.log(template);
                     const actType = template.activityType;
                     const preVal = template.activity_group_name_id_or_activity_id;
                     const is_master_row = template.is_master ? "bg-secondary" : "";
@@ -140,10 +139,10 @@
                         <select class="form-select activity-select" id="activity_id${template.id}" name="activity_id" required>
                             <option selected disabled value="">Choose...</option>
                             @foreach ($activities as $activity)
-                    <option value="{{ $activity->id }}">{{ $activity->activity_name }}</option>
+                            <option value="{{ $activity->id }}">{{ $activity->activity_name }}</option>
                             @endforeach
-                    </select>
-@error('project_id')
+                        </select>
+                    @error('project_id')
                     <p class="text-red-500 text-xs mt-1">
                     {{ $message }}
                     </p>
@@ -154,10 +153,10 @@
                         <select class="form-select group-activity-select" id="group_project_id_${template.id}" name="group_project_id" required>
                             <option selected disabled value="">Choose...</option>
                             @foreach ($group_activities as $group_activity)
-                    <option value="{{ $group_activity->id }}">{{ $group_activity->activity_group_name }}</option>
+                            <option value="{{ $group_activity->id }}">{{ $group_activity->activity_group_name }}</option>
                             @endforeach
-                    </select>
-@error('group_project_id')
+                        </select>
+                    @error('group_project_id')
                     <p class="text-red-500 text-xs mt-1">
                     {{ $message }}
                     </p>
@@ -169,81 +168,86 @@
                         <select class="form-select otp-Activity-select otp-activity-select${template.id}" id="activity_otp_id${template.id}" name="activity_otp_id[]" required multiple >
                             <option selected disabled value="">Choose...</option>
                             @foreach ($activities as $activity)
-                    <option value="{{ $activity->id }}">{{ $activity->activity_name }}</option>
+                            <option value="{{ $activity->id }}">{{ $activity->activity_name }}</option>
                             @endforeach
-                    </select>
-                        @error('activity_otp_id')
+                        </select>
+                    @error('activity_otp_id')
                     <p class="text-red-500 text-xs mt-1">
-{{ $message }}
+                    {{ $message }}
                     </p>
-@enderror
+                    @enderror
                     </div>
-{{--  khushboo 05-04-2025 --}}
+                    {{--  khushboo 05-04-2025 --}}
                     <div class="col-md-4 col-sm-4">
-                        <label class="form-label" for="master_template_head${template.id}">Master Template Head<span class="txt-danger"></span></label>
+                            <label class="form-label" for="master_template_head${template.id}">Master Template Head<span class="txt-danger"></span></label>
                                 <select class="form-select master_template_head" id="master_template_head${template.id}" name="master_template_head" required>
                             <option selected disabled value="">Choose...</option>
-                        </select>
-                        </div>
-                        <div class="col-md-4 col-sm-4">
+                    </select>
+                    </div>
+                    <div class="col-md-4 col-sm-4">
                             <label class="form-label" for="own_template_head${template.id}">Own Template Head<span class="txt-danger"></span></label>
                                 <select class="form-select own_template_head" id="own_template_head${template.id}" name="own_template_head" required>
                                     <option selected disabled value="">Choose...</option>
                                 </select>
-                        </div>
-                        <div class="col-md-4 col-sm-4">
+                    </div>
+                    <div class="col-md-4 col-sm-4">
                             <label class="form-label" for="main_header${template.id}">Main Header<span class="txt-danger"></span></label>
-                            <select class="form-select main_header" id="main_header${template.id}" name="main_header" required>
-                                <option selected disabled value="">Choose...</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4 col-sm-4">
+                                <select class="form-select main_header" id="main_header${template.id}" name="main_header" required>
+                                    <option selected disabled value="">Choose...</option>
+                                </select>
+                    </div>
+                    <div class="col-md-4 col-sm-4">
                             <label class="form-label" for="sub_header${template.id}">Sub Header<span class="txt-danger"></span></label>
-                            <select class="form-select sub_header" id="sub_header${template.id}" name="sub_header" required>
-                                <option selected disabled value="">Choose...</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4 col-sm-4 ${template.is_master == 1 && isNonComplianceApplicable ? '' : 'd-none'} ">
+                                <select class="form-select sub_header" id="sub_header${template.id}" name="sub_header" required>
+                                    <option selected disabled value="">Choose...</option>
+                                </select>
+                    </div>
+                    <div class="col-md-4 col-sm-4 ${template.is_master == 1 && isNonComplianceApplicable ? '' : 'd-none'} ">
                             <label class="form-label" for="compliance_column${template.id}">Compliance Column<span class="txt-danger"></span></label>
-                            <select class="form-select compliance_column" id="compliance_column${template.id}" name="compliance_column" required>
-                                <option selected disabled value="">Choose...</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2 col-sm-2">
+                                <select class="form-select compliance_column" id="compliance_column${template.id}" name="compliance_column" required>
+                                    <option selected disabled value="">Choose...</option>
+                                </select>
+                    </div>
+                      <div class="col-md-2 col-sm-2">
                             <label class="form-label" for="completion_type_${template.id}">Completion Type<span class="txt-danger"></span></label>
-                            <select class="form-select complete_type_select" id="completion_type_${template.id}" name="completion_type" required>
-                                <option selected disabled value="">Choose...</option>
-                                <option value="Percentage">Percentage</option>
-                                <option value="Number">Number</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2 col-sm-2">
+                                <select class="form-select complete_type_select" id="completion_type_${template.id}" name="completion_type" required>
+                            <option selected disabled value="">Choose...</option>
+                            <option value="Percentage">Percentage</option>
+                            <option value="Number">Number</option>
+                    </select>
+                    </div>
+                      <div class="col-md-2 col-sm-2">
                                                     <label class="form-label" for="min_completion_${template.id}">Minimum&nbsp;Completion<span class="txt-danger"></span></label>
                                                     <input class="form-control min_completion" id="min_completion_${template.id}" value="" name="min_completion" type="number" placeholder="Minimum Completion" required="">
-                        </div>
-                        <div class="col-xl-3 col-sm-3 ">
+
+                    </div>
+                     <div class="col-xl-3 col-sm-3 ">
                                                     <div class="form-check checkbox checkbox-primary mb-0">
                                                         <input class="form-check-input data_add_on" name="data_add_on" id="data_add_on_${template.id}" type="checkbox">
                                                         <label class="form-check-label" for="data_add_on_${template.id}">Data Add On</label>
-                                                    </div>
-                        </div>
-                        <div class="col-xl-3 col-sm-3 ">
+                                                        </div>
+                                                </div>
+                    <div class="col-xl-3 col-sm-3 ">
                                                     <div class="form-check checkbox checkbox-primary mb-0">
-                                                        <input class="form-check-input with_data" name="with_data" id="with_data_${template.id}" type="checkbox" checked >
+                                                        <input class="form-check-input with_data" name="with_data" id="with_data_${template.id}" type="checkbox">
                                                         <label class="form-check-label" for="with_data_${template.id}">With Data</label>
-                                                    </div>
-                        </div>
-                        <div class="col-xl-3 col-sm-3 ">
+                                                        </div>
+                    </div>
+                    <div class="col-xl-3 col-sm-3 ">
                                                     <div class="form-check checkbox checkbox-primary mb-0">
                                                         <input class="form-check-input can_edit_data" name="can_edit_data" id="can_edit_data_${template.id}" type="checkbox" >
                                                         <label class="form-check-label" for="can_edit_data_${template.id}">Can Edit Data</label>
                                                     </div>
-                        </div>
-                    </div> <hr>`;
+                    </div>
+
+
+</div> <hr>`;
                     $(".mapping_con").append(templateHtml);
+
 
                     //khushboo 05-04-2025
                     $(`.otp-activity-select${template.id}`).select2();
+
                     //khushboo 05-04-2025
 
                     let min_completion_check = $(`#min_completion_${template.id}`);
@@ -299,7 +303,7 @@
                         'selected',
                         true));
                     //khushboo 02-05-2025
-                    $.each(templateHeads, function (index, head) {
+                    $.each(templateHeads, function(index, head) {
                         const cleanValue = head.template_head_name.trim().replace(/\s+/g, '');
                         if ($.inArray(cleanValue, render_not) === -1) {
                             if (template.own_reference_head_id == head.id) {
@@ -327,11 +331,11 @@
                             if (isNonComplianceApplicable) {
                                 if (template.sub_header == head.id) {
                                     complianceColumnSelect.append($("<option>").text(head
-                                        .template_head_name)
+                                            .template_head_name)
                                         .val(head.id).prop('selected', true))
                                 } else {
                                     complianceColumnSelect.append($("<option>").text(head
-                                        .template_head_name)
+                                            .template_head_name)
                                         .val(head.id))
                                 }
 
@@ -342,7 +346,7 @@
                     masterHeadSelect.empty();
                     masterHeadSelect.append($("<option>").text('Select Master Head').val('').prop(
                         'selected', true));
-                    $.each(masterHeads, function (index, masterHead) {
+                    $.each(masterHeads, function(index, masterHead) {
                         if ($.inArray(masterHead.template_head_name, render_not) === -1) {
                             if (template.master_head_id == masterHead.id) {
                                 masterHeadSelect.append($("<option>").text(masterHead
@@ -362,11 +366,11 @@
                     $(`#min_completion_${template.id}`).val(template.min_completion);
                 });
                 // Add event listeners to the newly added select elements
-                $(".activity-select").change(function () {
+                $(".activity-select").change(function() {
                     const groupActivitySelect = $(this).closest('.row').find('.group-activity-select');
                     groupActivitySelect.val('').prop('selected', false); // Unselect the group activity
                 });
-                $(".group-activity-select").change(function () {
+                $(".group-activity-select").change(function() {
                     const activitySelect = $(this).closest('.row').find('.activity-select');
                     activitySelect.val('').prop('selected', false); // Unselect the activity
                 });
@@ -376,13 +380,12 @@
             function render_templates_master(projectTemplates) {
                 const master_template_select = $("#master_template_id");
                 master_template_select.empty();
-                $.each(projectTemplates, function (index, value) {
+                $.each(projectTemplates, function(index, value) {
                     master_template_select.append($('<option>').text(value.get_template.template_name).val(
                         value.get_template.id))
                 })
             }
-
-            $("#project_id").change(function (e) {
+            $("#project_id").change(function(e) {
                 const selectedProjectId = $(this).val();
                 if (selectedProjectId) {
                     $.ajax({
@@ -392,7 +395,7 @@
                             "_token": "{{ csrf_token() }}", // Add the CSRF token to the data
                             "id": selectedProjectId
                         },
-                        success: function (response) {
+                        success: function(response) {
                             // console.log(response);
                             if (response.message == "Success") {
 
@@ -432,11 +435,11 @@
                     })
                 }
             })
-            $("#map_btn").click(function () {
+            $("#map_btn").click(function() {
                 const p_id = $("#project_id").val();
                 if (p_id) {
                     const projectTemplateActivityMapper = [];
-                    $(".mapping_con .row").each(function () {
+                    $(".mapping_con .row").each(function() {
                         const row = $(this);
                         const templateNameId = row.find(".template_name-select").val();
                         const completionType = row.find(".complete_type_select").val() ? row.find(
@@ -495,8 +498,7 @@
                             "project_id": p_id,
                             "mapper_data": projectTemplateActivityMapper
                         },
-                        success: function (response) {
-                            console.log(response);
+                        success: function(response) {
                             if (response == "success") {
                                 Swal.fire({
                                     title: 'Success!',
@@ -516,7 +518,7 @@
                     alert('Please select project');
                 }
             })
-            $("#make_ptm").click(function () {
+            $("#make_ptm").click(function() {
                 const p_id = $("#project_id").val();
                 const mt = $("#master_template_id").val();
                 if (p_id) {
@@ -529,7 +531,7 @@
                                 "p_id": p_id,
                                 "mt_id": mt
                             },
-                            success: function (response) {
+                            success: function(response) {
                                 if (response.message == "Success") {
                                     Swal.fire({
                                         position: "top-center",
@@ -572,7 +574,7 @@
                                     //khushboo 05-04-2025
                                 }
                             },
-                            error: function (xhr, status, error) {
+                            error: function(xhr, status, error) {
                                 console.error(error);
                             }
 

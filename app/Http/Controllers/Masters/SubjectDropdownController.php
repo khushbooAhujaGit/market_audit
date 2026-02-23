@@ -53,8 +53,9 @@ class SubjectDropdownController extends Controller
         $questionInfo = Question::where('id', $request->question_id)->first();
         $questionSubjectInfo = SubjectQuestion::with('getOptions')->where('question_id', $questionInfo->id)
             ->where('subject', $request->subject)->first();
-
-        return response()->json(['message' => "success", "subjectOption" => $questionSubjectInfo]);
+        $otherSubjectiveIds = SubjectQuestion::with('getOptions')->where('question_id', $questionInfo->id)
+            ->whereNot('subject', $request->subject)->pluck('id')->toArray();
+        return response()->json(['message' => "success", "subjectOption" => $questionSubjectInfo, "otherSubjectiveIds" => $otherSubjectiveIds]);
     }
 
     public function  get_subject_dropdowns($id)

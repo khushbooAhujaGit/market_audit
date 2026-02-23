@@ -100,7 +100,7 @@
                                 </tbody>
                             </table>
                             <div>
-
+                              
                             </div>
                         </div>
                     </div>
@@ -145,7 +145,7 @@
             $('.loader-backdrop').addClass('d-none');
             // Initialize DataTable
             const projects_table = $("#projects_table").DataTable({
-                // paging: false
+                paging: true
             });
 
             @if (session()->has('message'))

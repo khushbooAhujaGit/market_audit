@@ -18,7 +18,7 @@ class TemplateNameController extends Controller
     }
     public function index()
     {
-        $template_names = TemplateName::paginate(10);
+        $template_names = TemplateName::all();
         return view('masters.data_templates.index', compact('template_names'));
     }
 

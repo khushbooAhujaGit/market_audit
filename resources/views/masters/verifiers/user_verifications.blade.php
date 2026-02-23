@@ -14,20 +14,19 @@
                         <div class="table-responsive theme-scrollbar">
                             <table class="display" id="projects_table">
                                 <thead>
-                                <tr>
-                                    <th>Sno</th>
-                                    <th>Project Name</th>
-                                    <th>Template Name</th>
-                                    <th>Activities</th>
-                                    <th class="d-none">Action</th>
-                                </tr>
+                                    <tr>
+                                        <th>Sno</th>
+                                        <th>Project Name </th>
+                                        <th>Template Name</th>
+                                        <th>Activities</th>
+                                        <th class="d-none" >Action</th>
+                                    </tr>
                                 </thead>
                                 <tbody>
-                                @php $index=1; @endphp
-                                @foreach ($my_verifications as $key =>  $my_verification)
-                                    @if(!empty($my_verification->projectTemplateInfo->getProject))
+                                    @foreach ($my_verifications as $my_verification)
+                                        @if(!empty($my_verification->projectTemplateInfo->getProject))
                                         <tr>
-                                            <td>{{ $index++ }}</td>
+                                            <td>{{ $loop->iteration }}</td>
                                             <td>{{ isset($my_verification->projectTemplateInfo->getTemplate) ? $my_verification->projectTemplateInfo->getProject->project_name : '' }}
                                             </td>
                                             <td>{{ isset($my_verification->projectTemplateInfo->getTemplate) ? $my_verification->projectTemplateInfo->getTemplate->template_name : '' }}
@@ -40,6 +39,7 @@
                                                         </li>
                                                     @else
                                                         @if (isset($my_verification->projectTemplateInfo))
+                                                        
                                                             @if(!empty($my_verification->projectTemplateInfo->activityGroup) && !empty($my_verification->projectTemplateInfo->activityGroup->get_group_activities))
                                                                 @foreach ($my_verification->projectTemplateInfo->activityGroup->get_group_activities as $group_activity)
                                                                     <li><a
@@ -51,19 +51,19 @@
                                                     @endif
                                                 </ul>
                                             </td>
-                                            <td class="d-none">
+                                            <td class="d-none" >
                                                 <ul class="action">
                                                     {{--                                                <li class="edit"> <a href="{{route('project.edit', ["id"=>$project->id])}}"><i class="icon-pencil-alt"></i></a></li> --}}
                                                     {{--                                                <li class="delete" data-id="{{$project->id}}"><i class="icon-trash"></i></li> --}}
                                                 </ul>
                                             </td>
                                         </tr>
-                                    @endif
-                                @endforeach
+                                        @endif
+                                    @endforeach
                                 </tbody>
                             </table>
                             <div>
-
+                                
                             </div>
                         </div>
                     </div>
@@ -77,22 +77,22 @@
 
 @section('scripts')
     <script>
-        $(document).ready(function () {
+        $(document).ready(function() {
             // Initialize DataTable
             const projects_table = $("#projects_table").DataTable({
                 paging: true
             });
 
             @if (session()->has('message'))
-            Swal.fire({
-                position: "top-center",
-                icon: "success",
-                title: "{{ session('message') }}",
-                showConfirmButton: false,
-                timer: 1500
-            });
+                Swal.fire({
+                    position: "top-center",
+                    icon: "success",
+                    title: "{{ session('message') }}",
+                    showConfirmButton: false,
+                    timer: 1500
+                });
             @endif
-            $("#projects_table").on("click", ".delete", function (event) {
+            $("#projects_table").on("click", ".delete", function(event) {
                 const project_id = $(this).data('id');
                 const tar_row = $(this).closest('tr');
                 Swal.fire({

@@ -7,6 +7,9 @@
                 <div class="card">
                     <div class="card-header">
                         @can('Add User')
+                            <a href="{{route('users.export')}}">
+                                <button class="btn btn-primary ms-2 float-end">Export</button>
+                            </a>
                             <h4>Users <a href="{{ route('users.create') }}">
                                     <button class="btn btn-primary float-end">Add
                                         User

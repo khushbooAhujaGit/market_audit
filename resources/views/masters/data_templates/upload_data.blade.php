@@ -141,7 +141,7 @@
 
                                                     <div class="col-12 text-end">
                                                         <button id="uploadBtn" name="upload_data"
-                                                                class="btn btn-primary">Upload Data
+                                                                class="btn btn-primary" >Upload Data
                                                         </button>
                                                         <button id="uploadDataJob" name="upload_with_job"
                                                                 class="btn btn-primary">Upload Data With Jobs

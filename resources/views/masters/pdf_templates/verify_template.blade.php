@@ -136,7 +136,11 @@
 <body>
 
 <div class="header">
-    {{ $value }}
+    @if(isset($main_header) && !empty($main_header) && isset($sub_header) && !empty($sub_header))
+        {{ $main_header . ' - ' . $sub_header }}
+    @else
+        {{ $value }}
+    @endif
 </div>
 
 <div class="section-title">Audit Details</div>

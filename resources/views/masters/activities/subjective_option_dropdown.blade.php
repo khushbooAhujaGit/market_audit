@@ -90,10 +90,10 @@
 
                                                         </form>
                                                         <div class="d-flex justify-content-between mt-4">
-                                                            <button class="btn btn-secondary d-flex m-auto"
+                                                            <button class="btn btn-primary d-flex m-auto"
                                                                     type="button" data-bs-dismiss="modal">Close
                                                             </button>
-                                                            <button class="btn btn-secondary d-flex m-auto"
+                                                            <button class="btn btn-primary d-flex m-auto"
                                                                     id="update_option_btn" type="button"
                                                                     data-bs-dismiss="modal">Update
                                                             </button>
@@ -115,7 +115,7 @@
                                                         </ul>
                                                         <h4 class="text-center pb-2">Ohh! Something went wrong!</h4>
                                                         <p class="text-center" id="error_message"></p>
-                                                        <button class="btn btn-secondary d-flex m-auto" type="button"
+                                                        <button class="btn btn-primary d-flex m-auto" type="button"
                                                                 data-bs-dismiss="modal">Close
                                                         </button>
                                                     </div>

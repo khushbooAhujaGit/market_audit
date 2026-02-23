@@ -43,29 +43,35 @@
     <div class="row">
 
         <div class="col-xl-12 p-0">
-            <div class="login-card login-dark" style="background-image: url("")">
+            <div class="login-card login-dark" style="background-image: url('');" >
             <div>
-                {{--                    <div class="text-center"><a class="logo text-start" href="index.html"><img--}}
-                {{--                                class="img-fluid for-light text-center d-flex justify-content-center"--}}
-                {{--                                style="width: 400px;height:100px"--}}
-                {{--                                src="{{url('assets/images/logo/'.$logo_header)}}"--}}
-                {{--                                alt="looginpage"><img--}}
-                {{--                                class="img-fluid for-dark"--}}
-                {{--                                src="{{url('assets/images/logo/logo_dark.png')}}" alt="looginpage"></a></div>--}}
+                <div class="text-center"><a class="logo text-start" href="">
+                        <img
+                            class="img-fluid for-light text-center d-flex justify-content-center"
+                            style="width: 400px;height:120px !important;"
+                            src="{{url('assets/images/logo/tnbttech.png')}}"
+                            alt="looginpage">
+                        <img
+                            class="img-fluid for-dark"
+                            src="{{url('assets/images/logo/tnbttech.png')}}" alt="looginpage">
+                    </a>
+                </div>
                 <div class="login-main">
                     <form method="POST" class="theme-form" action="{{ route('custom_login') }}">
                         @csrf
                         <h4 class="text-center">Sign in to account</h4>
                         <p class="text-center">Enter your mobile number & password to login</p>
                         <div class="form-group">
-                            <label for="mobile" class="col-md-4 col-form-label text-md-end">{{ __('Mobile Number') }}</label>
-                                <input id="mobile" type="number" class="form-control @error('mobile') is-invalid @enderror" name="mobile" value="{{ old('mobile') }}" required autofocus>
+                            <label for="mobile"
+                                   class="col-md-4 col-form-label text-md-end">{{ __('Mobile Number') }}</label>
+                            <input id="mobile" type="number" class="form-control @error('mobile') is-invalid @enderror"
+                                   name="mobile" value="{{ old('mobile') }}" required autofocus>
 
-                                @error('mobile')
-                                <span class="invalid-feedback" role="alert">
+                            @error('mobile')
+                            <span class="invalid-feedback" role="alert">
                                         <strong>{{ $message }}</strong>
                                     </span>
-                                @enderror
+                            @enderror
                         </div>
                         <div class="form-group">
                             <label for="password"
@@ -133,8 +139,8 @@
 <!-- Theme js-->
 <script src="{{url('assets/js/script.js')}}"></script>
 <script>
-    $(document).ready(function(){
-        $(".toggle_password_btn").click(function(event) {
+    $(document).ready(function () {
+        $(".toggle_password_btn").click(function (event) {
             console.log("hr");
             var passwordInput = $(".password_type");
             var passwordFieldType = passwordInput.attr("type");

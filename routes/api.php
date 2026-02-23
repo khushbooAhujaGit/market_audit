@@ -37,7 +37,7 @@ Route::post('updateStatus', [AuthenticationController::class, 'updateStatus']);
 
 //  Route::middleware(['auth:sanctum'])->group(function () {
 Route::get('getAllProject', [TaskController::class, 'getAllProject']);
-Route::get('getAllActivity/{id}/{user_id}', [TaskController::class, 'getAllActivity']);
+Route::get('getAllActivity/{id}/{user_id}/{status?}', [TaskController::class, 'getAllActivity']);
 Route::get('projectDistributorData', [TaskController::class, 'projectDistributorData']);
 Route::get('projectOutletData', [TaskController::class, 'projectOutletData']);
 Route::get('getAllQuestion', [TaskController::class, 'getAllQuestion']);
@@ -45,6 +45,7 @@ Route::post('answerSubmit', [TaskController::class, 'row_activity_answers']);
 Route::post('questionAnswer', [TaskController::class, 'questionAnswer']);
 Route::get('getSubjectiveDropdown', [TaskController::class, 'getSubjectiveDropdown']);
 //  });
+//Route::get('myProjectsDistributorOutletsData/{projectTemplate}/{activity}/{distributor_value}/{user}/{group_info?} ', [TaskController::class, 'myProjectsDistributorOutletsData']);
 Route::get('myProjectsDistributorOutletsData/{row_id}/{distributor_value}/{user} ', [TaskController::class, 'myProjectsDistributorOutletsData']);
 
 //khushboo 05-04-2025
@@ -56,9 +57,6 @@ Route::post('close_audit_data', [TaskController::class, 'auditCloseSubmit']);
 //khushboo 16-05-2025
 //to add more distributors
 Route::get('getTemplateData/{project}/{template}', [TaskController::class, 'getTemplateHeaders']);
-Route::get('getEditTemplateData/{row_id}', [TaskController::class, 'getEditTemplateHeadersData']);
-Route::get('getOutletTemplatesAvailable/{row_id}/{user_id}', [TaskController::class, 'getOutletTemplatesAvailable']);
 Route::post('storeTemplateData', [TaskController::class, 'storeTemplateHeaderValues']);
-Route::post('editTemplateData', [TaskController::class, 'editTemplateHeaderValues']);
 //khushboo 16-05-2025
 

@@ -6,6 +6,7 @@
             <div class="col-sm-12">
                 <div class="card">
                     <div class="card-header">
+
                         <h4>My Project Data
                             @if($currentUserRole == 'Auditor')
                                 <button id="add_data_btn"
@@ -23,6 +24,7 @@
                                         <div class="d-flex">
                                             <div class="flex-grow-1 ms-3">
                                                 <div class="product-name">
+
                                                     <h6>
                                                         @if (isset($project_data['main_header']))
                                                             {{ $project_data['main_header'] }}
@@ -42,17 +44,31 @@
                                                             {{ $project_data['data_item']['head_value'] }}
                                                         @endif
                                                     </div>
-                                                    @if ($project_data['status'] == 'completed')
+                                                    @if ($project_data['status'] == 'completed' && $project_data['otpVerificationDone'])
+                                                        {{-- Completed + OTP Done --}}
                                                         <div class="text-muted" style="margin-top: 10%;">
-                                                            <span
-                                                                class="btn btn-primary btn-xs"
-                                                                @if ($currentUserRole == 'Company User') onclick="viewQuestionModel('{{ $project_data['data_item']['id'] }}', '{{ $activity->id }}')" @endif>
-                                                                @if ($project_data['status'] == 'pending')
-                                                                    Pending
-                                                                @else
-                                                                    Completed
-                                                                @endif
+                                                            <span class="btn btn-primary btn-xs"
+                                                                  @if ($currentUserRole == 'Company User')
+                                                                      onclick="viewQuestionModel('{{ $project_data['data_item']['id'] }}', '{{ $activity->id }}')"
+                                                                 @endif>
+                                                                Completed
                                                             </span>
+                                                        </div>
+                                                    @elseif($project_data['status'] == 'completed' && !$project_data['otpVerificationDone'])
+                                                        {{-- Completed + OTP Pending --}}
+                                                        <div class="text-muted" style="margin-top: 10%;">
+                                                            <a class="btn btn-primary btn-xs"
+                                                               @if ($currentUserRole == 'Company User')
+                                                                   onclick="viewQuestionModel('{{ $project_data['data_item']['id'] }}', '{{ $activity->id }}')"
+                                                               @else
+                                                                   @if($isParent == 0)
+                                                                       href="{{ route('user.project.assigned_activities', ['row_id' => $project_data['data_item']['id'], 'status' => $isOutletAssigned]) }}"
+                                                               @else
+                                                                   href="{{ route('user.project.assigned_activities', ['row_id' => $project_data['data_item']['row_id'], 'status' => $isOutletAssigned]) }}"
+                                                                @endif
+                                                                @endif>
+                                                                Pending
+                                                            </a>
                                                         </div>
                                                     @else
                                                         @if($project_data['can_edit_data'] == 1)
@@ -87,15 +103,16 @@
                                                 <div class="avaiabilty">
 
                                                 </div>
+
                                                 <div class="border">
                                                     <div class="show-con d-none">
-                                                        @foreach ($project_data['data_item'] as $rowData)
-                                                            @if(!empty($rowData))
-                                                                <span>{{ $rowData['head_name']??'' }} -
-                                                                {{ $rowData['head_value']??'' }}</span>
+                                                        @if(!empty($project_data['header_data']))
+                                                            @foreach($project_data['header_data'] as $head_data)
+                                                                <span>{{ $head_data['head_name']??'' }} -
+                                                                {{ $head_data['value']??'' }}</span>
                                                                 <br>
-                                                            @endif
-                                                        @endforeach
+                                                            @endforeach
+                                                        @endif
                                                     </div>
                                                 </div>
                                             </div>
@@ -104,7 +121,7 @@
                                     </div>
                                 </div>
                             @empty
-                                <p>NO Data FOUND</p>
+                                <p>No Data Found</p>
                             @endforelse
 
                         </div>
@@ -162,6 +179,7 @@
                                                 @endforeach
                                             </div>
                                         @else
+
                                             <div class="row">
                                                 @foreach($projectTemplateHeaders as $key => $templateHeadersData)
                                                     <button
@@ -176,7 +194,7 @@
                                                 <div class="template-content " id="template-content-{{ $key }}"
                                                      style="{{ $key == 0 ? '' : 'display:none;' }}">
                                                     <div class="row ">
-                                                        <h3 >{{ $templateHeadersData['template_name'] }}</h3>
+                                                        <h3>{{ $templateHeadersData['template_name'] }}</h3>
                                                         <input type="hidden" name="project_template_id"
                                                                value="{{ $templateHeadersData['id'] }}">
 
@@ -191,7 +209,7 @@
                                                                        name="{{ $projectTemplateHeaderInfo->id }}"
                                                                        type="text"
                                                                        placeholder="Enter Data"
-                                                                       required >
+                                                                       required>
                                                             </div>
                                                         @endforeach
                                                     </div>
@@ -474,6 +492,7 @@
                 const data_val = $(this).data('val');
                 const row_con = $(this).closest('.row_data_con');
                 const row_data = row_con.find('.show-con').html();
+                console.log(data_val, row_con, row_data)
                 $("#main-content").html(row_data)
                 $("#row_data_title").html(data_val)
                 $("#row_detail_modal").modal('show');

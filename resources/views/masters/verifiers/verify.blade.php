@@ -24,9 +24,9 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            width: 160px !important;
-            max-height: 100%;
-            max-width: 100%;
+            max-width: 100% !important;
+            height: 500px !important;
+            width: auto;
         }
 
         .select2-container--default .select2-selection--multiple {
@@ -220,15 +220,32 @@
                                                                         @break
 
                                                                     @case('Video')
+                                                                        @php
+                                                                            // Decode URL-encoded characters
+                                                                            $decodedValue = urldecode($d_value);
+
+                                                                            // Check if it's already a full URL
+                                                                            if (str_starts_with($decodedValue, 'http://') || str_starts_with($decodedValue, 'https://')) {
+                                                                                $fileUrl = $decodedValue;
+                                                                            } else {
+                                                                                $fileUrl = asset($decodedValue);
+                                                                            }
+
+                                                                            // Encode for JavaScript
+                                                                            $jsFileUrl = str_replace(' ', '%20', $fileUrl);
+                                                                        @endphp
                                                                         @if ($d_value)
                                                                             <a class="badge badge-primary mt-2 imagemodal"
-                                                                               data-setval="{{ asset($d_value) }}"
-                                                                               style="cursor:pointer;">Click
-                                                                                Here
+                                                                               data-setval="{{ $jsFileUrl }}"
+                                                                               style="cursor:pointer;">
+                                                                                Click Here
                                                                             </a>
+                                                                            <!-- Debug: show actual path -->
+                                                                            <small class="d-block text-muted mt-1" title="{{ $fileUrl }}">
+                                                                                Path: .../{{ basename($decodedValue) }}
+                                                                            </small>
                                                                         @endif
                                                                         @break
-
                                                                     @case('Free Text')
                                                                         <input type="text" value="{{ $d_value }}"
                                                                                name="{{ $related_question->id }}"
@@ -271,12 +288,20 @@
                                                                                     // Not a valid date/datetime, fallback
                                                                                 }
 
+// Decode URL-encoded characters FIRST
+            $decodedValue = urldecode($d_value);
+
+ // Check if it's already a full URL
+            if (str_starts_with($decodedValue, 'http://') || str_starts_with($decodedValue, 'https://')) {
+                $fileUrl = $decodedValue;
+            } else {
+                $fileUrl = asset($decodedValue);
+            }
                                                                             @endphp
 
                                                                             @if (!$isUrlOrPath)
                                                                                 {{-- Plain Text --}}
                                                                                 <div class="d-flex flex-column gap-2">
-
                                                                                     <select
                                                                                         @if ($related_question->answer_type) required=""
                                                                                         @endif
@@ -295,161 +320,159 @@
                                                                                         <img class="imagemodal"
                                                                                              data-setval="{{ asset($d_value) }}"
                                                                                              alt="Image"
-                                                                                             src="{{ asset($d_value) }}>
+                                                                                             src="{{ asset($d_value) }}" >
                                                                                     </div>
                                                                                 </div>
 
                                                                             @elseif (in_array($extension, ['mp4', 'webm', 'ogg', 'temp']))
                                                                                 {{-- Video --}}
                                                                                 <div class="mb-2">
-                                                                                        <a class="badge badge-primary mt-2 imagemodal"
-                                                                                           style="cursor:pointer;"
-                                                                                           data-setval="{{ asset($d_value) }}">Click
-                                                                                            Here
-                                                                                        </a>
-                                                                                    </div>
+                                                                                    <a class="badge badge-primary mt-2 imagemodal"
+                                                                                       style="cursor:pointer;"
+                                                                                       data-setval="{{ $fileUrl }}">Click Here
+                                                                                    </a>
+                                                                                </div>
+                                                                            @elseif (in_array($extension, ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt']))
+                                                                                {{-- File --}}
+                                                                                <div class="mb-2">
+                                                                                    <a class="badge badge-primary mt-2"
+                                                                                       href="{{ asset($d_value) }}">Click
+                                                                                        Here
+                                                                                    </a>
+                                                                                </div>
 
-                                                                                    @elseif (in_array($extension, ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt']))
-                                                                                        {{-- File --}}
-                                                                                        <div class="mb-2">
-                                                                                            <a class="badge badge-primary mt-2"
-                                                                                               href="{{ asset($d_value) }}">Click
-                                                                                                Here
-                                                                                            </a>
-                                                                                        </div>
+                                                                            @elseif ($isDate)
+                                                                                <input type="date"
+                                                                                       value="{{ $d_value ? \Carbon\Carbon::createFromFormat('d/m/Y', $d_value)->format('Y-m-d') : '' }}"
+                                                                                       name="{{ $related_question->id }}"
+                                                                                       class="form-control" readonly>
 
-                                                                                    @elseif ($isDate)
-                                                                                        <input type="date"
-                                                                                               value="{{ $d_value ? \Carbon\Carbon::createFromFormat('d/m/Y', $d_value)->format('Y-m-d') : '' }}"
-                                                                                               name="{{ $related_question->id }}"
-                                                                                               class="form-control" readonly>
+                                                                            @elseif ($isDateTime)
+                                                                                @php
 
-                                                                                    @elseif ($isDateTime)
-                                                                                        @php
+                                                                                    $formattedDateTime = \Carbon\Carbon::parse(
+                                                                                        $d_value,
+                                                                                    )->format('Y-m-d\TH:i');
+                                                                                @endphp
+                                                                                <input type="datetime-local"
+                                                                                       name="{{ $related_question->id }}"
+                                                                                       value="{{ $formattedDateTime }}"
+                                                                                       class="form-control" readonly>
 
-                                                                                            $formattedDateTime = \Carbon\Carbon::parse(
-                                                                                                $d_value,
-                                                                                            )->format('Y-m-d\TH:i');
-                                                                                        @endphp
-                                                                                        <input type="datetime-local"
-                                                                                               name="{{ $related_question->id }}"
-                                                                                               value="{{ $formattedDateTime }}"
-                                                                                               class="form-control" readonly>
+                                                                            @endif
+                                                                        @endforeach
 
-                                                                                    @endif
-                                                                                    @endforeach
+                                                                        @break
 
-                                                                                    @break
+                                                                    @case('Dropdown')
+                                                                        <select class="form-select"
+                                                                                name="{{ $related_question->id }}"
+                                                                                disabled>
+                                                                            <option value="">Select ..</option>
+                                                                            @foreach ($related_question->getOptions as $questionOption)
+                                                                                <option
+                                                                                    value="{{ $questionOption->option }}"
+                                                                                    @if ($questionOption->option == $d_value) selected @endif>
+                                                                                    {{ $questionOption->option }}
+                                                                                </option>
+                                                                            @endforeach
+                                                                        </select>
+                                                                        @break
 
-                                                                                    @case('Dropdown')
-                                                                                        <select class="form-select"
-                                                                                                name="{{ $related_question->id }}"
-                                                                                                disabled>
-                                                                                            <option value="">Select ..</option>
-                                                                                            @foreach ($related_question->getOptions as $questionOption)
-                                                                                                <option
-                                                                                                    value="{{ $questionOption->option }}"
-                                                                                                    @if ($questionOption->option == $d_value) selected @endif>
-                                                                                                    {{ $questionOption->option }}
-                                                                                                </option>
-                                                                                            @endforeach
-                                                                                        </select>
-                                                                                        @break
+                                                                    @case('Multi select')
+                                                                        @php
+                                                                            $selectArrIds[] =
+                                                                                'select' . $related_question->id;
+                                                                            $selectedValues = explode(
+                                                                                ',',
+                                                                                $d_value ?? '',
+                                                                            );
+                                                                        @endphp
+                                                                        <select class="form-select"
+                                                                                name="{{ $related_question->id }}[]"
+                                                                                id="select{{ $related_question->id }}"
+                                                                                multiple
+                                                                                disabled>
+                                                                            <option value="">Select ..</option>
+                                                                            @foreach ($related_question->getOptions as $questionOption)
+                                                                                <option
+                                                                                    value="{{ $questionOption->option }}"
+                                                                                    @if (in_array($questionOption->option, $selectedValues)) selected @endif>
+                                                                                    {{ $questionOption->option }}
+                                                                                </option>
+                                                                            @endforeach
+                                                                        </select>
+                                                                        @break
 
-                                                                                    @case('Multi select')
-                                                                                        @php
-                                                                                            $selectArrIds[] =
-                                                                                                'select' . $related_question->id;
-                                                                                            $selectedValues = explode(
-                                                                                                ',',
-                                                                                                $d_value ?? '',
-                                                                                            );
-                                                                                        @endphp
-                                                                                        <select class="form-select"
-                                                                                                name="{{ $related_question->id }}[]"
-                                                                                                id="select{{ $related_question->id }}"
-                                                                                                multiple
-                                                                                                disabled>
-                                                                                            <option value="">Select ..</option>
-                                                                                            @foreach ($related_question->getOptions as $questionOption)
-                                                                                                <option
-                                                                                                    value="{{ $questionOption->option }}"
-                                                                                                    @if (in_array($questionOption->option, $selectedValues)) selected @endif>
-                                                                                                    {{ $questionOption->option }}
-                                                                                                </option>
-                                                                                            @endforeach
-                                                                                        </select>
-                                                                                        @break
+                                                                    @case('Date & Time')
+                                                                        @php
+                                                                            // Parse the date in the 'd-m-Y H:i:s' format and convert it to 'Y-m-d\TH:i' for the datetime-local input
+                                                                            //                                                                            $formattedDateTime = \Carbon\Carbon::createFromFormat('d-m-Y H:i:s', $d_value)->format('Y-m-d\TH:i');
+                                                                            $formattedDateTime = \Carbon\Carbon::parse(
+                                                                                $d_value,
+                                                                            )->format('Y-m-d\TH:i');
+                                                                        @endphp
+                                                                        <input type="datetime-local"
+                                                                               name="{{ $related_question->id }}"
+                                                                               value="{{ $formattedDateTime }}"
+                                                                               class="form-control" readonly>
+                                                                        @break
 
-                                                                                    @case('Date & Time')
-                                                                                        @php
-                                                                                            // Parse the date in the 'd-m-Y H:i:s' format and convert it to 'Y-m-d\TH:i' for the datetime-local input
-                                                                                            //                                                                            $formattedDateTime = \Carbon\Carbon::createFromFormat('d-m-Y H:i:s', $d_value)->format('Y-m-d\TH:i');
-                                                                                            $formattedDateTime = \Carbon\Carbon::parse(
-                                                                                                $d_value,
-                                                                                            )->format('Y-m-d\TH:i');
-                                                                                        @endphp
-                                                                                        <input type="datetime-local"
-                                                                                               name="{{ $related_question->id }}"
-                                                                                               value="{{ $formattedDateTime }}"
-                                                                                               class="form-control" readonly>
-                                                                                        @break
+                                                                    @case('Date')
+                                                                        <input type="date"
+                                                                               value="{{ $d_value ? \Carbon\Carbon::createFromFormat('d/m/Y', $d_value)->format('Y-m-d') : '' }}"
+                                                                               name="{{ $related_question->id }}"
+                                                                               class="form-control" readonly>
+                                                                        @break
 
-                                                                                    @case('Date')
-                                                                                        <input type="date"
-                                                                                               value="{{ $d_value ? \Carbon\Carbon::createFromFormat('d/m/Y', $d_value)->format('Y-m-d') : '' }}"
-                                                                                               name="{{ $related_question->id }}"
-                                                                                               class="form-control" readonly>
-                                                                                        @break
+                                                                    @case('File Upload')
+                                                                        <input type="file"
+                                                                               name="{{ $related_question->id }}"
+                                                                               class="form-control" disabled>
+                                                                        @if ($d_value)
+                                                                            <a class="badge badge-primary mt-2"
+                                                                               href="{{ asset($d_value) }}">Click
+                                                                                Here
+                                                                            </a>
+                                                                        @endif
+                                                                        @break
 
-                                                                                    @case('File Upload')
-                                                                                        <input type="file"
-                                                                                               name="{{ $related_question->id }}"
-                                                                                               class="form-control" disabled>
-                                                                                        @if ($d_value)
-                                                                                            <a class="badge badge-primary mt-2"
-                                                                                               href="{{ asset($d_value) }}">Click
-                                                                                                Here
-                                                                                            </a>
-                                                                                        @endif
-                                                                                        @break
+                                                                    @case('Audio')
+                                                                        <div class="audio-recorder">
+                                                                            <button type="button"
+                                                                                    class="btn btn-sm btn-primary start-recording"
+                                                                                    data-id="{{ $related_question->id }}">
+                                                                                Record
+                                                                            </button>
+                                                                            <button type="button"
+                                                                                    class="btn btn-sm btn-danger stop-recording"
+                                                                                    data-id="{{ $related_question->id }}"
+                                                                                    disabled>Stop
+                                                                            </button>
+                                                                            <button type="button"
+                                                                                    class="btn btn-sm btn-warning delete-audio"
+                                                                                    data-id="{{ $related_question->id }}"
+                                                                                    @if (!isset($d_value)) disabled @endif>
+                                                                                Delete
+                                                                            </button>
 
-                                                                                    @case('Audio')
-                                                                                        <div class="audio-recorder">
-                                                                                            <button type="button"
-                                                                                                    class="btn btn-sm btn-primary start-recording"
-                                                                                                    data-id="{{ $related_question->id }}">
-                                                                                                Record
-                                                                                            </button>
-                                                                                            <button type="button"
-                                                                                                    class="btn btn-sm btn-danger stop-recording"
-                                                                                                    data-id="{{ $related_question->id }}"
-                                                                                                    disabled>Stop
-                                                                                            </button>
-                                                                                            <button type="button"
-                                                                                                    class="btn btn-sm btn-warning delete-audio"
-                                                                                                    data-id="{{ $related_question->id }}"
-                                                                                                    @if (!isset($d_value)) disabled @endif>
-                                                                                                Delete
-                                                                                            </button>
+                                                                            <audio
+                                                                                id="audio-player-{{ $related_question->id }}"
+                                                                                controls></audio>
+                                                                            <input type="hidden"
+                                                                                   name="{{ $related_question->id }}"
+                                                                                   class="audio-data"
+                                                                                   data-id="{{ $related_question->id }}"
+                                                                                   value="{{ asset($d_value) }}">
+                                                                        </div>
+                                                                        @break
 
-                                                                                            <audio
-                                                                                                id="audio-player-{{ $related_question->id }}"
-                                                                                                controls></audio>
-                                                                                            <input type="hidden"
-                                                                                                   name="{{ $related_question->id }}"
-                                                                                                   class="audio-data"
-                                                                                                   data-id="{{ $related_question->id }}"
-                                                                                                   value="{{ asset($d_value) }}">
-                                                                                        </div>
-                                                                                        @break
-
-                                                                                    @default
-                                                                                        <input type="text" value="{{ $d_value }}"
-                                                                                               class="form-control"
-                                                                                               name="{{ $related_question->id }}"
-                                                                                               readonly>
-                                                                                @endswitch
+                                                                    @default
+                                                                        <input type="text" value="{{ $d_value }}"
+                                                                               class="form-control"
+                                                                               name="{{ $related_question->id }}"
+                                                                               readonly>
+                                                                @endswitch
 
                                                             </td>
                                                         </tr>
@@ -753,7 +776,7 @@
             }
         });
 
-        function openImageModel(filePath) {
+        function openImageModelold(filePath) {
             const extension = filePath.split('.').pop().toLowerCase();
             let html = '';
 
@@ -766,7 +789,7 @@
             src="${filePath}"
             alt="Uploaded File"
             class=" rounded shadow-sm border"
-            style="max-height: 80vh !important; width: auto; object-fit: contain;"
+            style="height: 450px !important; width: auto; object-fit: contain;"
             onerror="this.onerror=null; this.src='/path/to/placeholder.png';"
         />
     `;
@@ -790,6 +813,359 @@
             modal.show();
         }
 
+        let isVideoLoading = false;
+        let isVideoPlaying = false;
+
+        function openImageModel(filePath) {
+            console.log('Original file path:', filePath);
+
+            // Reset flags
+            isVideoLoading = false;
+            isVideoPlaying = false;
+
+            // Ensure the path is properly encoded for URLs
+            const encodedFilePath = encodeURI(filePath).replace(/%20/g, ' ');
+
+            const extension = encodedFilePath.split('.').pop().toLowerCase();
+            console.log('Encoded file path:', encodedFilePath, 'Extension:', extension);
+
+            let html = '';
+
+            const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+            const videoExtensions = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'wmv', 'flv', 'mkv', 'temp'];
+
+            if (imageExtensions.includes(extension)) {
+                html = `
+            <img
+                src="${encodedFilePath}"
+                alt="Uploaded File"
+                class="img-fluid rounded shadow-sm border"
+                style="height: 450px !important; width: auto; object-fit: contain;"
+                onerror="handleImageError(this, '${encodedFilePath}')"
+            />
+        `;
+            } else if (videoExtensions.includes(extension)) {
+                // Determine mime type
+                let mimeType = 'video/';
+                switch(extension) {
+                    case 'mp4': mimeType += 'mp4'; break;
+                    case 'webm': mimeType += 'webm'; break;
+                    case 'ogg': mimeType += 'ogg'; break;
+                    case 'mov': mimeType += 'quicktime'; break;
+                    case 'avi': mimeType += 'x-msvideo'; break;
+                    case 'wmv': mimeType += 'x-ms-wmv'; break;
+                    case 'flv': mimeType += 'x-flv'; break;
+                    case 'temp': mimeType += 'mp4'; break;
+                    default: mimeType += 'mp4';
+                }
+
+                // Create a direct download link with proper encoding
+                const downloadLink = encodedFilePath.replace(/ /g, '%20');
+
+                html = `
+            <div class="video-container">
+                <video id="modal-video" controls class="w-100 rounded shadow-sm border"
+                       style="max-height: 70vh; object-fit: contain; background: #000;"
+                       preload="metadata"
+                       crossorigin="anonymous"
+                       playsinline>
+                    <source src="${encodedFilePath}" type="${mimeType}">
+                    <p class="mt-3 p-3 bg-light rounded">
+                        <i class="fa fa-exclamation-triangle text-warning"></i>
+                        Your browser does not support this video format or the file cannot be loaded.
+                        <br>
+                        <a href="${downloadLink}" download class="btn btn-sm btn-danger mt-2">
+                            <i class="fa fa-download"></i> Download Video
+                        </a>
+                    </p>
+                </video>
+                <div class="mt-3">
+                    <div class="btn-group" role="group">
+                        <button type="button" class="btn btn-success" onclick="playVideo()" id="play-btn">
+                            <i class="fa fa-play"></i> Play
+                        </button>
+                        <button type="button" class="btn btn-info" onclick="reloadVideo('${encodedFilePath}')" id="reload-btn">
+                            <i class="fa fa-refresh"></i> Reload
+                        </button>
+                        <a href="${downloadLink}" download class="btn btn-primary">
+                            <i class="fa fa-download"></i> Download
+                        </a>
+                    </div>
+                </div>
+                <div class="mt-2">
+                    <span id="video-status" class="badge bg-secondary">Loading...</span>
+                    <small class="text-muted ms-2">Format: .${extension}</small>
+                </div>
+                <div id="video-error" class="alert alert-danger mt-2 d-none">
+                    <i class="fa fa-exclamation-triangle"></i>
+                    Video cannot be played. Possible issues:
+                    <ul class="mb-0 mt-1">
+                        <li>Browser doesn't support .${extension} format</li>
+                        <li>File path contains spaces (common issue)</li>
+                        <li>Video file might be corrupted</li>
+                        <li>Web recordings may have encoding issues</li>
+                    </ul>
+                    <div class="mt-2">
+                        <a href="${downloadLink}" download class="btn btn-sm btn-danger">
+                            <i class="fa fa-download"></i> Download and play locally
+                        </a>
+                        <button type="button" class="btn btn-sm btn-warning ms-2" onclick="forceLoadVideo('${encodedFilePath}')">
+                            <i class="fa fa-bolt"></i> Force Load
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+            } else {
+                html = `
+            <div class="alert alert-warning">
+                <p class="mb-0">File type .${extension} not supported for preview.</p>
+                <a href="${encodedFilePath}" download class="btn btn-sm btn-primary mt-2">
+                    <i class="fa fa-download"></i> Download File
+                </a>
+            </div>
+        `;
+            }
+
+            $('#ImageModelBody').html(html);
+            const modal = new bootstrap.Modal(document.getElementById('ImageModel'));
+            modal.show();
+
+            // Set up video event listeners
+            if (videoExtensions.includes(extension)) {
+                setTimeout(() => {
+                    setupVideoListeners(encodedFilePath);
+                }, 500); // Delay to ensure DOM is ready
+            }
+        }
+
+        function setupVideoListeners(filePath) {
+            const video = document.getElementById('modal-video');
+            const playBtn = document.getElementById('play-btn');
+            const reloadBtn = document.getElementById('reload-btn');
+            const status = document.getElementById('video-status');
+
+            if (!video) return;
+
+            // Clear any existing listeners
+            video.onerror = null;
+            video.oncanplay = null;
+            video.onplaying = null;
+            video.onwaiting = null;
+
+            video.onerror = function(e) {
+                console.error('Video error:', video.error);
+                status.textContent = 'Error: ' + getVideoError(video.error);
+                status.className = 'badge bg-danger';
+                document.getElementById('video-error').classList.remove('d-none');
+                isVideoLoading = false;
+                playBtn.disabled = false;
+                reloadBtn.disabled = false;
+            };
+
+            video.oncanplay = function() {
+                status.textContent = 'Ready to play';
+                status.className = 'badge bg-success';
+                isVideoLoading = false;
+                playBtn.disabled = false;
+                reloadBtn.disabled = false;
+            };
+
+            video.onplaying = function() {
+                status.textContent = 'Playing';
+                status.className = 'badge bg-success';
+                isVideoPlaying = true;
+                playBtn.innerHTML = '<i class="fa fa-pause"></i> Pause';
+                playBtn.onclick = pauseVideo;
+            };
+
+            video.onpause = function() {
+                isVideoPlaying = false;
+                playBtn.innerHTML = '<i class="fa fa-play"></i> Play';
+                playBtn.onclick = playVideo;
+            };
+
+            video.onwaiting = function() {
+                status.textContent = 'Buffering...';
+                status.className = 'badge bg-warning';
+            };
+
+            video.onloadstart = function() {
+                status.textContent = 'Loading...';
+                status.className = 'badge bg-warning';
+                isVideoLoading = true;
+                playBtn.disabled = true;
+                reloadBtn.disabled = true;
+            };
+        }
+
+        function playVideo() {
+            if (isVideoLoading) {
+                console.log('Video is still loading, please wait...');
+                return;
+            }
+
+            const video = document.getElementById('modal-video');
+            const status = document.getElementById('video-status');
+            const playBtn = document.getElementById('play-btn');
+
+            if (!video) return;
+
+            // Disable button while playing
+            playBtn.disabled = true;
+            isVideoPlaying = true;
+
+            // Small delay to ensure video is ready
+            setTimeout(() => {
+                video.play().then(() => {
+                    console.log('Video playback started successfully');
+                    status.textContent = 'Playing';
+                    status.className = 'badge bg-success';
+                    playBtn.disabled = false;
+                    playBtn.innerHTML = '<i class="fa fa-pause"></i> Pause';
+                    playBtn.onclick = pauseVideo;
+                }).catch(error => {
+                    console.error('Error playing video:', error);
+                    status.textContent = 'Play failed - try reloading';
+                    status.className = 'badge bg-danger';
+                    playBtn.disabled = false;
+                    isVideoPlaying = false;
+
+                    // Show specific error
+                    let errorMsg = 'Unknown error';
+                    switch(error.name) {
+                        case 'AbortError':
+                            errorMsg = 'Playback was interrupted. Try reloading the video.';
+                            break;
+                        case 'NotAllowedError':
+                            errorMsg = 'Autoplay blocked. Click play again or enable autoplay in browser settings.';
+                            break;
+                        case 'NotSupportedError':
+                            errorMsg = 'Video format not supported by browser.';
+                            break;
+                        case 'NetworkError':
+                            errorMsg = 'Network error loading video.';
+                            break;
+                    }
+
+                    // Update error message
+                    const errorDiv = document.getElementById('video-error');
+                    const errorList = errorDiv.querySelector('ul');
+                    if (errorList) {
+                        errorList.innerHTML = `<li>${errorMsg}</li>
+                                      <li>Try downloading and playing locally</li>`;
+                        errorDiv.classList.remove('d-none');
+                    }
+                });
+            }, 100);
+        }
+
+        function pauseVideo() {
+            const video = document.getElementById('modal-video');
+            const playBtn = document.getElementById('play-btn');
+
+            if (video && isVideoPlaying) {
+                video.pause();
+                isVideoPlaying = false;
+                playBtn.innerHTML = '<i class="fa fa-play"></i> Play';
+                playBtn.onclick = playVideo;
+            }
+        }
+
+        function reloadVideo(filePath) {
+            if (isVideoLoading) {
+                console.log('Video is already loading, please wait...');
+                return;
+            }
+
+            const video = document.getElementById('modal-video');
+            const source = video.querySelector('source');
+            const status = document.getElementById('video-status');
+            const playBtn = document.getElementById('play-btn');
+            const reloadBtn = document.getElementById('reload-btn');
+
+            // Disable buttons during reload
+            playBtn.disabled = true;
+            reloadBtn.disabled = true;
+            isVideoLoading = true;
+
+            // Reset video
+            video.pause();
+
+            // Reset status
+            status.textContent = 'Reloading...';
+            status.className = 'badge bg-warning';
+
+            // Hide error
+            document.getElementById('video-error').classList.add('d-none');
+
+            // Force reload with cache busting
+            const newPath = filePath + (filePath.includes('?') ? '&' : '?') + 't=' + new Date().getTime();
+
+            // Change source and load
+            source.src = newPath;
+            video.load();
+
+            // Re-enable buttons after load
+            setTimeout(() => {
+                playBtn.disabled = false;
+                reloadBtn.disabled = false;
+                isVideoLoading = false;
+
+                // Auto-play if previously playing
+                if (isVideoPlaying) {
+                    setTimeout(() => playVideo(), 500);
+                }
+            }, 1000);
+        }
+
+        function forceLoadVideo(filePath) {
+            const video = document.getElementById('modal-video');
+            const source = video.querySelector('source');
+            const status = document.getElementById('video-status');
+
+            // Create a new source element (clean slate)
+            const newSource = document.createElement('source');
+            newSource.src = filePath + '?force=' + new Date().getTime();
+            newSource.type = source.type;
+
+            // Replace the source
+            video.innerHTML = '';
+            video.appendChild(newSource);
+
+            // Reset and load
+            video.load();
+
+            status.textContent = 'Force loading...';
+            status.className = 'badge bg-warning';
+
+            // Hide error
+            document.getElementById('video-error').classList.add('d-none');
+
+            // Setup listeners again
+            setTimeout(() => {
+                setupVideoListeners(filePath);
+            }, 300);
+        }
+
+        function getVideoError(error) {
+            if (!error) return 'Unknown error';
+
+            switch(error.code) {
+                case 1: return 'Video loading aborted';
+                case 2: return 'Network error';
+                case 3: return 'Video decoding error (common with web recordings)';
+                case 4: return 'Video format not supported';
+                default: return 'Error code: ' + error.code;
+            }
+        }
+
+        function handleImageError(img, filePath) {
+            console.error('Image failed to load:', filePath);
+            img.src = '/path/to/placeholder.png';
+            img.alt = 'Image failed to load';
+            img.style.border = '2px dashed #dc3545';
+        }
 
         $(document).ready(function () {
 

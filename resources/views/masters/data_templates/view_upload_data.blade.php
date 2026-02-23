@@ -71,7 +71,7 @@
                                                         <label class="form-label" for="template_name_id">Select Data Template</label>
                                                         <select class="form-select" id="template_name_id" name="template_name_id" required="">
                                                             <option selected="" disabled="" value="">Choose...</option>
-
+                                                           
                                                         </select>
                                                         @error('template_name_id')
                                                         <p class="text-red-500 text-xs mt-1">

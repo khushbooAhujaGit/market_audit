@@ -22,12 +22,10 @@ class MultiSheetExport implements WithMultipleSheets
     use Exportable;
 
     protected $sheetsData;
-
     public function __construct($sheetsData)
     {
         $this->sheetsData = $sheetsData;
     }
-
     public function sheets(): array
     {
         $sheets = [];

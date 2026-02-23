@@ -44,12 +44,13 @@ class AuditorAssignedDataController extends Controller
 //            $user_list = AuditorAssignedData::where('data_assign_id', $request->data_assigned_id)->with('get_user_info')->get();
 
             // $user_list = UserActivityDataAssign::where('data_assign_id', $request->data_assigned_id)->with('get_user_info')->get();
+            
             $user_list = UserActivityDataAssign::where('data_assign_id', $request->data_assigned_id)
                 ->select('user_id')   // only select user_id
                 ->distinct()
                 ->with('get_user_info')
                 ->get();
-
+    
             $common_Ids = UserActivityDataAssign::where('data_assign_id', $request->data_assigned_id)->distinct()->pluck('common_id')->toArray();
             $getAssignedData = DataAssign::find($request->data_assigned_id);
             $getRowIds = UserAuditAssigns::whereIn('common_id', $common_Ids)->distinct()->pluck('row_id')->toArray();

@@ -37,7 +37,7 @@ use Illuminate\Support\Facades\Validator;
 use App\Jobs\ConvertAuditorSelfiesToGeoSelfies;
 use Illuminate\Support\Facades\Log;
 
-class TaskControllerOld extends Controller
+class TaskController extends Controller
 {
     //
 
@@ -561,6 +561,13 @@ class TaskControllerOld extends Controller
                                 'longitude' => $longitudeValue,
                             ];
 
+//                            $project_data_arr[] = [
+//                                'data_item' => $projectData,
+//                                'status' => $projectStatus,
+//                                'main_header' => $main_header,
+//                                'sub_header' => $sub_header
+//                            ];
+
                         }
                     }
                 }
@@ -576,6 +583,7 @@ class TaskControllerOld extends Controller
                 $endTime = microtime(true);
                 $executionTime = $endTime - $startTime;
 
+
                 $project_data_arr = collect($project_data_arr);
                 // Now you can use the where method
                 if ($request->status) {
@@ -589,6 +597,7 @@ class TaskControllerOld extends Controller
                     });
                 }
 
+
                 $distributors_collection = collect($project_data_arr);
                 $currentPage = request()->get('page', 1);
                 $perPage = 10;
@@ -601,6 +610,383 @@ class TaskControllerOld extends Controller
                     ['path' => request()->url(), 'query' => request()->query()]
                 );
 
+
+                return response([
+                    'status' => 200,
+                    'message' => 'success',
+                    'project_id' => $request->project_id,
+                    'template_id' => $request->template_id,
+                    'activity_id' => $request->activity_id,
+                    "group_info" => $group_session_id,
+                    'data' => $paginatedDistributors,
+                    'otp_required_status' => (string)$otpRequiredStatus,
+                    'add_outlet' => $add_outlet,
+
+                ], 200);
+
+            } else {
+                return response([
+                    'status' => 401,
+                    'message' => 'success',
+                    'data' => $project_data_arr,
+                ], 401);
+            }
+        }
+    }
+
+
+    public function projectDistributorDataOld(Request $request)
+    {
+
+        $startTime = microtime(true);
+        $group_session_id = null;
+        if (!isset($request->group_info_id)) {
+            $group_info = null;
+        } else {
+            $group_session_id = $request->group_info_id;
+        }
+
+        $row_renderred_arr = [];
+        $user = $request->user_id;
+        $project_data_arr = [];
+
+
+        $project_data_completed_arr = [];
+        $project_temp_info = DB::table('project_templates')->where('project_id', $request->project_id)
+            ->where('template_name_id', $request->template_id)
+            ->first();
+
+
+        //khushboo 17-05-25
+        $add_outlet = false;
+        if ($project_temp_info->data_add_on == 1) {
+            $add_outlet = true;
+        }
+        //khushboo 17-05-25
+
+        //khushboo 07-04-2025
+        $otpRequiredStatus = 0;
+        $projectInfo = Project::findOrFail($request->project_id);
+
+        if (
+            $projectInfo->is_otp_required == 1 &&
+            !empty($project_temp_info->activity_otp_required_ids)
+        ) {
+            $otpRequiredIds = json_decode($project_temp_info->activity_otp_required_ids, true);
+
+            if (!empty($otpRequiredIds) && in_array($request->activity_id, $otpRequiredIds)) {
+                $otpRequiredStatus = 1;
+            }
+        }
+        //khushboo 07-04-2025
+
+
+        // dd($request->project_id, $request->template_id);
+        $main_header_id = $project_temp_info->main_header;
+        $sub_header_id = $project_temp_info->sub_header;
+        if ($project_temp_info->is_master == 1) {
+            // dd('fdgfg');
+            // this is to check if the project is assigned to the logged in user or not
+            $checkingIfProjectAssigned = AuditorAssignedData::where('user_id', $user)
+                ->where('project_id', $request->project_id)
+                ->where('template_name_id', $request->template_id)
+                ->whereHas('dataAssign', function ($query) use ($request, $group_session_id) {
+                    $query->where('activity_id', $request->activity_id)
+                        ->where('activity_group_id', $group_session_id);
+                })
+                ->get();
+
+//             dd($checkingIfProjectAssigned);
+            if (count($checkingIfProjectAssigned)) {
+                $projectTemplateHeadsAssigned = [];
+                // this is to get the template heads and values that are assigned to that user
+                foreach ($checkingIfProjectAssigned as $auditor_assiged_data) {
+                    $project_template_id = $auditor_assiged_data->dataAssign->project_template_id;
+                    $projectTemplateHeadsAssigned[] = [
+                        'project_template_id' => $project_template_id,
+                        'head_id' => $auditor_assiged_data->dataAssign->template_name_head_id,
+                        'head_value' => $auditor_assiged_data->template_name_head_value, // Add more fields if needed
+                    ];
+                }
+
+                $projectTemplateIDs = array_column($projectTemplateHeadsAssigned, 'project_template_id');
+
+//                $allTemplateValues = DB::table('project_template_name_values')
+//                    ->whereIn('project_template_id', $projectTemplateIDs)
+//                    ->get()
+//                    ->groupBy('project_template_id');
+
+                $allTemplateValues = DB::table('project_template_name_values as ptv')
+                    ->leftJoin('template_name_heads as tnh', 'ptv.template_name_head_id', '=', 'tnh.id')
+                    ->select(
+                        'ptv.*',
+                        'tnh.id as head_id',
+                        'tnh.template_name_id as head_template_name_id',
+                        'tnh.template_head_name',
+                        'tnh.created_at as head_created_at',
+                        'tnh.updated_at as head_updated_at',
+                        'tnh.deleted_at as head_deleted_at'
+                    )
+                    ->whereIn('ptv.project_template_id', $projectTemplateIDs)
+                    ->get()
+                    ->groupBy('project_template_id');
+
+                $allTemplateActivityAnswers = DB::table('temp_user_activity_answers_data')->get();
+
+//                $rowGroupedValues = $allTemplateValues->flatMap(fn($group) => $group)->groupBy('row_id');
+
+                $rowGroupedValues = $allTemplateValues->flatMap(function ($group) {
+                    return $group->map(function ($item) {
+                        // Add get_head_name to each row
+                        $item->get_head_name = [
+                            'id' => $item->head_id,
+                            'template_name_id' => $item->head_template_name_id,
+                            'template_head_name' => $item->template_head_name,
+                            'deleted_at' => $item->head_deleted_at,
+                            'created_at' => $item->head_created_at,
+                            'updated_at' => $item->head_updated_at,
+                        ];
+                        return $item;
+                    });
+                })->groupBy('row_id');
+
+//                dd($projectTemplateHeadsAssigned);
+                foreach ($projectTemplateHeadsAssigned as $assigned_value_info) {
+//                    print_r($assigned_value_info);
+//                    echo 'fghgfh';
+                    $template_id = $assigned_value_info['project_template_id'];
+                    $templateValues = $allTemplateValues[$template_id] ?? collect();
+//                    dd($templateValues);
+
+                    if (isset($request->group_info_id)) {
+                        $activity_sequence = DB::table('activity_group_pivots')->where('activity_id', $request->activity_id)
+                            ->where('activity_group_id', $request->group_info_id)
+                            ->first();
+
+                        if ($activity_sequence) {
+                            $cur_sequence = $activity_sequence->sequence;
+
+                            // this is to handle if the activity if the first activity of the group or having the first sequence
+                            if ($cur_sequence == 1) {
+                                $projectDataArr = $templateValues->where('template_name_head_id', $assigned_value_info['head_id'])
+                                    ->where('value', $assigned_value_info['head_value']);
+
+//                              dd($projectDataArr);
+                            } else {
+                                // this is to handle if the activity sequence if greater then 1
+                                $previous_sequence = $cur_sequence - 1;
+                                $get_previous_sequence_activities = DB::table('activity_group_pivots')->where('activity_group_id', $request->group_info_id)
+                                    ->where('sequence', $previous_sequence)
+                                    ->get();
+                                $previous_sequence_answered_rows = [];
+                                foreach ($get_previous_sequence_activities as $previous_sequence_activity) {
+//                                    dd('fhgfh');
+                                    $rows_in_templates = $templateValues->unique('row_id')->pluck('row_id')->toArray();
+
+                                    $get_previous_sequence_answered = DB::table('temp_user_activity_answers_data')->where('activity_group_name_id', $previous_sequence_activity->activity_group_id)
+                                        //                                    ->where('activity_sequence', $previous_sequence_activity->sequence)
+                                        ->where('activity_id', $previous_sequence_activity->activity_id)
+                                        ->whereIn('row_id', $rows_in_templates)
+                                        ->distinct('row_id')
+                                        ->pluck('row_id')->toArray();
+
+                                    if (empty($previous_sequence_answered_rows)) {
+                                        // For the first iteration, just set the array
+                                        $previous_sequence_answered_rows = $get_previous_sequence_answered;
+                                    } else {
+                                        // For subsequent iterations, keep only common values between the arrays
+                                        $previous_sequence_answered_rows = array_intersect($previous_sequence_answered_rows, $get_previous_sequence_answered);
+                                    }
+                                }
+                                $previous_sequence_answered_rows = array_unique($previous_sequence_answered_rows);
+
+                                $projectDataArr = $templateValues
+                                    ->where('template_name_head_id', $assigned_value_info['head_id'])
+                                    ->whereIn('row_id', $previous_sequence_answered_rows)
+                                    ->where('value', $assigned_value_info['head_value']);
+                            }
+                        } else {
+                            abort(404); // is to render if the activity if not present in the group
+                        }
+
+                    } else {
+//                        echo $assigned_value_info['head_id'], $assigned_value_info['head_value'];
+                        $projectDataArr = $templateValues
+                            ->where('template_name_head_id', $assigned_value_info['head_id'])
+                            ->where('value', $assigned_value_info['head_value']);
+                    }
+
+//                    dd($projectDataArr);
+//                    print_r($projectDataArr);
+
+                    $getAllQuestionIds = DB::table('questions')
+                        ->where('activity_id', $request->activity_id)
+                        ->pluck('id')
+                        ->toArray();
+
+                    $all_row_ids = array_column($projectDataArr->toArray(), 'row_id');
+
+                    $allTemplateActivityAnswers = DB::table('temp_user_activity_answers_data')
+                        ->where('activity_id', $request->activity_id)
+                        ->whereIn('row_id', $all_row_ids)
+                        ->get()
+                        ->groupBy('row_id'); // group it for faster per-row access
+
+                    foreach ($projectDataArr as $projectData) {
+
+                        if (!in_array($projectData->row_id, $row_renderred_arr)) {
+                            $row_renderred_arr[] = $projectData->row_id;
+
+                            //khushboo 02-05-2025
+//                            $getAllQuestionIds = DB::table('questions')->where('activity_id', $request->activity_id)
+//                                ->pluck('id')
+//                                ->toArray();
+
+                            $totalQuestions = count($getAllQuestionIds);
+
+                            $filteredAnswers = $allTemplateActivityAnswers[$projectData->row_id] ?? collect();
+
+                            $completedAnswersCount = $filteredAnswers->where('status', 5)->count();
+                            $rejectedAnswersCount = $filteredAnswers->where('status', 4)->count();
+
+                            $answeredCount = $filteredAnswers
+                                ->pluck('question_id')
+                                ->unique()
+                                ->count();
+
+                            $allAnswered = $answeredCount === $totalQuestions;
+                            $otpVerificationDone = false;
+
+                            if ($allAnswered) {
+                                $lastQuestionAnswered = $filteredAnswers
+                                    ->sortByDesc('id')
+                                    ->first();
+
+                                if (!empty($lastQuestionAnswered->mobile_otp) && $lastQuestionAnswered->otp_verified_status == 1) {
+                                    $otpVerificationDone = true;
+                                }
+                            }
+
+                            // dd($allAnswered);
+                            //khushboo 02-05-2025
+                            // $check_if_answered = TempUserActivityAnswersData::where('row_id', $projectData->row_id)
+                            //     ->where('activity_id', $request->activity_id)->exists();
+
+//                            $get_row_header = $allTemplateValues->where('row_id', $projectData->row_id)
+//                                ->where('template_name_head_id', $main_header_id)
+//                                ->first();
+
+                            $get_row_header = $rowGroupedValues[$projectData->row_id]
+//                                ->firstWhere('template_name_head_id', $assigned_value_info['head_id']);
+                                ->firstWhere('template_name_head_id', $main_header_id);
+
+//                            dd($get_row_header);
+//                            echo $get_row_header->value, '<pre>', $main_header_id, '<pre>', $projectData->row_id;
+
+                            $main_header = null;
+                            if ($get_row_header) {
+                                $main_header = $get_row_header->value;
+//                                $main_header = $assigned_value_info['head_value'];
+                            }
+//                            $get_row_sub_header = $allTemplateValues->where('row_id', $projectData->row_id)
+//                                ->where('template_name_head_id', $sub_header_id)
+//                                ->first();
+
+                            $get_row_sub_header = $rowGroupedValues[$projectData->row_id]
+                                ->firstWhere('template_name_head_id', $sub_header_id);
+
+//                            echo $get_row_header->value, '<pre>', $sub_header_id, '<pre>', $projectData->row_id;
+
+                            $sub_header = null;
+                            if ($get_row_sub_header) {
+                                $sub_header = $get_row_sub_header->value;
+                            }
+
+                            //khushboo 02-05-2025
+                            $projectStatus = "pending";
+                            if ($allAnswered && $otpVerificationDone && ($otpRequiredStatus == 1)) {
+                                $projectStatus = "completed";
+                            } else if ($allAnswered && !$otpVerificationDone && ($otpRequiredStatus == 1)) {
+                                $projectStatus = "Awaiting OTP Verify";
+                            } else if ($allAnswered) {
+                                $projectStatus = "completed";
+                            }
+
+                            if ($rejectedAnswersCount > 0) {
+                                $projectStatus = "rejected";
+                            }
+
+                            //khushboo 02-05-2025
+
+                            $get_head_name = [
+                                'id' => $projectData->head_id,
+                                'template_name_id' => $projectData->head_template_name_id,
+                                'template_head_name' => $projectData->template_head_name,
+                                'created_at' => $projectData->head_created_at,
+                                'updated_at' => $projectData->head_updated_at,
+                                'deleted_at' => $projectData->head_deleted_at,
+                            ];
+
+//                            $projectData->get_data_of_rows = $rowGroupedValues[$projectData->row_id] ?? collect();
+
+                            $project_data_arr[] = [
+                                'data_item' => (array)$projectData + [
+                                        'get_head_name' => $get_head_name,
+                                        'get_data_of_rows' => $rowGroupedValues[$projectData->row_id] ?? collect()
+                                    ],
+                                'status' => $projectStatus,
+                                'main_header' => $main_header,
+                                'sub_header' => $sub_header
+                            ];
+
+//                            $project_data_arr[] = [
+//                                'data_item' => $projectData,
+//                                'status' => $projectStatus,
+//                                'main_header' => $main_header,
+//                                'sub_header' => $sub_header
+//                            ];
+
+                        }
+                    }
+                }
+//                dd('hgkjh');
+//                dd($project_data_arr);
+
+                Session::put('project_dist_activity', ['project' => $request->project_id, 'template' => $request->template_id, 'activity' => $request->activity_id, "group_info" => $group_session_id]);
+                if (Session::has('project_outlet_activity')) {
+                    Session::forget('project_outlet_activity');
+                }
+                $endTime = microtime(true);
+                $executionTime = $endTime - $startTime;
+
+
+                $project_data_arr = collect($project_data_arr);
+                // Now you can use the where method
+                if ($request->status) {
+                    $project_data_arr = $project_data_arr->where('status', $request->status);
+                }
+
+                if ($request->keyword) {
+                    $project_data_arr = $project_data_arr->filter(function ($item) use ($request) {
+                        return strpos(strtolower($item['main_header']), strtolower($request->keyword)) !== false ||
+                            strpos(strtolower($item['sub_header']), strtolower($request->keyword)) !== false;
+                    });
+                }
+
+
+                $distributors_collection = collect($project_data_arr);
+                $currentPage = request()->get('page', 1);
+                $perPage = 10;
+                $currentPageItems = $distributors_collection->slice(($currentPage - 1) * $perPage, $perPage)->values();
+                $paginatedDistributors = new LengthAwarePaginator(
+                    $currentPageItems,
+                    $distributors_collection->count(),
+                    $perPage,
+                    $currentPage,
+                    ['path' => request()->url(), 'query' => request()->query()]
+                );
+
+//                dd($paginatedDistributors);
 
                 return response([
                     'status' => 200,

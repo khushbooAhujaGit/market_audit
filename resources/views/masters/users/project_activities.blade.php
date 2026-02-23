@@ -11,6 +11,7 @@
                         @if(isset($projectTemplateInfo))
                             <h4>{{$projectTemplateInfo->getTemplate->template_name}}</h4>
                         @endif
+
                         @if($status == 1 || $with_data_check == 0)
                             <a class="btn btn-primary float-end"
                                href="{{route('user.project.distributor.outlets', ['row_id'=> $row_id, 'distributor_value' => $distributor_value])}}">
@@ -18,16 +19,17 @@
                             </a>
                         @endif
                     </div>
+
                     <div class="card-body">
                         <div class="table-responsive theme-scrollbar">
                             <table class="display" id="project_activities">
                                 <thead>
                                 <tr>
                                     <th>Sno</th>
-                                    <th>Template Name</th>
-                                    <th>Group Name</th>
-                                    <th>Activity</th>
-                                    <th>Sequence</th>
+                                    <th class="d-none">Template Name</th>
+                                    <th class="d-none">Group Name</th>
+                                    <th >Activity</th>
+                                    <th class="d-none">Sequence</th>
                                     <th>Action</th>
                                 </tr>
                                 </thead>
@@ -35,14 +37,14 @@
                                 @foreach($userAssignedActivities as $userAssignedActivity)
                                     <tr @if($userAssignedActivity['is_master']) class="bg-success" @endif>
                                         <td @if($userAssignedActivity['is_master']) class="bg-success" @endif>{{$loop->iteration}}</td>
-                                        <td>{{$userAssignedActivity['template_name']}}</td>
-                                        <td>@if(isset($userAssignedActivity['group_name']))
+                                        <td class="d-none">{{$userAssignedActivity['template_name']}}</td>
+                                        <td class="d-none">@if(isset($userAssignedActivity['group_name']))
                                                 {{$userAssignedActivity['group_name']}}
                                             @else
                                                 -
                                             @endif</td>
                                         <td>{{$userAssignedActivity['activity_name']}}</td>
-                                        <td>
+                                        <td  class="d-none">
                                             @if(isset($userAssignedActivity['sequence']))
                                                 {{$userAssignedActivity['sequence']}}
                                             @else
@@ -52,13 +54,34 @@
                                         <td>
                                             <ul class="action">
                                                 @if($userAssignedActivity['is_master'])
-                                                    <li class="view"><a
-                                                            href="{{route('user.project.row_id.activity', ['row_id'=>$row_id, 'activity' => $userAssignedActivity['activity_id'], 'group_info' => $userAssignedActivity['group_id']])}}"><i
-                                                                class="icon-eye text-secondary fs-5"></i></a></li>
+
+                                                    @if($userAssignedActivity['answer_submitted'] && $userAssignedActivity['otpVerificationDone'])
+                                                        <a><i class="icon-check text-white fs-5"></i></a>
+                                                    @elseif($userAssignedActivity['answer_submitted'] && !$userAssignedActivity['otpVerificationDone'])
+                                                        <a class="text-white"
+                                                           href="{{route('otp_verification_page', ['row_id'=>$row_id, 'activity' => $userAssignedActivity['activity_id']])}}">
+                                                            OTP Verification Pending
+                                                        </a>
+                                                    @else
+                                                        <li class="view">
+                                                            <a
+                                                                href="{{route('user.project.row_id.activity', ['row_id'=>$row_id, 'activity' => $userAssignedActivity['activity_id'], 'group_info' => $userAssignedActivity['group_id']])}}"><i
+                                                                    class="icon-eye text-white fs-5"></i>
+                                                            </a>
+                                                        </li>
+                                                    @endif
                                                 @else
-                                                    <li class="view"><a
-                                                            href="{{route('user.project.row_id.activity', [ 'row_id'=>$row_id, 'activity' => $userAssignedActivity['activity_id'], 'group_info' => $userAssignedActivity['group_id']])}}"><i
-                                                                class="icon-eye text-secondary fs-5"></i></a></li>
+                                                    @if($userAssignedActivity['answer_submitted'] && $userAssignedActivity['otpVerificationDone'])
+                                                        <a><i class="icon-check text-white fs-5"></i></a>
+                                                    @elseif($userAssignedActivity['answer_submitted'] && !$userAssignedActivity['otpVerificationDone'])
+                                                        <a
+                                                            href="{{route('otp_verification_page', ['row_id'=>$row_id, 'activity' => $userAssignedActivity['activity_id']])}}"><i
+                                                                class="icon-eye text-white fs-5"></i></a>
+                                                    @else
+                                                        <li class="view"><a
+                                                                href="{{route('user.project.row_id.activity', [ 'row_id'=>$row_id, 'activity' => $userAssignedActivity['activity_id'], 'group_info' => $userAssignedActivity['group_id']])}}"><i
+                                                                    class="icon-eye text-white fs-5"></i></a></li>
+                                                    @endif
                                                 @endif
                                             </ul>
                                         </td>
@@ -67,7 +90,6 @@
                                 </tbody>
                             </table>
                             <div>
-                                {{--                                {{$userProjects->links()}}--}}
                             </div>
                         </div>
                     </div>

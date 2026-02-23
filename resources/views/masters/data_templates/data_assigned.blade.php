@@ -162,8 +162,8 @@
                 // 5. Draw the table
                 dt.draw();
             }
-
-            function render_assigned_user(users, assignedValues = []) {
+            
+             function render_assigned_user(users, assignedValues = []) {
                 // 1. Static labels
                 $("#model_title").html(`<strong class="txt-danger"></strong>Auditors List`);
                 $("#user_type").text("Auditor Name");
@@ -174,8 +174,8 @@
 
                 // 3. Convert assignedValues → single comma-separated string
                 const combinedHeadValues = (assignedValues || [])
-                    .map(v => v.head_value)
-                    .filter(value => value?.trim() !== '')  // Remove empty/whitespace values
+                    .map(v => v.head_value?.trim())   // trim first
+                    .filter(v => v) // keep only non-empty strings
                     .join(', ');
 
                 // 4. Add one row per user (same head-value string for each)
@@ -224,7 +224,7 @@
                                 "id": data_assigned_id
                             },
                             success: function(response) {
-                                console.log(response)
+                                console.log(response);
                                 if (response == "Success") {
                                     templates_table.row(tar_row).remove().draw();
                                     Swal.fire(
@@ -242,7 +242,7 @@
 
             $("#templates_table").on("click", ".view_auditors", function(event) {
                 const data_assigned_id = $(this).data('id');
-                // $("#user_assigned_model").modal('show')
+                $("#user_assigned_model").modal('show')
                 // alert(data_assigned_id)
 
                 $.ajax({
@@ -257,7 +257,6 @@
                         console.log(response);
                         if (response.message == "Success") {
                             render_assigned_user(response.user_list, response.distinctValuesAssign);
-                            // $("#user_assigned_model").modal('show')
                         }
                     }
                 })

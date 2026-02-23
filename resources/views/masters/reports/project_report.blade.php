@@ -54,41 +54,6 @@
                                                         </p>
                                                         @enderror
                                                     </div>
-                                                    <div class="col-xl-3 col-sm-3 d-none" id="group_display">
-                                                        <label class="form-label" for="activity_group_name_id">Select
-                                                            Activity Group</label>
-                                                        <select class="form-select" id="activity_group_name_id"
-                                                                name="activity_group_name_id"
-                                                                required="">
-                                                            <option selected="" disabled="" value="">Choose...</option>
-                                                            @foreach($activity_groups as $activity_group)
-                                                                <option value="{{$activity_group->id}}"
-                                                                        @if(old('activity_group_name_id') == $activity_group->id) selected @endif>{{$activity_group->activity_group_name}}</option>
-                                                            @endforeach
-                                                        </select>
-                                                        @error('activity_group_name_id')
-                                                        <p class="text-red-500 text-xs mt-1">
-                                                            {{$message}}
-                                                        </p>
-                                                        @enderror
-                                                    </div>
-                                                    <div class="col-xl-4 col-sm-4 " id="activites_display">
-                                                        <label class="form-label" for="activity_id">Select
-                                                            Activity</label>
-                                                        <select class="form-select" id="activity_id"
-                                                                name="activity_id[]" multiple=""
-                                                                required="">
-                                                            @foreach($activities as $activity)
-                                                                <option value="{{$activity->id}}"
-                                                                        @if(old('company_id') == $activity->id) selected @endif>{{$activity->activity_name}}</option>
-                                                            @endforeach
-                                                        </select>
-                                                        @error('activity_id')
-                                                        <p class="text-red-500 text-xs mt-1">
-                                                            {{$message}}
-                                                        </p>
-                                                        @enderror
-                                                    </div>
                                                     <div class="col-xl-4 col-sm-4 ">
                                                         <label class="form-label" for="row_id">Distributor</label>
                                                         <select class="form-select" id="row_id"
@@ -200,45 +165,9 @@
             });
             @endif
 
-            $("#activity_id").select2();
-
             const row_id_select = $("#row_id").select2();
             const project_id_select = $("#project_id").select2();
             const template_name_id_select = $("#template_name_id").select2();
-
-            function renderGroupActivities(activities) {
-                let activitySelect = $("#activity_id");
-                activitySelect.empty();
-                let activity_idArr = [];
-                $.each(activities, function (index1, group_activity) {
-                    activity_idArr.push(group_activity.activity_id);
-                })
-                $.each(all_activites, function (index, activity) {
-                    if ($.inArray(activity.id, activity_idArr) !== -1) {
-                        activitySelect.append($('<option>').text(activity.activity_name).val(activity.id));
-                    }
-                })
-
-            }
-
-            let all_activites = @json($activities);
-            $("#activity_group_name_id").change(function (e) {
-                const selectedGroup = $(this).val();
-                if (selectedGroup) {
-                    $.ajax({
-                        url: "{{route('group_activities')}}",
-                        type: "POST",
-                        data: {
-                            "_token": "{{@csrf_token()}}",
-                            "g_id": selectedGroup
-                        },
-                        success: function (response) {
-                            renderGroupActivities(response.get_group_activities)
-                        }
-                    })
-                }
-            })
-
             function render_headers(main_headers, sub_headers){
                const rowIds = $("#row_id");
                rowIds.empty();
@@ -249,20 +178,6 @@
                     rowIds.append($('<option>').text(main_header_info.value + ' - ' + sub_header_info.value).val(main_header_info.id));
                 })
             }
-
-            function activitySelectFunc(a_id = 0) {
-                let activitySelect = $("#activity_id");
-                activitySelect.empty();
-                $.each(all_activites, function (index, activity) {
-                    if (activity.id == a_id) {
-                        activitySelect.append($('<option>').text(activity.activity_name).val(activity.id).attr('selected', 'selected'));
-                    } else {
-                        activitySelect.append($('<option>').text(activity.activity_name).val(activity.id).attr('disabled', 'disabled'));
-                    }
-                })
-
-            }
-
             $("#template_name_id").change(function (e) {
                 const template_name_id = $(this).val();
                 const project_id = $("#project_id").val();
@@ -294,7 +209,7 @@
                                     }
                                     else{
                                         $("#activites_display").addClass('d-none');
-                                        // $("#group_display").removeClass('d-none');
+                                        $("#group_display").removeClass('d-none');
                                         $("#activity_group_name_id").val(make_select).trigger('change')
                                     }
 

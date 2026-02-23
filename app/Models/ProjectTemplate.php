@@ -18,12 +18,10 @@ class ProjectTemplate extends Model
     public function getTemplate(){
         return $this->belongsTo(TemplateName::class, 'template_name_id');
     }
-
     public function getProjectTemplateData(){
         return $this->hasMany(ProjectTemplateNameValuesNew::class, 'project_template_id')
             ->orderBy('id');
     }
-
     // Define the relationship with Activity model
     public function activity()
     {

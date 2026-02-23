@@ -139,6 +139,7 @@
                                                                for="template_name_head_id">Selector</label>
                                                         <select class="form-select" id="template_name_head_id"
                                                                 name="template_name_head_id" required=""
+
                                                         >
                                                             <option selected="" disabled="" value="">Choose...
                                                             </option>
@@ -149,8 +150,8 @@
                                                         </p>
                                                         @enderror
                                                     </div>
-                                                    <div class="col-xl-3 col-sm-3" id="template_head_values">
-                                                        <label class="form-label" for="template_name_head_values">Selector
+                                                    <div class="col-xl-3 col-sm-3">
+                                                        <label class="form-label" for="template_name_head_values" id="template_head_values">Selector
                                                             Values</label>
                                                         <select class="form-select" id="template_name_head_values"
                                                                 name="template_name_head_values[]" multiple="multiple"
@@ -326,6 +327,7 @@
             $.each(head_values, function (index, head_value) {
                 template_name_head_values_select.append($('<option>').text(head_value).val(head_value));
             })
+
             // $("#template_name_head_values").select2();
         }
 
@@ -347,10 +349,9 @@
                             "template_name_id": template_name_id,
                         },
                         success: function (response) {
-                            // console.log(response)
+                            console.log(response)
                             // document.querySelector('.loader-backdrop').style.display ='none';
                             if (response.message == "Success") {
-                                // console.log(response.related_head_values);
                                 if(response.related_head_values.length == 0){
                                     $('#template_head_values').addClass('d-none');
                                     $('#template_name_head_values').removeAttr('required');
@@ -492,6 +493,7 @@
                                     $('#template_name_head_values').attr('required', true);
                                 }
                                 //for empty data check
+                                
                                 if (response.project_templates_count > 1 && response
                                     .projectTemplate['is_master'] == 1) {
                                     $("#assign_outlets_con").removeClass('d-none');

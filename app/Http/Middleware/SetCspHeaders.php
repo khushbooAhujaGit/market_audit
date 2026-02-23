@@ -35,30 +35,7 @@ class SetCspHeaders
             );
             $response->setContent($content);
         }
-        // Correct and single CSP header
-        // $response->headers->set('Content-Security-Policy',
-        //     "default-src 'self'; " .
-        //     "connect-src 'self' https://ka-f.fontawesome.com https://api.iconify.design https://api.simplesvg.com https://api.unisvg.com; " .
-        //     "script-src 'self' 'nonce-$nonce' https://cdn.jsdelivr.net https://cdn.datatables.net https://kit.fontawesome.com https://code.jquery.com https://cdnjs.cloudflare.com; " .
-        //     "script-src-elem 'self' 'nonce-$nonce' https://cdn.jsdelivr.net https://cdn.datatables.net https://kit.fontawesome.com https://code.jquery.com https://cdnjs.cloudflare.com; " .
-        //     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.datatables.net https://ka-f.fontawesome.com; " .
-        //     "style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.datatables.net https://ka-f.fontawesome.com; " .
-        //     "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net https://cdn.jsdelivr.net/npm/bootstrap-icons data:; " .
-        //     "img-src 'self' data: https://cdn.datatables.net https://*.iconify.design;".
-        //     "script-src 'self' 'nonce-$nonce' https://cdn.jsdelivr.net https://cdn.datatables.net https://kit.fontawesome.com https://code.jquery.com https://cdnjs.cloudflare.com https://unpkg.com;" .
-        //     "script-src-elem 'self' 'nonce-$nonce' https://cdn.jsdelivr.net https://cdn.datatables.net https://kit.fontawesome.com https://code.jquery.com https://cdnjs.cloudflare.com https://unpkg.com "
-        // );
-//        $response->headers->set('Content-Security-Policy',
-//            "default-src 'self'; " .
-//            "script-src 'self' 'nonce-$nonce' 'unsafe-hashes' 'sha256-AbCdEf123...' https://cdn.jsdelivr.net ..." .
-//            "connect-src 'self' https://ka-f.fontawesome.com https://api.iconify.design https://api.simplesvg.com https://api.unisvg.com https://unpkg.com; " .
-//            "script-src 'self' 'nonce-$nonce' https://cdn.jsdelivr.net https://cdn.datatables.net https://kit.fontawesome.com https://code.jquery.com https://cdnjs.cloudflare.com https://unpkg.com; " .
-//            "script-src-elem 'self' 'nonce-$nonce' https://cdn.jsdelivr.net https://cdn.datatables.net https://kit.fontawesome.com https://code.jquery.com https://cdnjs.cloudflare.com https://unpkg.com; " .
-//            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.datatables.net https://ka-f.fontawesome.com https://unpkg.com; " .
-//            "style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdn.datatables.net https://ka-f.fontawesome.com https://unpkg.com; " .
-//            "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net https://cdn.jsdelivr.net/npm/bootstrap-icons data:; " .
-//            "img-src 'self' data: https://cdn.datatables.net https://*.iconify.design https://unpkg.com https://*.tile.openstreetmap.org;"
-//        );
+     
         $response->headers->set('Content-Security-Policy',
             "default-src 'self'; " .
             "connect-src 'self' https://ka-f.fontawesome.com https://api.iconify.design https://api.simplesvg.com https://api.unisvg.com https://unpkg.com; " .
@@ -71,7 +48,8 @@ class SetCspHeaders
         $response->headers->set('X-Frame-Options', 'SAMEORIGIN');
         $response->headers->set('X-Content-Type-Options', 'nosniff');
         $response->headers->set('Referrer-Policy', 'strict-origin-when-cross-origin');
-        $response->headers->set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+        // $response->headers->set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+        $response->headers->set('Permissions-Policy', 'geolocation=(self), microphone=(), camera=()');
         $response->headers->set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
         return $response;
     }

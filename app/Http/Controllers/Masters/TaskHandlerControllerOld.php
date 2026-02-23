@@ -30,7 +30,7 @@ use Illuminate\Support\Facades\Session;
 
 // use http\Client\Curl\User;
 
-class TaskHandlerControllerOld extends Controller
+class TaskHandlerController extends Controller
 {
     // this is to render the projects assigned to the user logged in
     public function userProjects()

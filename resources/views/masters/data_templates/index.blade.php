@@ -43,7 +43,7 @@
                             </tbody>
                         </table>
                         <div>
-                            {{$template_names->links()}}
+                           
                         </div>
                     </div>
                 </div>
@@ -59,7 +59,7 @@
         $(document).ready(function (){
             // Initialize DataTable
             const templates_table = $("#templates_table").DataTable({
-                paging: false
+                paging: true
             });
             @if(session()->has('message'))
             Swal.fire({
