@@ -3,15 +3,18 @@
 namespace App\Http\Controllers\Masters;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessExcelImportJob;
 use App\Models\Activity;
 use App\Models\ActivityGroup;
 use App\Models\Project;
 use App\Models\ProjectTemplate;
 use App\Models\ProjectTemplateNameValuesNew;
 use App\Models\Question;
+use App\Models\QuestionSubQuestion;
 use App\Models\RemarkMaster;
 use App\Models\TemplateNameHead;
 use App\Models\TempUserActivityAnswersData;
+use App\Models\ActivityInstanceClose;
 use App\Models\User;
 use App\Models\Verifier;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -65,7 +68,7 @@ class VerifierController extends Controller
         // dd($data_to_verify_Ids, $activity_group_info->id);
         $verification_data = [];
         foreach ($data_to_verify_Ids as $verify_id) {
-//            $verify_data = ProjectTemplateNameValue::with('getDataOfRows')->where('row_id', $verify_id)->first();
+            //            $verify_data = ProjectTemplateNameValue::with('getDataOfRows')->where('row_id', $verify_id)->first();
             $verify_data = ProjectTemplateNameValuesNew::find($verify_id);
             $template_name_values = [];
             $json_data = json_decode($verify_data->template_data_json);
@@ -78,7 +81,7 @@ class VerifierController extends Controller
             }
             $verify_data->templateNameValues = $template_name_values;
             $verification_data[] = $verify_data;
-//            $verification_data['templateNameValues'] = $template_name_values;
+            //            $verification_data['templateNameValues'] = $template_name_values;
         }
 
         return view('masters.verifiers.verifications', compact('verification_data', 'activity_info', 'activity_group_info', 'projectTemplateInfo'));
@@ -95,34 +98,65 @@ class VerifierController extends Controller
             ->get()
             ->pluck('id');
 
-        //khushboo 06-05-2025
-        $data_to_verify = TempUserActivityAnswersData::whereIn('row_id', $uniqueRowIds)
+        // For activity_add_on activities, only show rows where the auditor has
+        // finally submitted (closed) all instances via the Submit button.
+        $isActivityAddOn = $projectTemplateInfo->activity_add_on == 1;
+        if ($isActivityAddOn) {
+            $addOnActivityIds = json_decode($projectTemplateInfo->activity_add_on_activity_ids ?? '[]', true);
+            $activityInAddOn  = empty($addOnActivityIds) || in_array((int)$a, array_map('intval', $addOnActivityIds));
+
+            if ($activityInAddOn) {
+                // Only include rows that have been fully closed by the auditor
+                $closedRowIds = ActivityInstanceClose::where('activity_id', $a)
+                    ->whereIn('row_id', $uniqueRowIds)
+                    ->pluck('row_id')
+                    ->unique()
+                    ->toArray();
+                $uniqueRowIds = collect($closedRowIds);
+            }
+        }
+
+        // Get unique (row_id, activity_sequence) pairs that are pending verification
+        $rawPairs = TempUserActivityAnswersData::whereIn('row_id', $uniqueRowIds)
             ->where('activity_id', $a)
             ->where('status', 0)
-            ->orderBy('id', 'DESC')
+            ->select('row_id', 'activity_sequence')
+            ->distinct()
+            ->orderBy('row_id')
+            ->orderByRaw('COALESCE(activity_sequence, 0) ASC')
             ->get();
 
-        // Now extract unique row_ids in descending order
-        $data_to_verify_Ids = $data_to_verify
-            ->pluck('row_id')
-            ->unique()
-            ->values();
-        //khushboo 06-05-2025
         $verification_data = [];
-        foreach ($data_to_verify_Ids as $verify_id) {
-            $verify_data = ProjectTemplateNameValuesNew::find($verify_id);
-            $template_name_values = [];
-            $json_data = json_decode($verify_data->template_data_json);
-            foreach ($json_data as $key => $value) {
-                $templateHeadName = TemplateNameHead::find($key);
-                $template_name_values[] = [
-                    'name' => $templateHeadName->template_head_name,
-                    'value' => $value,
-                ];
+        $rowCache = [];
+        foreach ($rawPairs as $pair) {
+            if (!isset($rowCache[$pair->row_id])) {
+                $rd = ProjectTemplateNameValuesNew::find($pair->row_id);
+                if (!$rd) continue;
+                $vals = [];
+                $json_data = json_decode($rd->template_data_json);
+                foreach ($json_data as $key => $value) {
+                    $head = TemplateNameHead::find($key);
+                    $vals[] = ['name' => $head->template_head_name, 'value' => $value];
+                }
+                $rd->templateNameValues = $vals;
+                $rowCache[$pair->row_id] = ['model' => $rd, 'vals' => $vals];
             }
-            $verify_data->templateNameValues = $template_name_values;
-            $verification_data[] = $verify_data;
-//            $verification_data['templateNameValues'] = $template_name_values;
+
+            $seq = (int)($pair->activity_sequence ?? 0);
+            $instance_label = null;
+            if ($seq > 0) {
+                $inst = \App\Models\ActivityRepeatInstance::where('row_id', $pair->row_id)
+                    ->where('activity_id', $a)
+                    ->where('activity_sequence', $seq)
+                    ->first();
+                $instance_label = $inst ? $inst->instance_label : "Instance {$seq}";
+            }
+
+            $entry = clone $rowCache[$pair->row_id]['model'];
+            $entry->templateNameValues = $rowCache[$pair->row_id]['vals'];
+            $entry->activity_sequence  = $seq;
+            $entry->instance_label     = $instance_label;
+            $verification_data[] = $entry;
         }
         return view('masters.verifiers.verifications', compact('verification_data', 'activity_info'));
     }
@@ -138,9 +172,9 @@ class VerifierController extends Controller
     }
 
 
-    public function data_to_verify($r, $a, $g = null)
+    public function data_to_verify($r, $a, $g = null, $seq = 0)
     {
-//         dd($r);
+        //         dd($r);
         $related_values = ProjectTemplateNameValuesNew::find($r);
 
         $template_name_values = [];
@@ -168,11 +202,52 @@ class VerifierController extends Controller
         if ($g) {
             $activity_group_info = ActivityGroup::findOrFail($g);
         }
-        $related_questions = Question::where('activity_id', $activity_check->id)->orderBy('question_sequence', 'asc')->get();
+        $related_questions = Question::with([
+            'getOptions',
+            'getSubjects.getOptions',
+            'subQuestions.childQuestion.getOptions',
+            'subQuestions.childQuestion.getSubjects.getOptions',
+            'subQuestions.childQuestion.subQuestions.childQuestion.getOptions',
+            'subQuestions.childQuestion.subQuestions.childQuestion.subQuestions.childQuestion.getOptions',
+        ])->where('activity_id', $activity_check->id)->orderBy('question_sequence', 'asc')->get();
+
+        // BFS: collect ALL sub-question child IDs across all levels
+        $sub_question_child_ids = [];
+        $toProcess = $related_questions->pluck('id')->toArray();
+        while (!empty($toProcess)) {
+            $childIds = QuestionSubQuestion::whereIn('parent_question_id', $toProcess)
+                ->pluck('child_question_id')->toArray();
+            $newIds = array_diff($childIds, $sub_question_child_ids);
+            if (empty($newIds)) break;
+            $sub_question_child_ids = array_merge($sub_question_child_ids, $newIds);
+            $toProcess = array_values($newIds);
+        }
+
+        $activity_sequence = (int)$seq;
+        $instance_label = null;
+        if ($activity_sequence > 0) {
+            $inst = \App\Models\ActivityRepeatInstance::where('row_id', $r)
+                ->where('activity_id', $a)
+                ->where('activity_sequence', $activity_sequence)
+                ->first();
+            $instance_label = $inst ? $inst->instance_label : "Instance {$activity_sequence}";
+        }
+
         $user_responses = TempUserActivityAnswersData::where('row_id', $r)
-            ->where('activity_id', $activity_check->id)->get();
+            ->where('activity_id', $activity_check->id)
+            ->where(function ($q) use ($activity_sequence) {
+                if ($activity_sequence > 0) {
+                    $q->where('activity_sequence', $activity_sequence);
+                } else {
+                    $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0);
+                }
+            })
+            ->get();
 
-
+        //check if otp verification is allowed
+        $project = Project::find($projectTemplateData->project_id);
+        $is_otp_required = $project->is_otp_required;
+        // if ($is_otp_required && $user_responses[0]->otp_verified_status == 1) {
         $checkLatLongData = TempUserActivityAnswersData::where('row_id', $r)
             ->where('activity_id', $activity_check->id)->whereNotNull('latitude')->whereNotNull('longitude')->exists();
         $userLatLongData = [];
@@ -184,13 +259,17 @@ class VerifierController extends Controller
                 ->latest() // orders by created_at descending by default
                 ->first(['latitude', 'longitude']);
         }
-//         dd($user_responses);
+        // dd($user_responses, $related_values);
 
         $auditorData = User::find($user_responses[0]->user_id);
         $agencyData = !empty($auditorData) ? User::find($auditorData->agency_user_id)->first() : null;
         $auditDateTime = $user_responses[0]->created_at->format('Y-m-d H:i:s');
 
-        return view('masters.verifiers.verify', compact('auditDateTime', 'agencyData', 'auditorData', 'related_values', 'activity_check', 'related_questions', 'user_responses', 'activity_group_info', 'remarks', 'userLatLongData'));
+        return view('masters.verifiers.verify', compact('auditDateTime', 'agencyData', 'auditorData', 'related_values', 'activity_check', 'related_questions', 'sub_question_child_ids', 'user_responses', 'activity_group_info', 'remarks', 'userLatLongData', 'activity_sequence', 'instance_label'));
+        // }
+        // else{
+        //     return redirect()->back()->with('message', 'OTP Verification is pending for this audit');
+        // }
     }
 
 
@@ -205,8 +284,17 @@ class VerifierController extends Controller
         $userId = Auth::id();
         $new_status = "";
         $row_id = $request->row_id;
-//        dd($row_id);
         $a_id = $request->activity_id;
+        $activity_sequence = (int)($request->activity_sequence ?? 0);
+        $seqFilter = function ($q) use ($activity_sequence) {
+            if ($activity_sequence > 0) {
+                $q->where('activity_sequence', $activity_sequence);
+            } else {
+                $q->where(function ($inner) {
+                    $inner->whereNull('activity_sequence')->orWhere('activity_sequence', 0);
+                });
+            }
+        };
 
         //khushboo 18-06-2025
         //answer pdf create
@@ -217,7 +305,7 @@ class VerifierController extends Controller
             ->select(
                 DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$projectTemplateHeaderId}\"')) as value")
             )
-//            ->where('template_name_head_id', $projectTemplateHeaderId)
+            //            ->where('template_name_head_id', $projectTemplateHeaderId)
             ->first();
         //answer pdf create
         //khushboo 18-06-2025
@@ -226,7 +314,7 @@ class VerifierController extends Controller
         $related_questions = Question::where('activity_id', $activity_info->id)->pluck('id')->toArray();
         $g_id = $group_id ? $group_id : 0;
 
-        $verifier_remark = $request->remark;
+        $verifier_remark = $request->remark == 'other' && isset($request->other_remark) ? $request->other_remark : $request->remark;
         //khushboo 10-06-25
         if ($request->remark == 'other' && isset($request->other_remark) && empty($request->other_remark)) {
             redirect()->back()->with('error', 'Please Add Other Remark Text');
@@ -236,7 +324,7 @@ class VerifierController extends Controller
         $baseDirectory = 'activityAnswerImages/'; // this is the base directory where all the project directories will be kept
 
         $get_project_template_value_row_info = ProjectTemplateNameValuesNew::find($row_id);
-//        dd($get_project_template_value_row_info->getProjectTemplateData->getProject);
+        //        dd($get_project_template_value_row_info->getProjectTemplateData->getProject);
 
         $projectName = $get_project_template_value_row_info->getProjectTemplateData->getProject->project_name;
         $projectId = $get_project_template_value_row_info->getProjectTemplateData->getProject->id;
@@ -253,6 +341,7 @@ class VerifierController extends Controller
             $new_status = 5; // this means the the answer user filled is verified by the verifier
             $message = "Verified Successfully";
         }
+
 
         // Check if the "reject" button was clicked
         if ($request->has('reject')) {
@@ -276,18 +365,65 @@ class VerifierController extends Controller
 
                 $verifier_remark = $newRemark->id;
             }
-
         }
         $auditDate = null;
 
         //khushboo 10-06-25
 
-        $parameters = $request->except(['activity_id', 'activity_group_id', 'row_id', '_token', 'reject', 'approve', 'activity_group_name_id', 'sequence', 'remark']);
+        //khushboo 07-05-26
+
+        // Check if the "send_back" button was clicked
+        if ($request->has('send_back')) {
+            // Handle the approval logic
+            $new_status = 3; // this means the the answer user filled is verified by the verifier
+            $message = "Sendback Successfully";
+
+            //check for otp
+            $otp_verified_status_exist = TempUserActivityAnswersData::where('row_id', $row_id)
+                ->where('activity_id', $request->activity_id)
+                ->where($seqFilter)
+                ->where('otp_verified_status', 1)->exists();
+            if ($otp_verified_status_exist) {
+                TempUserActivityAnswersData::where('row_id', $row_id)
+                    ->where('activity_id', $request->activity_id)
+                    ->where($seqFilter)
+                    ->update([
+                        'status' => 3,
+                        'otp_verified_status' => 0,
+                        'mobile_otp' => null,
+                        'mobile_no' => null
+                    ]);
+            } else {
+                TempUserActivityAnswersData::where('row_id', $row_id)
+                    ->where('activity_id', $request->activity_id)
+                    ->where($seqFilter)
+                    ->update(['status' => 3]);
+            }
+            // Mark repeat instance as pending so user can re-submit
+            if ($activity_sequence > 0) {
+                \App\Models\ActivityRepeatInstance::where('row_id', $row_id)
+                    ->where('activity_id', $request->activity_id)
+                    ->where('activity_sequence', $activity_sequence)
+                    ->update(['status' => 0]);
+            }
+            // Remove close record so auditor can re-enter instances page after sendback
+            ActivityInstanceClose::where('row_id', $row_id)
+                ->where('activity_id', $request->activity_id)
+                ->delete();
+
+            $params = Session::get('activity_verification_rerender');
+            return redirect(route('activity.verification.view', $params))->with('message', $message);
+        }
+
+        //khushboo 07-05-26
+
+        $parameters = $request->except(['activity_id', 'activity_group_id', 'row_id', '_token', 'reject', 'approve', 'activity_group_name_id', 'sequence', 'remark', 'activity_sequence', 'other_remark']);
         foreach ($parameters as $key => $value) {
             if (!is_object($value)) {
                 if (!empty($value)) {
                     $user_answer_get = TempUserActivityAnswersData::where("row_id", $row_id)
                         ->where("activity_id", $a_id)
+                        ->where($seqFilter)
                         ->where(function ($query) use ($g_id) {
                             if ($g_id == 0) {
                                 $query->whereNull('activity_group_name_id')
@@ -299,8 +435,8 @@ class VerifierController extends Controller
                         ->where('question_id', $key)->first();
 
                     $check_questionType = Question::find($key);
-//                    dd($key);
-//                    dd($check_questionType->question_type);
+                    //                    dd($key);
+                    //                    dd($check_questionType->question_type);
                     if (!empty($check_questionType)) {
                         if ($check_questionType->question_type == "Date") {
                             if (isset($value)) {
@@ -335,12 +471,12 @@ class VerifierController extends Controller
                                 $value = $relative_path;
                             }
                         }
-
                     }
 
                     if (!empty($check_questionType) && $check_questionType->question_type == "Subjective") {
                         $user_answer_get = TempUserActivityAnswersData::where("row_id", $row_id)
                             ->where("activity_id", $a_id)
+                            ->where($seqFilter)
                             ->where(function ($query) use ($g_id) {
                                 if ($g_id == 0) {
                                     $query->whereNull('activity_group_name_id')
@@ -352,9 +488,9 @@ class VerifierController extends Controller
                             ->where('question_id', $key)->get();
 
                         foreach ($user_answer_get as $key1 => $value1) {
-//                            echo '<pre>';
-//                            echo 'subjective - '.$value1->id;
-//                            echo $value;
+                            //                            echo '<pre>';
+                            //                            echo 'subjective - '.$value1->id;
+                            //                            echo $value;
 
                             if (!empty($value) && $value1->user_answer != $value) {
                                 $value1->user_answer = $value;
@@ -373,8 +509,8 @@ class VerifierController extends Controller
                             }
                         }
                     } else {
-//                        echo '<pre>';
-//                        echo 'non subjective'.$user_answer_get->id;
+                        //                        echo '<pre>';
+                        //                        echo 'non subjective'.$user_answer_get->id;
                         if ($user_answer_get) {
 
                             if (!empty($value) && $user_answer_get->user_answer != $value) {
@@ -393,16 +529,16 @@ class VerifierController extends Controller
                             }
                         }
                     }
-
                 }
             }
         }
         // dd($new_status);
         foreach ($related_questions as $re_quest) {
 
-//            dd($row_id, $a_id, $g_id, $re_quest);
+            //            dd($row_id, $a_id, $g_id, $re_quest);
             $user_answer_count = TempUserActivityAnswersData::where("row_id", $row_id)
                 ->where("activity_id", $a_id)
+                ->where($seqFilter)
                 ->where(function ($query) use ($g_id) {
                     if ($g_id == 0) {
                         $query->whereNull('activity_group_name_id')
@@ -416,6 +552,7 @@ class VerifierController extends Controller
 
                 $user_answer_get = TempUserActivityAnswersData::where("row_id", $row_id)
                     ->where("activity_id", $a_id)
+                    ->where($seqFilter)
                     ->where(function ($query) use ($g_id) {
                         if ($g_id == 0) {
                             $query->whereNull('activity_group_name_id')
@@ -428,11 +565,11 @@ class VerifierController extends Controller
 
                 $auditDate = $user_answer_get->created_at;
 
-//                echo '<pre>';
-//                echo 'image'.$user_answer_get->id;
+                //                echo '<pre>';
+                //                echo 'image'.$user_answer_get->id;
                 if ($request->hasFile($re_quest)) {
-//                    echo '<pre>';
-//                    echo 'image edit'.$user_answer_get->id;
+                    //                    echo '<pre>';
+                    //                    echo 'image edit'.$user_answer_get->id;
                     // this is to remove the previous file from the folder when verifier is updating the file
                     $folder = "answer";
                     $previousImagePath = public_path('answer/' . basename($user_answer_get->user_answer));
@@ -450,21 +587,21 @@ class VerifierController extends Controller
                     $user_answer_get->edited_by_verifier = 1;
                     $user_answer_get->save();
                 } else {
-//                dd($user_answer_get->status);
-//                print_r($user_answer_get);
-//                    echo '<pre>';
-//                    echo 'image save'.$user_answer_get->id;
+                    //                dd($user_answer_get->status);
+                    //                print_r($user_answer_get);
+                    //                    echo '<pre>';
+                    //                    echo 'image save'.$user_answer_get->id;
                     $user_answer_get->status = $new_status;
                     $user_answer_get->remark = $verifier_remark;
                     $user_answer_get->verified_by = $userId;
                     $user_answer_get->edited_by_verifier = 1;
                     $user_answer_get->save();
                 }
-
             } else if ($user_answer_count > 1) {
 
                 $user_answer_get = TempUserActivityAnswersData::where("row_id", $row_id)
                     ->where("activity_id", $a_id)
+                    ->where($seqFilter)
                     ->where(function ($query) use ($g_id) {
                         if ($g_id == 0) {
                             $query->whereNull('activity_group_name_id')
@@ -478,12 +615,12 @@ class VerifierController extends Controller
                 $auditDate = $user_answer_get[0]->created_at;
 
                 foreach ($user_answer_get as $key1 => $value1) {
-//                    echo '<pre>';
-//                    echo 'subj other img- '.$value1->id;
+                    //                    echo '<pre>';
+                    //                    echo 'subj other img- '.$value1->id;
 
                     if ($request->hasFile($re_quest)) {
-//                        echo '<pre>';
-//                        echo 'subj other with edit img- '.$value1->id;
+                        //                        echo '<pre>';
+                        //                        echo 'subj other with edit img- '.$value1->id;
                         // this is to remove the previous file from the folder when verifier is updating the file
                         $folder = "answer";
                         $previousImagePath = public_path('answer/' . basename($user_answer_get->user_answer));
@@ -501,34 +638,28 @@ class VerifierController extends Controller
                         $value1->edited_by_verifier = 1;
                         $value1->save();
                     } else {
-//                dd($user_answer_get->status);
-//                print_r($user_answer_get);
-//                        echo '<pre>';
-//                        echo 'subj other without edit img- '.$value1->id;
+                        //                dd($user_answer_get->status);
+                        //                print_r($user_answer_get);
+                        //                        echo '<pre>';
+                        //                        echo 'subj other without edit img- '.$value1->id;
                         $value1->status = $new_status;
                         $value1->remark = $verifier_remark;
                         $value1->verified_by = $userId;
                         $value1->edited_by_verifier = 1;
                         $value1->save();
                     }
-
                 }
-
             }
-
-
         }
 
         try {
-//            dd('fghgf');
+            //            dd('fghgf');
             $this->storeAnswerPdf($row_id, $projectTemplateValueData->value, $a_id, $auditDate);
-
         } catch (\Exception $e) {
-//            dd($e->getMessage());
+            //            dd($e->getMessage());
         }
 
-
-//        dd('gjnhg');
+        //        dd('gjnhg');
 
         if ($group_or_single == 1) {
             $params = Session::get('group_verification_rerender');
@@ -552,7 +683,7 @@ class VerifierController extends Controller
         $userId = Auth::id();
         $new_status = "";
         $row_id = $request->row_id;
-//        dd($row_id);
+        //        dd($row_id);
         $a_id = $request->activity_id;
 
         //khushboo 18-06-2025
@@ -564,7 +695,7 @@ class VerifierController extends Controller
             ->select(
                 DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$projectTemplateHeaderId}\"')) as value")
             )
-//            ->where('template_name_head_id', $projectTemplateHeaderId)
+            //            ->where('template_name_head_id', $projectTemplateHeaderId)
             ->first();
         //answer pdf create
         //khushboo 18-06-2025
@@ -583,7 +714,7 @@ class VerifierController extends Controller
         $baseDirectory = 'activityAnswerImages/'; // this is the base directory where all the project directories will be kept
 
         $get_project_template_value_row_info = ProjectTemplateNameValuesNew::find($row_id);
-//        dd($get_project_template_value_row_info->getProjectTemplateData->getProject);
+        //        dd($get_project_template_value_row_info->getProjectTemplateData->getProject);
 
         $projectName = $get_project_template_value_row_info->getProjectTemplateData->getProject->project_name;
         $projectId = $get_project_template_value_row_info->getProjectTemplateData->getProject->id;
@@ -624,7 +755,6 @@ class VerifierController extends Controller
 
                 $verifier_remark = $newRemark->id;
             }
-
         }
         $auditDate = null;
 
@@ -647,8 +777,8 @@ class VerifierController extends Controller
                         ->where('question_id', $key)->first();
 
                     $check_questionType = Question::find($key);
-//                    dd($key);
-//                    dd($check_questionType->question_type);
+                    //                    dd($key);
+                    //                    dd($check_questionType->question_type);
                     if (!empty($check_questionType)) {
                         if ($check_questionType->question_type == "Date") {
                             if (isset($value)) {
@@ -683,7 +813,6 @@ class VerifierController extends Controller
                                 $value = $relative_path;
                             }
                         }
-
                     }
 
                     if (!empty($check_questionType) && $check_questionType->question_type == "Subjective") {
@@ -731,14 +860,13 @@ class VerifierController extends Controller
                             }
                         }
                     }
-
                 }
             }
         }
         // dd($new_status);
         foreach ($related_questions as $re_quest) {
 
-//            dd($row_id, $a_id, $g_id, $re_quest);
+            //            dd($row_id, $a_id, $g_id, $re_quest);
             $user_answer_count = TempUserActivityAnswersData::where("row_id", $row_id)
                 ->where("activity_id", $a_id)
                 ->where(function ($query) use ($g_id) {
@@ -785,18 +913,18 @@ class VerifierController extends Controller
                     $user_answer_get->edited_by_verifier = 1;
                     $user_answer_get->save();
                 } else {
-//                dd($user_answer_get->status);
-//                print_r($user_answer_get);
+                    //                dd($user_answer_get->status);
+                    //                print_r($user_answer_get);
                     $user_answer_get->status = $new_status;
                     $user_answer_get->remark = $verifier_remark;
                     $user_answer_get->verified_by = $userId;
                     $user_answer_get->save();
                 }
-
             } else if ($user_answer_count > 1) {
 
                 $user_answer_get = TempUserActivityAnswersData::where("row_id", $row_id)
                     ->where("activity_id", $a_id)
+                    ->where($seqFilter)
                     ->where(function ($query) use ($g_id) {
                         if ($g_id == 0) {
                             $query->whereNull('activity_group_name_id')
@@ -830,31 +958,26 @@ class VerifierController extends Controller
                         $value1->edited_by_verifier = 1;
                         $value1->save();
                     } else {
-//                dd($user_answer_get->status);
-//                print_r($user_answer_get);
+                        //                dd($user_answer_get->status);
+                        //                print_r($user_answer_get);
                         $value1->status = $new_status;
                         $value1->remark = $verifier_remark;
                         $value1->verified_by = $userId;
                         $value1->save();
                     }
-
                 }
-
             }
-
-
         }
 
         try {
 
             $this->storeAnswerPdf($row_id, $projectTemplateValueData->value, $a_id, $auditDate);
-
         } catch (\Exception $e) {
-//            dd($e->getMessage());
+            //            dd($e->getMessage());
         }
 
 
-//        dd('gjnhg');
+        //        dd('gjnhg');
 
         if ($group_or_single == 1) {
             $params = Session::get('group_verification_rerender');
@@ -870,16 +993,16 @@ class VerifierController extends Controller
     public function storeAnswerPdf($r, $v, $a, $auditDate)
     {
 
-//        $related_values = ProjectTemplateNameValue::where('row_id', $r)->where('value', $v)->get();
+        //        $related_values = ProjectTemplateNameValue::where('row_id', $r)->where('value', $v)->get();
         $related_values = ProjectTemplateNameValuesNew::where('id', $r)
-//            ->where('value', $v)
+            //            ->where('value', $v)
             ->where('template_data_json', 'like', '%"' . $v . '"%')
             ->get();
-        dd($related_values);
+        //        dd($related_values);
 
         $projectTemplateData = ProjectTemplate::with(['getMainHeader', 'getSubHeader'])->where('id', $related_values[0]->project_template_id)->first();
 
-//        dd($projectTemplateData);
+        //        dd($projectTemplateData);
         $remarks = RemarkMaster::where('project_id', $projectTemplateData->project_id)->where('status', 1)->get();
 
         $activity_check = Activity::find($a);
@@ -940,7 +1063,7 @@ class VerifierController extends Controller
             $sanitizedProjectName = str_replace(' ', '-', $projectName);
             $fileName = 'Audit-' . $sanitizedProjectName . '_' . $r . '_' . $auditDate . '.pdf';
             // Define the PDF filename
-//            $fileName = 'Audit-' . $projectName . '_' . $r . '_' . $auditDate . '.pdf';
+            //            $fileName = 'Audit-' . $projectName . '_' . $r . '_' . $auditDate . '.pdf';
 
             // Full path to save
             $fullFilePath = public_path($answerPdfsDirectory . $fileName);
@@ -952,15 +1075,11 @@ class VerifierController extends Controller
 
                 // 3️⃣ Give the newly‑created file full permissions too
                 $this->setFilePermissions($fullFilePath, 0777);
-
             } else {
                 // Optionally log or return message
                 Log::info("PDF already exists: " . $fileName);
             }
-
-
         }
-
     }
 
     private function ensureWritableDirectory(string $absPath, int $mode = 0777): void
@@ -1005,7 +1124,7 @@ class VerifierController extends Controller
         }
 
         $related_questions = Question::where('activity_id', $activity_check->id)->orderBy('question_sequence', 'asc')->get();
-//        dd($related_questions);
+        //        dd($related_questions);
 
         $user_responses = TempUserActivityAnswersData::with('getUser')
             ->where('row_id', $r)
@@ -1048,7 +1167,6 @@ class VerifierController extends Controller
                 'auditDate',
             )
         );
-
     }
 
     public function downloadPdfTemplate(Request $request)
@@ -1057,10 +1175,10 @@ class VerifierController extends Controller
         $v = $request->distributor_value;
         $a = $request->activity_id;
 
-//        $related_values = ProjectTemplateNameValue::where('row_id', $r)->where('value', $v)->get();
+        //        $related_values = ProjectTemplateNameValue::where('row_id', $r)->where('value', $v)->get();
 
         $related_values = ProjectTemplateNameValuesNew::where('id', $r)
-//            ->where('value', $v)
+            //            ->where('value', $v)
             // ->where('template_data_json', 'like', '%"'.$v.'"%')
             //  ->whereJsonContains('template_data_json', $v)
             ->where('template_data_json', 'like', '%' . addslashes($v) . '%')
@@ -1071,7 +1189,7 @@ class VerifierController extends Controller
 
         $projectTemplateData = ProjectTemplate::with(['getMainHeader', 'getSubHeader'])->where('id', $related_values[0]->project_template_id)->first();
 
-//        dd($projectTemplateData);
+        //        dd($projectTemplateData);
         $remarks = RemarkMaster::where('project_id', $projectTemplateData->project_id)->where('status', 1)->get();
 
         $activity_check = Activity::find($a);
@@ -1095,7 +1213,7 @@ class VerifierController extends Controller
             $templateJson = json_decode($related_values[0]->template_data_json, true);
 
             $mainHeaderValue = $templateJson[$projectTemplateData->main_header] ?? null;
-            $subHeaderValue  = $templateJson[$projectTemplateData->sub_header] ?? null;
+            $subHeaderValue = $templateJson[$projectTemplateData->sub_header] ?? null;
 
 
             $pdf = Pdf::loadView('masters.pdf_templates.verify_template', [
@@ -1114,7 +1232,7 @@ class VerifierController extends Controller
             // File name and path
             $fileName = 'Audit-' . uniqid() . '.pdf';
             $filePath = public_path('temp/' . $fileName);
-//        dd($filePath);
+            //        dd($filePath);
 
             // Ensure the directory exists
             if (!file_exists(public_path('temp'))) {
@@ -1132,7 +1250,6 @@ class VerifierController extends Controller
                 'file_name' => $fileName
             ]);
         }
-
     }
 
     public function deleteTempPdf(Request $request)
@@ -1163,14 +1280,14 @@ class VerifierController extends Controller
             $templateIds = Verifier::where('user_id', $userId)
                 ->pluck('project_template_name_id');
 
-//            dd($templateIds);
+            //            dd($templateIds);
             // Now get projects that are linked to those templates
             $projects = Project::whereHas('getProjectTemplates', function ($query) use ($templateIds) {
                 $query->whereIn('id', $templateIds);
             })
                 ->orderBy('id', 'DESC')->get();
 
-//            dd($projects);
+            //            dd($projects);
         }
 
         if ($currentUser->getRoleNames()->first() == 'Company User') {
@@ -1200,9 +1317,8 @@ class VerifierController extends Controller
                 ->get();
         }
 
-//        dd($projects);
+        //        dd($projects);
         return view('masters.companies.pdf_report_page', compact('companies', 'currentUser', 'projects', 'currentUserRole'));
-
     }
 
 
@@ -1216,7 +1332,7 @@ class VerifierController extends Controller
         $startDate = $request->start_date;
 
 
-//        dd(empty($startDate));
+        //        dd(empty($startDate));
 
         if (empty($rowIds)) {
             return response()->json(['error' => 'No row IDs provided.'], 422);
@@ -1238,7 +1354,7 @@ class VerifierController extends Controller
 
                 $projectName = $projectData->project_name;
                 $sanitizedProjectName = str_replace(' ', '-', $projectName);
-//                $sanitizedProjectName = Str::slug($projectName);
+                //                $sanitizedProjectName = Str::slug($projectName);
                 $folderPath = public_path("activityAnswerImages/{$projectName}/" . now()->format('FY') . "/answerPdfs/");
 
                 if (!File::exists($folderPath)) continue;
@@ -1259,7 +1375,7 @@ class VerifierController extends Controller
                     // dd($fileDate);
 
 
-//                    dd($sanitizedProjectName);
+                    //                    dd($sanitizedProjectName);
                     $pattern = '/^Audit-' . preg_quote($sanitizedProjectName, '/') . '_(\d+)_([\d]{2}-[\d]{2}-[\d]{4})\.pdf$/';
 
                     if (preg_match($pattern, $fileName, $matches)) {
@@ -1286,7 +1402,6 @@ class VerifierController extends Controller
                         $zip->addFile($file->getRealPath(), $fileName);
                         $filesAdded = true;
                     }
-
                 }
             }
 
@@ -1300,7 +1415,5 @@ class VerifierController extends Controller
         }
 
         return response()->json(['error' => 'Could not create zip file.'], 500);
-
     }
-
 }

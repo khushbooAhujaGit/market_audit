@@ -1,8 +1,8 @@
 @extends('template.layouts.simple.master')
 @section('style')
     <link href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css"
-          rel="stylesheet">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+        rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
 
     <style>
@@ -14,8 +14,10 @@
         .table-avtar-new {
             height: 250px !important;
             width: 250px !important;
-            position: relative; /* Needed for absolute positioning */
-            overflow: hidden; /* Hide any image overflow */
+            position: relative;
+            /* Needed for absolute positioning */
+            overflow: hidden;
+            /* Hide any image overflow */
         }
 
         .table-avtar-new img {
@@ -80,6 +82,21 @@
                                         'lat',
                                         'long',
                                     ];
+
+                                    // Organize questions by parent-child relationship
+                                    $sub_question_child_ids = $sub_question_child_ids ?? [];
+                                    $parentQuestions = [];
+                                    $childQuestions = [];
+
+                                    foreach ($related_questions as $question) {
+                                        // Skip Outlet sub-children — rendered recursively under their Outlet parent
+                                        if (in_array($question->id, $sub_question_child_ids)) continue;
+                                        if ($question->is_parent == 1 || $question->parent_question_id == 0) {
+                                            $parentQuestions[] = $question;
+                                        } else {
+                                            $childQuestions[$question->parent_question_id][] = $question;
+                                        }
+                                    }
                                 @endphp
                                 <div class="col-xl-6 col-md-6">
                                     <div class="table-card">
@@ -90,19 +107,19 @@
                                             </thead>
                                             <tbody>
 
-                                            @foreach ($related_values->templateNameValues as $r_values)
-                                                @php
-                                                    $Value = trim($r_values['value']);
-                                                @endphp
-                                                @if (Str::contains($Value, $latlongArr))
-                                                    @php $latlongData[] = $r_values['value']; @endphp
-                                                @endif
-                                                <tr>
-                                                    <td class="fw-medium">
-                                                        {{ $r_values['name'] }}</td>
-                                                    <td>{{ $r_values['value'] }}</td>
-                                                </tr>
-                                            @endforeach
+                                                @foreach ($related_values->templateNameValues as $r_values)
+                                                    @php
+                                                        $Value = trim($r_values['value']);
+                                                    @endphp
+                                                    @if (Str::contains($Value, $latlongArr))
+                                                        @php $latlongData[] = $r_values['value']; @endphp
+                                                    @endif
+                                                    <tr>
+                                                        <td class="fw-medium">
+                                                            {{ $r_values['name'] }}</td>
+                                                        <td>{{ $r_values['value'] }}</td>
+                                                    </tr>
+                                                @endforeach
 
                                             </tbody>
                                         </table>
@@ -113,400 +130,1231 @@
                                             </thead>
                                             <tbody>
 
-                                            <tr class="mt-2">
-                                                <td class="fw-medium">Auditor Name</td>
-                                                <td>{{ !empty($auditorData) ? $auditorData->name : '' }}</td>
-                                            </tr>
-                                            <tr>
-                                                <td class="fw-medium">Agency Name</td>
-                                                <td>{{ !empty($agencyData) ? $agencyData->name : '' }}</td>
-                                            </tr>
-                                            <tr>
-                                                <td class="fw-medium">Audit Date / Time</td>
-                                                <td>{{ $auditDateTime??'' }}</td>
-                                            </tr>
+                                                <tr class="mt-2">
+                                                    <td class="fw-medium">Auditor Name</td>
+                                                    <td>{{ !empty($auditorData) ? $auditorData->name : '' }}</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="fw-medium">Agency Name</td>
+                                                    <td>{{ !empty($agencyData) ? $agencyData->name : '' }}</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="fw-medium">Audit Date / Time</td>
+                                                    <td>{{ $auditDateTime ?? '' }}</td>
+                                                </tr>
                                             </tbody>
                                         </table>
                                         <!--end table-->
                                         @if (!empty($latlongData) || !empty($userLatLongData))
-
                                             <div id="map" class=""
-                                                 style="height: 300px; margin-top: 15px; border-radius: 8px;"></div>
+                                                style="height: 300px; margin-top: 15px; border-radius: 8px;"></div>
                                         @endif
                                     </div>
                                 </div>
                                 <div class="col-xl-6 col-md-6">
                                     <div class="card">
                                         <div class="table-card">
-                                            <h5 class="mt-2 p-2">Activity Questions <span
-                                                    class="fs-5 float-end  badge bg-secondary"
+                                            <h5 class="mt-2 p-2">Activity Questions
+                                                <span class="fs-5 float-end badge bg-secondary"
                                                     id="edit_answers">Edit</span>
                                             </h5>
                                             <form method="post" action="{{ route('verifier.activityQuestionAnswers') }}"
-                                                  enctype="multipart/form-data">
+                                                enctype="multipart/form-data">
                                                 @csrf
                                                 <input type="hidden" name="row_id" value="{{ $related_values->id }}">
                                                 <input type="hidden" name="activity_id"
-                                                       value="{{ $related_questions[0]->activity_id }}">
+                                                    value="{{ $related_questions[0]->activity_id }}">
+                                                <input type="hidden" name="activity_sequence"
+                                                    value="{{ $activity_sequence ?? 0 }}">
                                                 @if ($activity_group_info)
                                                     <input type="hidden" name="activity_group_id"
-                                                           value="{{ $activity_group_info->id }}">
+                                                        value="{{ $activity_group_info->id }}">
+                                                @endif
+                                                @if (!empty($activity_sequence) && $activity_sequence > 0)
+                                                    <div class="alert d-flex align-items-center gap-2 mx-2 mt-2"
+                                                        style="background:#e7f1ff; border:1.5px solid #4a6cf7; border-radius:8px; padding:10px 14px; font-size:13px;">
+                                                        <span style="font-size:18px;">📝</span>
+                                                        <div>
+                                                            <strong>Additional Submission{{ !empty($instance_label) ? ': ' . $instance_label : '' }}</strong><br>
+                                                            <span class="text-muted" style="font-size:12px;">
+                                                                You are verifying a repeat instance — not the original submission.
+                                                            </span>
+                                                        </div>
+                                                    </div>
                                                 @endif
 
-                                                <table class="table mb-0">
-                                                    <thead>
-                                                    </thead>
-                                                    <tbody>
-                                                    @php
-                                                        $selectArrIds = [];
-                                                    @endphp
-                                                    @foreach ($related_questions as $related_question)
+                                                <div class="table-responsive">
+                                                    <table class="table mb-0">
+                                                        <tbody>
+                                                            @php
+                                                                $selectArrIds = [];
+                                                            @endphp
 
-                                                        <tr>
-                                                            <td class="col-md-6 fw-medium">
-                                                                {{ $related_question->question }}</td>
-                                                            <td class="col-md-6">
+                                                            @foreach ($parentQuestions as $parentQuestion)
                                                                 @php
-                                                                    if($related_question->question_type == 'Subjective'){
-                                                                        $d_values = [];
-                                                                    }else{
-                                                                        $d_value = '';
+                                                                    // Get parent question answer
+                                                                    $parentAnswer = '';
+                                                                    $parentValues = []; // all answers for this question
+                                                                    $subjectSelected = null; // first answer = subject name
+                                                                    $subjectDepAnswers = []; // subsequent answers = dependent values
+
+                                                                    foreach ($user_responses as $response) {
+                                                                        if (
+                                                                            $response->question_id ==
+                                                                            $parentQuestion->id
+                                                                        ) {
+                                                                            if (
+                                                                                $parentQuestion->question_type ==
+                                                                                'Subjective'
+                                                                            ) {
+                                                                                $parentValues[] = [
+                                                                                    'id' => $response->id,
+                                                                                    'answer' => $response->user_answer,
+                                                                                ];
+                                                                            } else {
+                                                                                $parentAnswer = $response->user_answer;
+                                                                                break;
+                                                                            }
+                                                                        }
                                                                     }
 
-                                                                    foreach ($user_responses as $user_reponse) {
-
-                                                                        if (
-                                                                            $user_reponse->question_id ==
-                                                                            $related_question->id
-                                                                        ) {
-                                                                            if($related_question->question_type == 'Subjective'){
-
-                                                                                $d_values[] = $user_reponse->user_answer;
-
-                                                                            }else{
-                                                                                $d_value = $user_reponse->user_answer;
-                                                                            }
- //
-                                                                        }
+                                                                    // Sort by DB id ascending so subject comes first
+                                                                    if (!empty($parentValues)) {
+                                                                        usort(
+                                                                            $parentValues,
+                                                                            fn($a, $b) => $a['id'] <=> $b['id'],
+                                                                        );
+                                                                        $subjectSelected = $parentValues[0]['answer'];
+                                                                        $subjectDepAnswers = array_column(
+                                                                            array_slice($parentValues, 1),
+                                                                            'answer',
+                                                                        );
                                                                     }
                                                                 @endphp
 
-                                                                @switch($related_question->question_type)
-                                                                    @case('Location')
-                                                                        <input name="{{ $related_question->id }}"
-                                                                               value="{{ $d_value }}" type="text"
-                                                                               class="form-control" disabled>
-                                                                        @if ($d_value)
-                                                                            <a href="https://www.google.com/maps?q={{ $d_value }}"
-                                                                               target="_blank"
-                                                                               class="text-underline text-dark">
-                                                                                Location
-                                                                            </a>
+                                                                <!-- Parent Question Row -->
+                                                                <tr class="parent-question-row">
+                                                                    <td class="col-md-6 fw-medium">
+                                                                        {{ $parentQuestion->question }}
+                                                                        @if ($parentQuestion->answer_type == 1)
+                                                                            <span class="text-danger">*</span>
                                                                         @endif
-                                                                        @break
+                                                                    </td>
+                                                                    <td class="col-md-6">
+                                                                        @switch($parentQuestion->question_type)
+                                                                            @case('Multi Response')
+                                                                                {{-- Multi Response = section, no answer stored --}}
+                                                                            @break
 
-                                                                    @case('Image')
-                                                                        @if($d_value)
-                                                                            <div class="table-avtar-new mb-3">
-                                                                                <img class="imagemodal"
-                                                                                     alt="Image"                         src="{{ asset($d_value) }}" data-setval="{{ asset($d_value) }}" >
-                                                                            </div>
+                                                                            @case('Location')
+                                                                                <input name="{{ $parentQuestion->id }}"
+                                                                                    value="{{ $parentAnswer }}" type="text"
+                                                                                    class="form-control" disabled>
+                                                                                @if ($parentAnswer)
+                                                                                    <a href="https://www.google.com/maps?q={{ $parentAnswer }}"
+                                                                                        target="_blank"
+                                                                                        class="text-underline text-dark">Location</a>
+                                                                                @endif
+                                                                            @break
 
-                                                                        @endif
-                                                                        <input name="{{ $related_question->id }}"
-                                                                               type="file" class="form-control"
-                                                                               disabled>
+                                                                            @case('Image')
+                                                                                @if ($parentAnswer)
+                                                                                    @php
+                                                                                        $imgPaths   = json_decode($parentAnswer, true);
+                                                                                        $isMultiImg = is_array($imgPaths) && count($imgPaths) > 1;
+                                                                                        if (!is_array($imgPaths)) $imgPaths = [$parentAnswer];
+                                                                                    @endphp
+                                                                                    @if ($isMultiImg)
+                                                                                        <div class="d-flex flex-wrap gap-2 mb-2">
+                                                                                            @foreach ($imgPaths as $imgP)
+                                                                                                <img class="imagemodal" alt="Image"
+                                                                                                     src="{{ asset($imgP) }}"
+                                                                                                     data-setval="{{ asset($imgP) }}"
+                                                                                                     style="width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid #ccc;cursor:pointer;">
+                                                                                            @endforeach
+                                                                                        </div>
+                                                                                        <a href="{{ route('report.download.images.zip', ['answer_id' => $response->id]) }}"
+                                                                                           class="btn btn-sm btn-success mt-1"
+                                                                                           style="font-size:12px;" title="Download all images as ZIP">
+                                                                                            ⬇ Download ZIP ({{ count($imgPaths) }} images)
+                                                                                        </a>
+                                                                                    @else
+                                                                                        <div class="table-avtar-new mb-3">
+                                                                                            <img class="imagemodal" alt="Image"
+                                                                                                src="{{ asset($imgPaths[0]) }}"
+                                                                                                data-setval="{{ asset($imgPaths[0]) }}">
+                                                                                        </div>
+                                                                                    @endif
+                                                                                @endif
+                                                                                <input name="{{ $parentQuestion->id }}"
+                                                                                    type="file" class="form-control" disabled>
+                                                                            @break
 
-                                                                        @break
-
-                                                                    @case('Video')
-                                                                        @php
-                                                                            // Decode URL-encoded characters
-                                                                            $decodedValue = urldecode($d_value);
-
-                                                                            // Check if it's already a full URL
-                                                                            if (str_starts_with($decodedValue, 'http://') || str_starts_with($decodedValue, 'https://')) {
-                                                                                $fileUrl = $decodedValue;
-                                                                            } else {
-                                                                                $fileUrl = asset($decodedValue);
-                                                                            }
-
-                                                                            // Encode for JavaScript
-                                                                            $jsFileUrl = str_replace(' ', '%20', $fileUrl);
-                                                                        @endphp
-                                                                        @if ($d_value)
-                                                                            <a class="badge badge-primary mt-2 imagemodal"
-                                                                               data-setval="{{ $jsFileUrl }}"
-                                                                               style="cursor:pointer;">
-                                                                                Click Here
-                                                                            </a>
-                                                                            <!-- Debug: show actual path -->
-                                                                            <small class="d-block text-muted mt-1" title="{{ $fileUrl }}">
-                                                                                Path: .../{{ basename($decodedValue) }}
-                                                                            </small>
-                                                                        @endif
-                                                                        @break
-                                                                    @case('Free Text')
-                                                                        <input type="text" value="{{ $d_value }}"
-                                                                               name="{{ $related_question->id }}"
-                                                                               class="form-control" readonly>
-                                                                        @break
-
-                                                                    @case('Yes / No')
-                                                                        <select class="form-select"
-                                                                                name="{{ $related_question->id }}"
-                                                                                disabled>
-                                                                            <option value="">Select ..</option>
-                                                                            <option value="Yes"
-                                                                                    @if ('Yes' == $d_value) selected @endif>
-                                                                                Yes
-                                                                            </option>
-                                                                            <option value="No"
-                                                                                    @if ('No' == $d_value) selected @endif>
-                                                                                No
-                                                                            </option>
-                                                                        </select>
-                                                                        @break
-
-                                                                    @case('Subjective')
-
-                                                                        @foreach ($d_values as $d_value)
-                                                                            @php
-                                                                                $extension = strtolower(pathinfo($d_value, PATHINFO_EXTENSION));
-                                                                                $isUrlOrPath = str_contains($d_value, '/'); // crude check for file path
-
-                                                                                $isDate = false;
-                                                                                $isDateTime = false;
-                                                                                $parsedDate = null;
-
-                                                                                // Detect Date or DateTime format using Carbon
-                                                                                try {
-                                                                                    $parsedDate = \Carbon\Carbon::parse($d_value);
-                                                                                    $isDate = $parsedDate && $parsedDate->format('Y-m-d') === $d_value;
-                                                                                    $isDateTime = $parsedDate && !$isDate;
-                                                                                } catch (\Exception $e) {
-                                                                                    // Not a valid date/datetime, fallback
-                                                                                }
-
-// Decode URL-encoded characters FIRST
-            $decodedValue = urldecode($d_value);
-
- // Check if it's already a full URL
-            if (str_starts_with($decodedValue, 'http://') || str_starts_with($decodedValue, 'https://')) {
-                $fileUrl = $decodedValue;
-            } else {
-                $fileUrl = asset($decodedValue);
-            }
-                                                                            @endphp
-
-                                                                            @if (!$isUrlOrPath)
-                                                                                {{-- Plain Text --}}
-                                                                                <div class="d-flex flex-column gap-2">
-                                                                                    <select
-                                                                                        @if ($related_question->answer_type) required=""
-                                                                                        @endif
-                                                                                        class="form-select subjective_ques_option"
-                                                                                        name="{{ $related_question->id }}"
-                                                                                        disabled>
-                                                                                        <option value="{{ $d_value }}">
-                                                                                            {{ $d_value }}</option>
-                                                                                    </select>
-                                                                                </div>
-
-                                                                            @elseif (in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp']))
-                                                                                {{-- Image --}}
-                                                                                <div class="d-flex flex-column gap-2">
-                                                                                    <div class="table-avtar-new mb-3">
-                                                                                        <img class="imagemodal"
-                                                                                             data-setval="{{ asset($d_value) }}"
-                                                                                             alt="Image"
-                                                                                             src="{{ asset($d_value) }}" >
-                                                                                    </div>
-                                                                                </div>
-
-                                                                            @elseif (in_array($extension, ['mp4', 'webm', 'ogg', 'temp']))
-                                                                                {{-- Video --}}
-                                                                                <div class="mb-2">
-                                                                                    <a class="badge badge-primary mt-2 imagemodal"
-                                                                                       style="cursor:pointer;"
-                                                                                       data-setval="{{ $fileUrl }}">Click Here
-                                                                                    </a>
-                                                                                </div>
-                                                                            @elseif (in_array($extension, ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt']))
-                                                                                {{-- File --}}
-                                                                                <div class="mb-2">
-                                                                                    <a class="badge badge-primary mt-2"
-                                                                                       href="{{ asset($d_value) }}">Click
-                                                                                        Here
-                                                                                    </a>
-                                                                                </div>
-
-                                                                            @elseif ($isDate)
-                                                                                <input type="date"
-                                                                                       value="{{ $d_value ? \Carbon\Carbon::createFromFormat('d/m/Y', $d_value)->format('Y-m-d') : '' }}"
-                                                                                       name="{{ $related_question->id }}"
-                                                                                       class="form-control" readonly>
-
-                                                                            @elseif ($isDateTime)
+                                                                            @case('Video')
                                                                                 @php
+                                                                                    $cleanPath = trim(
+                                                                                        urldecode($parentAnswer),
+                                                                                    );
+                                                                                    if (
+                                                                                        str_starts_with(
+                                                                                            $cleanPath,
+                                                                                            'http://',
+                                                                                        ) ||
+                                                                                        str_starts_with(
+                                                                                            $cleanPath,
+                                                                                            'https://',
+                                                                                        )
+                                                                                    ) {
+                                                                                        $fileUrl = $cleanPath;
+                                                                                    } else {
+                                                                                        $cleanPath = ltrim(
+                                                                                            $cleanPath,
+                                                                                            '/',
+                                                                                        );
+                                                                                        $fileUrl = asset($cleanPath);
+                                                                                    }
+                                                                                    $jsFileUrl = htmlspecialchars(
+                                                                                        $fileUrl,
+                                                                                        ENT_QUOTES,
+                                                                                        'UTF-8',
+                                                                                    );
+                                                                                @endphp
+                                                                                @if ($parentAnswer)
+                                                                                    <a class="badge badge-primary mt-2 imagemodal"
+                                                                                        data-setval="{{ $jsFileUrl }}"
+                                                                                        style="cursor:pointer;">Click
+                                                                                        Here</a>
+                                                                                @endif
+                                                                            @break
 
-                                                                                    $formattedDateTime = \Carbon\Carbon::parse(
-                                                                                        $d_value,
-                                                                                    )->format('Y-m-d\TH:i');
+                                                                            @case('Free Text')
+                                                                                <input type="text" value="{{ $parentAnswer }}"
+                                                                                    name="{{ $parentQuestion->id }}"
+                                                                                    class="form-control" readonly>
+                                                                            @break
+
+                                                                            @case('Yes / No')
+                                                                                <select class="form-select"
+                                                                                    name="{{ $parentQuestion->id }}" disabled>
+                                                                                    <option value="">Select ..</option>
+                                                                                    <option value="Yes"
+                                                                                        @if ('Yes' == $parentAnswer) selected @endif>
+                                                                                        Yes
+                                                                                    </option>
+                                                                                    <option value="No"
+                                                                                        @if ('No' == $parentAnswer) selected @endif>
+                                                                                        No
+                                                                                    </option>
+                                                                                </select>
+                                                                            @break
+
+                                                                            @case('Dropdown')
+                                                                                <select class="form-select"
+                                                                                    name="{{ $parentQuestion->id }}" disabled>
+                                                                                    <option value="">Select ..</option>
+                                                                                    @foreach ($parentQuestion->getOptions as $questionOption)
+                                                                                        <option
+                                                                                            value="{{ $questionOption->option }}"
+                                                                                            @if ($questionOption->option == $parentAnswer) selected @endif>
+                                                                                            {{ $questionOption->option }}
+                                                                                        </option>
+                                                                                    @endforeach
+                                                                                </select>
+                                                                            @break
+
+                                                                            @case('Multi select')
+                                                                                @php
+                                                                                    $selectArrIds[] =
+                                                                                        'select' . $parentQuestion->id;
+                                                                                    $selectedValues = explode(
+                                                                                        ',',
+                                                                                        $parentAnswer ?? '',
+                                                                                    );
+                                                                                @endphp
+                                                                                <select class="form-select"
+                                                                                    name="{{ $parentQuestion->id }}[]"
+                                                                                    id="select{{ $parentQuestion->id }}" multiple
+                                                                                    disabled>
+                                                                                    <option value="">Select ..</option>
+                                                                                    @foreach ($parentQuestion->getOptions as $questionOption)
+                                                                                        <option
+                                                                                            value="{{ $questionOption->option }}"
+                                                                                            @if (in_array($questionOption->option, $selectedValues)) selected @endif>
+                                                                                            {{ $questionOption->option }}
+                                                                                        </option>
+                                                                                    @endforeach
+                                                                                </select>
+                                                                            @break
+
+                                                                            @case('Date & Time')
+                                                                                @php
+                                                                                    $formattedDateTime = '';
+                                                                                    if (!empty($parentAnswer)) {
+                                                                                        try {
+                                                                                            $datetimeFormats = [
+                                                                                                'Y-m-d H:i:s',
+                                                                                                'Y-m-d H:i',
+                                                                                                'd/m/Y H:i:s',
+                                                                                                'd/m/Y H:i',
+                                                                                                'm/d/Y H:i:s',
+                                                                                                'm/d/Y H:i',
+                                                                                                'Y-m-d\TH:i:s',
+                                                                                                'Y-m-d\TH:i',
+                                                                                            ];
+
+                                                                                            $parsed = false;
+                                                                                            foreach (
+                                                                                                $datetimeFormats
+                                                                                                as $format
+                                                                                            ) {
+                                                                                                try {
+                                                                                                    $carbonDate = \Carbon\Carbon::createFromFormat(
+                                                                                                        $format,
+                                                                                                        $parentAnswer,
+                                                                                                    );
+                                                                                                    if (
+                                                                                                        $carbonDate !==
+                                                                                                        false
+                                                                                                    ) {
+                                                                                                        $formattedDateTime = $carbonDate->format(
+                                                                                                            'Y-m-d\TH:i',
+                                                                                                        );
+                                                                                                        $parsed = true;
+                                                                                                        break;
+                                                                                                    }
+                                                                                                } catch (\Exception $e) {
+                                                                                                    continue;
+                                                                                                }
+                                                                                            }
+
+                                                                                            if (!$parsed) {
+                                                                                                try {
+                                                                                                    $formattedDateTime = \Carbon\Carbon::parse(
+                                                                                                        $parentAnswer,
+                                                                                                    )->format(
+                                                                                                        'Y-m-d\TH:i',
+                                                                                                    );
+                                                                                                } catch (\Exception $e) {
+                                                                                                    $formattedDateTime = $parentAnswer;
+                                                                                                }
+                                                                                            }
+                                                                                        } catch (\Exception $e) {
+                                                                                            $formattedDateTime = $parentAnswer;
+                                                                                        }
+                                                                                    }
                                                                                 @endphp
                                                                                 <input type="datetime-local"
-                                                                                       name="{{ $related_question->id }}"
-                                                                                       value="{{ $formattedDateTime }}"
-                                                                                       class="form-control" readonly>
+                                                                                    name="{{ $parentQuestion->id }}"
+                                                                                    value="{{ $formattedDateTime }}"
+                                                                                    class="form-control" readonly>
+                                                                            @break
 
-                                                                            @endif
-                                                                        @endforeach
+                                                                            @case('Date')
+                                                                                @php
+                                                                                    $formattedDate = '';
+                                                                                    if (!empty($parentAnswer)) {
+                                                                                        try {
+                                                                                            // Try common date formats
+                                                                                            $dateFormats = [
+                                                                                                'd/m/Y',
+                                                                                                'Y-m-d',
+                                                                                                'm/d/Y',
+                                                                                                'd-m-Y',
+                                                                                                'Y/m/d',
+                                                                                                'm-d-Y',
+                                                                                                'd M Y',
+                                                                                                'M d Y',
+                                                                                                'd F Y',
+                                                                                                'F d Y',
+                                                                                            ];
 
-                                                                        @break
+                                                                                            $parsed = false;
+                                                                                            foreach (
+                                                                                                $dateFormats
+                                                                                                as $format
+                                                                                            ) {
+                                                                                                try {
+                                                                                                    $carbonDate = \Carbon\Carbon::createFromFormat(
+                                                                                                        $format,
+                                                                                                        $parentAnswer,
+                                                                                                    );
+                                                                                                    if (
+                                                                                                        $carbonDate !==
+                                                                                                        false
+                                                                                                    ) {
+                                                                                                        $formattedDate = $carbonDate->format(
+                                                                                                            'Y-m-d',
+                                                                                                        );
+                                                                                                        $parsed = true;
+                                                                                                        break;
+                                                                                                    }
+                                                                                                } catch (\Exception $e) {
+                                                                                                    continue;
+                                                                                                }
+                                                                                            }
 
-                                                                    @case('Dropdown')
-                                                                        <select class="form-select"
-                                                                                name="{{ $related_question->id }}"
-                                                                                disabled>
-                                                                            <option value="">Select ..</option>
-                                                                            @foreach ($related_question->getOptions as $questionOption)
-                                                                                <option
-                                                                                    value="{{ $questionOption->option }}"
-                                                                                    @if ($questionOption->option == $d_value) selected @endif>
-                                                                                    {{ $questionOption->option }}
-                                                                                </option>
-                                                                            @endforeach
-                                                                        </select>
-                                                                        @break
+                                                                                            // If none of the formats worked, try parsing with Carbon's automatic parser
+        if (!$parsed) {
+            try {
+                $formattedDate = \Carbon\Carbon::parse(
+                    $parentAnswer,
+                )->format('Y-m-d');
+                                                                                                } catch (\Exception $e) {
+                                                                                                    // If all parsing fails, just display the original value
+                                                                                                    $formattedDate = $parentAnswer;
+                                                                                                }
+                                                                                            }
+                                                                                        } catch (\Exception $e) {
+                                                                                            $formattedDate = $parentAnswer;
+                                                                                        }
+                                                                                    }
+                                                                                @endphp
+                                                                                <input type="date" value="{{ $formattedDate }}"
+                                                                                    name="{{ $parentQuestion->id }}"
+                                                                                    class="form-control" readonly>
+                                                                            @break
 
-                                                                    @case('Multi select')
+                                                                            @case('File Upload')
+                                                                                <input type="file"
+                                                                                    name="{{ $parentQuestion->id }}"
+                                                                                    class="form-control" disabled>
+                                                                                @if ($parentAnswer)
+                                                                                    <a class="badge badge-primary mt-2"
+                                                                                        href="{{ asset($parentAnswer) }}">Click
+                                                                                        Here</a>
+                                                                                @endif
+                                                                            @break
+
+                                                                            @case('Subjective')
+                                                                                {{-- Row 1: the subject that was selected --}}
+                                                                                @if ($subjectSelected)
+                                                                                    <div class="mb-2">
+                                                                                        <small
+                                                                                            class="text-muted d-block mb-1">Subject
+                                                                                            Selected</small>
+                                                                                        <select class="form-select" disabled>
+                                                                                            <option selected>{{ $subjectSelected }}
+                                                                                            </option>
+                                                                                        </select>
+                                                                                    </div>
+                                                                                @endif
+
+                                                                                {{-- Row 2+: the dependent answer(s) --}}
+                                                                                @foreach ($subjectDepAnswers as $depAnsIndex => $depAns)
+                                                                                    @php
+                                                                                        // Get the label for this dependent answer from the subject config
+                                                                                        // $subjectSelected = the subject name chosen (e.g. "L2")
+                                                                                        // We look it up in $parentQuestion->getSubjects to find answer_type
+                                                                                        $depLabel = 'Answer'; // fallback
+                                                                                        $depAnswerType = null;
+
+                                                                                        if (
+                                                                                            $parentQuestion->relationLoaded(
+                                                                                                'getSubjects',
+                                                                                            ) ||
+                                                                                            method_exists(
+                                                                                                $parentQuestion,
+                                                                                                'getSubjects',
+                                                                                            )
+                                                                                        ) {
+                                                                                            foreach (
+                                                                                                $parentQuestion->getSubjects
+                                                                                                as $subjectConfig
+                                                                                            ) {
+                                                                                                if (
+                                                                                                    $subjectConfig->subject ===
+                                                                                                    $subjectSelected
+                                                                                                ) {
+                                                                                                    $depAnswerType =
+                                                                                                        $subjectConfig->answer_type;
+                                                                                                    // Use a human-readable label based on answer_type
+                                                                                                    $labelMap = [
+                                                                                                        'Free Text' =>
+                                                                                                            'Text Answer',
+                                                                                                        'Date' =>
+                                                                                                            'Date',
+                                                                                                        'Date & Time' =>
+                                                                                                            'Date & Time',
+                                                                                                        'Yes / No' =>
+                                                                                                            'Yes / No',
+                                                                                                        'Dropdown' =>
+                                                                                                            'Selected Option',
+                                                                                                        'Multi select' =>
+                                                                                                            'Selected Options',
+                                                                                                        'Image' =>
+                                                                                                            'Image',
+                                                                                                        'File Upload' =>
+                                                                                                            'File',
+                                                                                                        'Audio' =>
+                                                                                                            'Audio Recording',
+                                                                                                        'Video' =>
+                                                                                                            'Video Recording',
+                                                                                                        'Location' =>
+                                                                                                            'Location',
+                                                                                                    ];
+                                                                                                    $depLabel =
+                                                                                                        $labelMap[
+                                                                                                            $depAnswerType
+                                                                                                        ] ??
+                                                                                                        ($depAnswerType ??
+                                                                                                            'Answer');
+                                                                                                    break;
+                                                                                                }
+                                                                                            }
+                                                                                        }
+
+                                                                                        // Auto-detect rendering type from content
+                                                                                        $depExt = strtolower(
+                                                                                            pathinfo(
+                                                                                                $depAns,
+                                                                                                PATHINFO_EXTENSION,
+                                                                                            ),
+                                                                                        );
+                                                                                        $isBase64 = str_starts_with(
+                                                                                            $depAns,
+                                                                                            'data:',
+                                                                                        );
+                                                                                        $isImageFile =
+                                                                                            !$isBase64 &&
+                                                                                            in_array($depExt, [
+                                                                                                'jpg',
+                                                                                                'jpeg',
+                                                                                                'png',
+                                                                                                'gif',
+                                                                                                'webp',
+                                                                                            ]) &&
+                                                                                            str_contains($depAns, '/');
+                                                                                        $isVideoFile =
+                                                                                            !$isBase64 &&
+                                                                                            in_array($depExt, [
+                                                                                                'mp4',
+                                                                                                'webm',
+                                                                                                'mov',
+                                                                                                'avi',
+                                                                                                'wmv',
+                                                                                                'flv',
+                                                                                                'mkv',
+                                                                                                'temp',
+                                                                                            ]) &&
+                                                                                            str_contains($depAns, '/');
+                                                                                        $isAudioFile =
+                                                                                            !$isBase64 &&
+                                                                                            in_array($depExt, [
+                                                                                                'mp3',
+                                                                                                'wav',
+                                                                                                'ogg',
+                                                                                                'm4a',
+                                                                                                'weba',
+                                                                                                'webm',
+                                                                                            ]) &&
+                                                                                            str_contains($depAns, '/');
+                                                                                        $isBase64Audio =
+                                                                                            $isBase64 &&
+                                                                                            str_starts_with(
+                                                                                                $depAns,
+                                                                                                'data:audio/',
+                                                                                            );
+                                                                                        $isBase64Video =
+                                                                                            $isBase64 &&
+                                                                                            str_starts_with(
+                                                                                                $depAns,
+                                                                                                'data:video/',
+                                                                                            );
+                                                                                        $isLatLong =
+                                                                                            !$isBase64 &&
+                                                                                            (bool) preg_match(
+                                                                                                '/^-?\d{1,3}\.\d+,\s*-?\d{1,3}\.\d+$/',
+                                                                                                trim($depAns),
+                                                                                            );
+                                                                                    @endphp
+
+                                                                                    <div class="mb-2 mt-2">
+                                                                                        {{-- Dependent answer label --}}
+                                                                                        <small
+                                                                                            class="text-muted d-block mb-1 fw-semibold">{{ $depLabel }}</small>
+
+                                                                                        @if ($isImageFile)
+                                                                                            <div class="mb-2"
+                                                                                                style="max-width:200px;">
+                                                                                                <img class="imagemodal img-fluid rounded border"
+                                                                                                    src="{{ asset($depAns) }}"
+                                                                                                    data-setval="{{ asset($depAns) }}"
+                                                                                                    alt="{{ $depLabel }}"
+                                                                                                    style="cursor:pointer; max-height:150px; object-fit:contain;">
+                                                                                            </div>
+                                                                                        @elseif ($isVideoFile)
+                                                                                            @php
+                                                                                                $vPath = ltrim(
+                                                                                                    $depAns,
+                                                                                                    '/',
+                                                                                                );
+                                                                                                $vExt = strtolower(
+                                                                                                    pathinfo(
+                                                                                                        $vPath,
+                                                                                                        PATHINFO_EXTENSION,
+                                                                                                    ),
+                                                                                                );
+                                                                                                $vUrl = asset($vPath);
+                                                                                                $vMime =
+                                                                                                    [
+                                                                                                        'mp4' =>
+                                                                                                            'video/mp4',
+                                                                                                        'webm' =>
+                                                                                                            'video/webm',
+                                                                                                        'mov' =>
+                                                                                                            'video/quicktime',
+                                                                                                        'avi' =>
+                                                                                                            'video/x-msvideo',
+                                                                                                    ][$vExt] ??
+                                                                                                    'video/mp4';
+                                                                                            @endphp
+                                                                                            <video controls preload="metadata"
+                                                                                                playsinline
+                                                                                                style="max-width:100%; max-height:200px; border-radius:4px;"
+                                                                                                class="d-block border">
+                                                                                                <source src="{{ $vUrl }}"
+                                                                                                    type="{{ $vMime }}">
+                                                                                                <source src="{{ $vUrl }}"
+                                                                                                    type="video/webm">
+                                                                                            </video>
+                                                                                            <a href="{{ $vUrl }}" download
+                                                                                                class="btn btn-sm btn-outline-secondary mt-1">⬇
+                                                                                                Download</a>
+                                                                                        @elseif ($isAudioFile)
+                                                                                            @php
+                                                                                                $aPath = ltrim(
+                                                                                                    $depAns,
+                                                                                                    '/',
+                                                                                                );
+                                                                                                $aExt = strtolower(
+                                                                                                    pathinfo(
+                                                                                                        $aPath,
+                                                                                                        PATHINFO_EXTENSION,
+                                                                                                    ),
+                                                                                                );
+                                                                                                $aUrl = asset($aPath);
+                                                                                                $aMime =
+                                                                                                    [
+                                                                                                        'mp3' =>
+                                                                                                            'audio/mpeg',
+                                                                                                        'wav' =>
+                                                                                                            'audio/wav',
+                                                                                                        'ogg' =>
+                                                                                                            'audio/ogg',
+                                                                                                        'm4a' =>
+                                                                                                            'audio/mp4',
+                                                                                                        'webm' =>
+                                                                                                            'audio/webm',
+                                                                                                    ][$aExt] ??
+                                                                                                    'audio/webm';
+                                                                                            @endphp
+                                                                                            <audio controls
+                                                                                                style="width:100%; max-width:280px;"
+                                                                                                class="d-block">
+                                                                                                <source src="{{ $aUrl }}"
+                                                                                                    type="{{ $aMime }}">
+                                                                                                <source src="{{ $aUrl }}"
+                                                                                                    type="audio/webm">
+                                                                                            </audio>
+                                                                                            <a href="{{ $aUrl }}" download
+                                                                                                class="btn btn-sm btn-outline-secondary mt-1">⬇
+                                                                                                Download Audio</a>
+                                                                                        @elseif ($isBase64Audio)
+                                                                                            @php
+                                                                                                preg_match(
+                                                                                                    '/^data:(audio\/[a-zA-Z0-9\-]+)/',
+                                                                                                    $depAns,
+                                                                                                    $bm,
+                                                                                                );
+                                                                                                $b64Mime = explode(
+                                                                                                    ';',
+                                                                                                    $bm[1] ??
+                                                                                                        'audio/webm',
+                                                                                                )[0];
+                                                                                            @endphp
+                                                                                            <audio controls
+                                                                                                style="width:100%; max-width:280px;"
+                                                                                                class="d-block">
+                                                                                                <source src="{{ $depAns }}"
+                                                                                                    type="{{ $b64Mime }}">
+                                                                                                <source src="{{ $depAns }}"
+                                                                                                    type="audio/webm">
+                                                                                            </audio>
+                                                                                        @elseif ($isBase64Video)
+                                                                                            @php
+                                                                                                preg_match(
+                                                                                                    '/^data:(video\/[a-zA-Z0-9\-]+)/',
+                                                                                                    $depAns,
+                                                                                                    $bm,
+                                                                                                );
+                                                                                                $b64Mime = explode(
+                                                                                                    ';',
+                                                                                                    $bm[1] ??
+                                                                                                        'video/webm',
+                                                                                                )[0];
+                                                                                            @endphp
+                                                                                            <video controls preload="metadata"
+                                                                                                style="max-width:100%; max-height:200px;"
+                                                                                                class="d-block rounded border">
+                                                                                                <source src="{{ $depAns }}"
+                                                                                                    type="{{ $b64Mime }}">
+                                                                                                <source src="{{ $depAns }}"
+                                                                                                    type="video/webm">
+                                                                                            </video>
+                                                                                        @elseif ($isLatLong)
+                                                                                            <input type="text"
+                                                                                                value="{{ $depAns }}"
+                                                                                                class="form-control" readonly>
+                                                                                            <a href="https://www.google.com/maps?q={{ urlencode($depAns) }}"
+                                                                                                target="_blank"
+                                                                                                class="small text-primary mt-1 d-inline-block">📍
+                                                                                                View on Map</a>
+                                                                                        @else
+                                                                                            {{-- Text / Date / DateTime / Yes-No / Dropdown —— plain readonly input --}}
+                                                                                            <input type="text"
+                                                                                                value="{{ $depAns }}"
+                                                                                                class="form-control" readonly>
+                                                                                        @endif
+                                                                                    </div>
+                                                                                @endforeach
+
+                                                                                @if (!$subjectSelected)
+                                                                                    <span class="text-muted small">No answer
+                                                                                        recorded</span>
+                                                                                @endif
+                                                                            @break
+
+                                                                            @default
+                                                                                <input type="text" value="{{ $parentAnswer }}"
+                                                                                    class="form-control"
+                                                                                    name="{{ $parentQuestion->id }}" readonly>
+                                                                        @endswitch
+                                                                    </td>
+                                                                </tr>
+
+                                                                <!-- Child Questions - Display directly under parent -->
+                                                                @if (isset($childQuestions[$parentQuestion->id]) && !empty($childQuestions[$parentQuestion->id]))
+                                                                    @foreach ($childQuestions[$parentQuestion->id] as $childQuestion)
                                                                         @php
-                                                                            $selectArrIds[] =
-                                                                                'select' . $related_question->id;
-                                                                            $selectedValues = explode(
-                                                                                ',',
-                                                                                $d_value ?? '',
-                                                                            );
+                                                                            // Get child question answer
+                                                                            $childAnswer = '';
+                                                                            $childValues = [];
+                                                                            foreach ($user_responses as $response) {
+                                                                                if (
+                                                                                    $response->question_id ==
+                                                                                    $childQuestion->id
+                                                                                ) {
+                                                                                    if (
+                                                                                        $childQuestion->question_type ==
+                                                                                        'Subjective'
+                                                                                    ) {
+                                                                                        $childValues[] =
+                                                                                            $response->user_answer;
+                                                                                    } else {
+                                                                                        $childAnswer =
+                                                                                            $response->user_answer;
+                                                                                    }
+                                                                                }
+                                                                            }
                                                                         @endphp
-                                                                        <select class="form-select"
-                                                                                name="{{ $related_question->id }}[]"
-                                                                                id="select{{ $related_question->id }}"
-                                                                                multiple
-                                                                                disabled>
-                                                                            <option value="">Select ..</option>
-                                                                            @foreach ($related_question->getOptions as $questionOption)
-                                                                                <option
-                                                                                    value="{{ $questionOption->option }}"
-                                                                                    @if (in_array($questionOption->option, $selectedValues)) selected @endif>
-                                                                                    {{ $questionOption->option }}
-                                                                                </option>
-                                                                            @endforeach
-                                                                        </select>
-                                                                        @break
+                                                                        @if ($childAnswer)
+                                                                            <tr class="child-question-row">
+                                                                                <td class="col-md-6 fw-medium">
+                                                                                    {{ $childQuestion->question }}
+                                                                                    @if ($childQuestion->answer_type == 1)
+                                                                                        <span class="text-danger">*</span>
+                                                                                    @endif
+                                                                                </td>
+                                                                                <td class="col-md-6">
+                                                                                    @if ($childAnswer)
+                                                                                        @switch($childQuestion->question_type)
+                                                                                            @case('Location')
+                                                                                                <input
+                                                                                                    name="{{ $childQuestion->id }}"
+                                                                                                    value="{{ $childAnswer }}"
+                                                                                                    type="text"
+                                                                                                    class="form-control" disabled>
+                                                                                                @if ($childAnswer)
+                                                                                                    <a href="https://www.google.com/maps?q={{ $childAnswer }}"
+                                                                                                        target="_blank"
+                                                                                                        class="text-underline text-dark">Location</a>
+                                                                                                @endif
+                                                                                            @break
 
-                                                                    @case('Date & Time')
-                                                                        @php
-                                                                            // Parse the date in the 'd-m-Y H:i:s' format and convert it to 'Y-m-d\TH:i' for the datetime-local input
-                                                                            //                                                                            $formattedDateTime = \Carbon\Carbon::createFromFormat('d-m-Y H:i:s', $d_value)->format('Y-m-d\TH:i');
-                                                                            $formattedDateTime = \Carbon\Carbon::parse(
-                                                                                $d_value,
-                                                                            )->format('Y-m-d\TH:i');
-                                                                        @endphp
-                                                                        <input type="datetime-local"
-                                                                               name="{{ $related_question->id }}"
-                                                                               value="{{ $formattedDateTime }}"
-                                                                               class="form-control" readonly>
-                                                                        @break
+                                                                                            @case('Image')
+                                                                                                @if ($childAnswer)
+                                                                                                    @php
+                                                                                                        $cImgPaths = json_decode($childAnswer, true);
+                                                                                                        $cIsMulti  = is_array($cImgPaths) && count($cImgPaths) > 1;
+                                                                                                        if (!is_array($cImgPaths)) $cImgPaths = [$childAnswer];
+                                                                                                    @endphp
+                                                                                                    @if ($cIsMulti)
+                                                                                                        <div class="d-flex flex-wrap gap-2 mb-2">
+                                                                                                            @foreach ($cImgPaths as $cImg)
+                                                                                                                <img class="imagemodal" alt="Image"
+                                                                                                                     src="{{ asset($cImg) }}"
+                                                                                                                     data-setval="{{ asset($cImg) }}"
+                                                                                                                     style="width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid #ccc;cursor:pointer;">
+                                                                                                            @endforeach
+                                                                                                        </div>
+                                                                                                        <a href="{{ route('report.download.images.zip', ['answer_id' => $response->id]) }}"
+                                                                                                           class="btn btn-sm btn-success mt-1"
+                                                                                                           style="font-size:12px;">
+                                                                                                            ⬇ Download ZIP ({{ count($cImgPaths) }} images)
+                                                                                                        </a>
+                                                                                                    @else
+                                                                                                        <div class="table-avtar-new mb-3">
+                                                                                                            <img class="imagemodal" alt="Image"
+                                                                                                                src="{{ asset($cImgPaths[0]) }}"
+                                                                                                                data-setval="{{ asset($cImgPaths[0]) }}">
+                                                                                                        </div>
+                                                                                                    @endif
+                                                                                                @endif
+                                                                                                <input
+                                                                                                    name="{{ $childQuestion->id }}"
+                                                                                                    type="file"
+                                                                                                    class="form-control" disabled>
+                                                                                            @break
 
-                                                                    @case('Date')
-                                                                        <input type="date"
-                                                                               value="{{ $d_value ? \Carbon\Carbon::createFromFormat('d/m/Y', $d_value)->format('Y-m-d') : '' }}"
-                                                                               name="{{ $related_question->id }}"
-                                                                               class="form-control" readonly>
-                                                                        @break
+                                                                                            @case('Video')
+                                                                                                @if ($childAnswer)
+                                                                                                    @php
+                                                                                                        $videoPath = ltrim(
+                                                                                                            trim(
+                                                                                                                urldecode(
+                                                                                                                    $childAnswer,
+                                                                                                                ),
+                                                                                                            ),
+                                                                                                            '/',
+                                                                                                        );
+                                                                                                        $videoExt = strtolower(
+                                                                                                            pathinfo(
+                                                                                                                $videoPath,
+                                                                                                                PATHINFO_EXTENSION,
+                                                                                                            ),
+                                                                                                        );
+                                                                                                        $videoUrl = asset(
+                                                                                                            $videoPath,
+                                                                                                        );
+                                                                                                        $jsVideoUrl = htmlspecialchars(
+                                                                                                            $videoUrl,
+                                                                                                            ENT_QUOTES,
+                                                                                                            'UTF-8',
+                                                                                                        );
+                                                                                                        $mimeMap = [
+                                                                                                            'mp4' =>
+                                                                                                                'video/mp4',
+                                                                                                            'webm' =>
+                                                                                                                'video/webm',
+                                                                                                            'ogg' =>
+                                                                                                                'video/ogg',
+                                                                                                            'mov' =>
+                                                                                                                'video/quicktime',
+                                                                                                            'avi' =>
+                                                                                                                'video/x-msvideo',
+                                                                                                            'wmv' =>
+                                                                                                                'video/x-ms-wmv',
+                                                                                                        ];
+                                                                                                        $videoMime =
+                                                                                                            $mimeMap[
+                                                                                                                $videoExt
+                                                                                                            ] ??
+                                                                                                            'video/mp4';
+                                                                                                    @endphp
+                                                                                                    <video controls
+                                                                                                        style="max-width:100%; max-height:220px; border-radius:4px;"
+                                                                                                        class="d-block mt-1 border"
+                                                                                                        preload="metadata"
+                                                                                                        playsinline>
+                                                                                                        <source
+                                                                                                            src="{{ $videoUrl }}"
+                                                                                                            type="{{ $videoMime }}">
+                                                                                                        <source
+                                                                                                            src="{{ $videoUrl }}"
+                                                                                                            type="video/webm">
+                                                                                                        Your browser does not
+                                                                                                        support video playback.
+                                                                                                    </video>
+                                                                                                    <div
+                                                                                                        class="mt-1 d-flex gap-1 flex-wrap">
+                                                                                                        <a href="{{ $videoUrl }}"
+                                                                                                            download
+                                                                                                            class="btn btn-sm btn-outline-secondary">
+                                                                                                            ⬇ Download
+                                                                                                        </a>
+                                                                                                        <a class="btn btn-sm btn-outline-primary imagemodal"
+                                                                                                            data-setval="{{ $jsVideoUrl }}"
+                                                                                                            style="cursor:pointer;">
+                                                                                                            ⛶ Fullscreen
+                                                                                                        </a>
+                                                                                                    </div>
+                                                                                                @endif
+                                                                                            @break
 
-                                                                    @case('File Upload')
-                                                                        <input type="file"
-                                                                               name="{{ $related_question->id }}"
-                                                                               class="form-control" disabled>
-                                                                        @if ($d_value)
-                                                                            <a class="badge badge-primary mt-2"
-                                                                               href="{{ asset($d_value) }}">Click
-                                                                                Here
-                                                                            </a>
+                                                                                            @case('Audio')
+                                                                                                @if ($childAnswer)
+                                                                                                    @php
+                                                                                                        $audioPath = ltrim(
+                                                                                                            trim(
+                                                                                                                $childAnswer,
+                                                                                                            ),
+                                                                                                            '/',
+                                                                                                        );
+                                                                                                        $audioExt = strtolower(
+                                                                                                            pathinfo(
+                                                                                                                $audioPath,
+                                                                                                                PATHINFO_EXTENSION,
+                                                                                                            ),
+                                                                                                        );
+                                                                                                        $audioUrl = asset(
+                                                                                                            $audioPath,
+                                                                                                        );
+                                                                                                        $mimeMap = [
+                                                                                                            'mp3' =>
+                                                                                                                'audio/mpeg',
+                                                                                                            'wav' =>
+                                                                                                                'audio/wav',
+                                                                                                            'ogg' =>
+                                                                                                                'audio/ogg',
+                                                                                                            'm4a' =>
+                                                                                                                'audio/mp4',
+                                                                                                            'aac' =>
+                                                                                                                'audio/aac',
+                                                                                                            'webm' =>
+                                                                                                                'audio/webm',
+                                                                                                        ];
+                                                                                                        $audioMime =
+                                                                                                            $mimeMap[
+                                                                                                                $audioExt
+                                                                                                            ] ??
+                                                                                                            'audio/webm';
+                                                                                                    @endphp
+                                                                                                    <audio controls
+                                                                                                        style="width:100%; max-width:280px;"
+                                                                                                        class="mt-1 d-block">
+                                                                                                        <source
+                                                                                                            src="{{ $audioUrl }}"
+                                                                                                            type="{{ $audioMime }}">
+                                                                                                        <source
+                                                                                                            src="{{ $audioUrl }}"
+                                                                                                            type="audio/webm">
+                                                                                                        <source
+                                                                                                            src="{{ $audioUrl }}"
+                                                                                                            type="audio/ogg">
+                                                                                                        Your browser does not
+                                                                                                        support audio playback.
+                                                                                                    </audio>
+                                                                                                    <a href="{{ $audioUrl }}"
+                                                                                                        download
+                                                                                                        class="btn btn-sm btn-outline-secondary mt-1">
+                                                                                                        ⬇ Download Audio
+                                                                                                    </a>
+                                                                                                @endif
+                                                                                            @break
+
+                                                                                            @case('Free Text')
+                                                                                                <input type="text"
+                                                                                                    value="{{ $childAnswer }}"
+                                                                                                    name="{{ $childQuestion->id }}"
+                                                                                                    class="form-control" readonly>
+                                                                                            @break
+
+                                                                                            @case('Yes / No')
+                                                                                                <select class="form-select"
+                                                                                                    name="{{ $childQuestion->id }}"
+                                                                                                    disabled>
+                                                                                                    <option value="">Select
+                                                                                                        ..
+                                                                                                    </option>
+                                                                                                    <option value="Yes"
+                                                                                                        @if ('Yes' == $childAnswer) selected @endif>
+                                                                                                        Yes
+                                                                                                    </option>
+                                                                                                    <option value="No"
+                                                                                                        @if ('No' == $childAnswer) selected @endif>
+                                                                                                        No
+                                                                                                    </option>
+                                                                                                </select>
+                                                                                            @break
+
+                                                                                            @case('Dropdown')
+                                                                                                <select class="form-select"
+                                                                                                    name="{{ $childQuestion->id }}"
+                                                                                                    disabled>
+                                                                                                    <option value="">Select
+                                                                                                        ..
+                                                                                                    </option>
+                                                                                                    @foreach ($childQuestion->getOptions as $questionOption)
+                                                                                                        <option
+                                                                                                            value="{{ $questionOption->option }}"
+                                                                                                            @if ($questionOption->option == $childAnswer) selected @endif>
+                                                                                                            {{ $questionOption->option }}
+                                                                                                        </option>
+                                                                                                    @endforeach
+                                                                                                </select>
+                                                                                            @break
+
+                                                                                            @case('Multi select')
+                                                                                                @php
+                                                                                                    $selectArrIds[] =
+                                                                                                        'select' .
+                                                                                                        $childQuestion->id;
+                                                                                                    $selectedValues = explode(
+                                                                                                        ',',
+                                                                                                        $childAnswer ??
+                                                                                                            '',
+                                                                                                    );
+                                                                                                @endphp
+                                                                                                <select class="form-select"
+                                                                                                    name="{{ $childQuestion->id }}[]"
+                                                                                                    id="select{{ $childQuestion->id }}"
+                                                                                                    multiple disabled>
+                                                                                                    <option value="">Select
+                                                                                                        ..
+                                                                                                    </option>
+                                                                                                    @foreach ($childQuestion->getOptions as $questionOption)
+                                                                                                        <option
+                                                                                                            value="{{ $questionOption->option }}"
+                                                                                                            @if (in_array($questionOption->option, $selectedValues)) selected @endif>
+                                                                                                            {{ $questionOption->option }}
+                                                                                                        </option>
+                                                                                                    @endforeach
+                                                                                                </select>
+                                                                                            @break
+
+                                                                                            @case('Date & Time')
+                                                                                                @php
+                                                                                                    $formattedDateTime =
+                                                                                                        '';
+                                                                                                    if (
+                                                                                                        !empty(
+                                                                                                            $childAnswer
+                                                                                                        )
+                                                                                                    ) {
+                                                                                                        try {
+                                                                                                            $datetimeFormats = [
+                                                                                                                'Y-m-d H:i:s',
+                                                                                                                'Y-m-d H:i',
+                                                                                                                'd/m/Y H:i:s',
+                                                                                                                'd/m/Y H:i',
+                                                                                                                'm/d/Y H:i:s',
+                                                                                                                'm/d/Y H:i',
+                                                                                                                'Y-m-d\TH:i:s',
+                                                                                                                'Y-m-d\TH:i',
+                                                                                                            ];
+
+                                                                                                            $parsed = false;
+                                                                                                            foreach (
+                                                                                                                $datetimeFormats
+                                                                                                                as $format
+                                                                                                            ) {
+                                                                                                                try {
+                                                                                                                    $carbonDate = \Carbon\Carbon::createFromFormat(
+                                                                                                                        $format,
+                                                                                                                        $childAnswer,
+                                                                                                                    );
+                                                                                                                    if (
+                                                                                                                        $carbonDate !==
+                                                                                                                        false
+                                                                                                                    ) {
+                                                                                                                        $formattedDateTime = $carbonDate->format(
+                                                                                                                            'Y-m-d\TH:i',
+                                                                                                                        );
+                                                                                                                        $parsed = true;
+                                                                                                                        break;
+                                                                                                                    }
+                                                                                                                } catch (\Exception $e) {
+                                                                                                                    continue;
+                                                                                                                }
+                                                                                                            }
+
+                                                                                                            if (
+                                                                                                                !$parsed
+                                                                                                            ) {
+                                                                                                                try {
+                                                                                                                    $formattedDateTime = \Carbon\Carbon::parse(
+                                                                                                                        $childAnswer,
+                                                                                                                    )->format(
+                                                                                                                        'Y-m-d\TH:i',
+                                                                                                                    );
+                                                                                                                } catch (\Exception $e) {
+                                                                                                                    $formattedDateTime = $childAnswer;
+                                                                                                                }
+                                                                                                            }
+                                                                                                        } catch (\Exception $e) {
+                                                                                                            $formattedDateTime = $childAnswer;
+                                                                                                        }
+                                                                                                    }
+                                                                                                @endphp
+                                                                                                <input type="datetime-local"
+                                                                                                    name="{{ $childQuestion->id }}"
+                                                                                                    value="{{ $formattedDateTime }}"
+                                                                                                    class="form-control" readonly>
+                                                                                            @break
+
+                                                                                            @case('Date')
+                                                                                                @php
+                                                                                                    $formattedDate = '';
+                                                                                                    if (
+                                                                                                        !empty(
+                                                                                                            $parentAnswer
+                                                                                                        )
+                                                                                                    ) {
+                                                                                                        try {
+                                                                                                            // Try common date formats
+                                                                                                            $dateFormats = [
+                                                                                                                'd/m/Y',
+                                                                                                                'Y-m-d',
+                                                                                                                'm/d/Y',
+                                                                                                                'd-m-Y',
+                                                                                                                'Y/m/d',
+                                                                                                                'm-d-Y',
+                                                                                                                'd M Y',
+                                                                                                                'M d Y',
+                                                                                                                'd F Y',
+                                                                                                                'F d Y',
+                                                                                                            ];
+
+                                                                                                            $parsed = false;
+                                                                                                            foreach (
+                                                                                                                $dateFormats
+                                                                                                                as $format
+                                                                                                            ) {
+                                                                                                                try {
+                                                                                                                    $carbonDate = \Carbon\Carbon::createFromFormat(
+                                                                                                                        $format,
+                                                                                                                        $childAnswer,
+                                                                                                                    );
+                                                                                                                    if (
+                                                                                                                        $carbonDate !==
+                                                                                                                        false
+                                                                                                                    ) {
+                                                                                                                        $formattedDate = $carbonDate->format(
+                                                                                                                            'Y-m-d',
+                                                                                                                        );
+                                                                                                                        $parsed = true;
+                                                                                                                        break;
+                                                                                                                    }
+                                                                                                                } catch (\Exception $e) {
+                                                                                                                    continue;
+                                                                                                                }
+                                                                                                            }
+
+                                                                                                            // If none of the formats worked, try parsing with Carbon's automatic parser
+        if (
+            !$parsed
+        ) {
+            try {
+                $formattedDate = \Carbon\Carbon::parse(
+                    $childAnswer,
+                )->format(
+                    'Y-m-d',
+                                                                                                                    );
+                                                                                                                } catch (\Exception $e) {
+                                                                                                                    // If all parsing fails, just display the original value
+                                                                                                                    $formattedDate = $childAnswer;
+                                                                                                                }
+                                                                                                            }
+                                                                                                        } catch (\Exception $e) {
+                                                                                                            $formattedDate = $childAnswer;
+                                                                                                        }
+                                                                                                    }
+                                                                                                @endphp
+                                                                                                <input type="date"
+                                                                                                    value="{{ $formattedDate }}"
+                                                                                                    name="{{ $childQuestion->id }}"
+                                                                                                    class="form-control" readonly>
+                                                                                            @break
+
+                                                                                            @case('File Upload')
+                                                                                                <input type="file"
+                                                                                                    name="{{ $childQuestion->id }}"
+                                                                                                    class="form-control" disabled>
+                                                                                                @if ($childAnswer)
+                                                                                                    <a class="badge badge-primary mt-2"
+                                                                                                        href="{{ asset($childAnswer) }}">Click
+                                                                                                        Here</a>
+                                                                                                @endif
+                                                                                            @break
+
+                                                                                            @case('Subjective')
+                                                                                                @foreach ($childValues as $value)
+                                                                                                    <div
+                                                                                                        class="d-flex flex-column gap-2">
+                                                                                                        <select class="form-select"
+                                                                                                            name="{{ $childQuestion->id }}"
+                                                                                                            disabled>
+                                                                                                            <option
+                                                                                                                value="{{ $value }}">
+                                                                                                                {{ $value }}
+                                                                                                            </option>
+                                                                                                        </select>
+                                                                                                    </div>
+                                                                                                @endforeach
+                                                                                            @break
+
+                                                                                            @default
+                                                                                                <input type="text"
+                                                                                                    value="{{ $childAnswer }}"
+                                                                                                    class="form-control"
+                                                                                                    name="{{ $childQuestion->id }}"
+                                                                                                    readonly>
+                                                                                        @endswitch
+                                                                                    @endif
+                                                                                </td>
+                                                                            </tr>
                                                                         @endif
-                                                                        @break
+                                                                    @endforeach
+                                                                @endif
 
-                                                                    @case('Audio')
-                                                                        <div class="audio-recorder">
-                                                                            <button type="button"
-                                                                                    class="btn btn-sm btn-primary start-recording"
-                                                                                    data-id="{{ $related_question->id }}">
-                                                                                Record
-                                                                            </button>
-                                                                            <button type="button"
-                                                                                    class="btn btn-sm btn-danger stop-recording"
-                                                                                    data-id="{{ $related_question->id }}"
-                                                                                    disabled>Stop
-                                                                            </button>
-                                                                            <button type="button"
-                                                                                    class="btn btn-sm btn-warning delete-audio"
-                                                                                    data-id="{{ $related_question->id }}"
-                                                                                    @if (!isset($d_value)) disabled @endif>
-                                                                                Delete
-                                                                            </button>
+                                                                {{-- ── Outlet sub-questions (new flow, recursive) ── --}}
+                                                                @if ($parentQuestion->question_type === 'Multi Response' && $parentQuestion->subQuestions->count() > 0)
+                                                                    @foreach ($parentQuestion->subQuestions as $subLink)
+                                                                        @if ($subLink->childQuestion)
+                                                                            @include('masters.verifiers.partials.render_sub_question_verify', [
+                                                                                'subQuestion'    => $subLink->childQuestion,
+                                                                                'depth'          => 1,
+                                                                                'user_responses' => $user_responses,
+                                                                            ])
+                                                                        @endif
+                                                                    @endforeach
+                                                                @endif
+                                                                {{-- ── End Outlet sub-questions ── --}}
 
-                                                                            <audio
-                                                                                id="audio-player-{{ $related_question->id }}"
-                                                                                controls></audio>
-                                                                            <input type="hidden"
-                                                                                   name="{{ $related_question->id }}"
-                                                                                   class="audio-data"
-                                                                                   data-id="{{ $related_question->id }}"
-                                                                                   value="{{ asset($d_value) }}">
-                                                                        </div>
-                                                                        @break
+                                                            @endforeach
 
-                                                                    @default
-                                                                        <input type="text" value="{{ $d_value }}"
-                                                                               class="form-control"
-                                                                               name="{{ $related_question->id }}"
-                                                                               readonly>
-                                                                @endswitch
+                                                            <!-- Verifier Remark Row -->
+                                                            <tr>
+                                                                <td class="col-md-6 fw-medium">Verifier Remark</td>
+                                                                <td class="col-md-6">
+                                                                    <select class="form-control" name="remark"
+                                                                        id="verify_remark" required>
+                                                                        <option value="">Select Remark</option>
+                                                                        <option value="other">Other Remark</option>
+                                                                        @foreach ($remarks as $remark)
+                                                                            <option value="{{ $remark->id }}">
+                                                                                {{ $remark->remark }}</option>
+                                                                        @endforeach
+                                                                    </select>
+                                                                    <input class="form-control d-none mt-4" type="text"
+                                                                        placeholder="Add Other Remark" id="other_remark"
+                                                                        name="other_remark">
+                                                                </td>
+                                                            </tr>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
 
-                                                            </td>
-                                                        </tr>
-                                                    @endforeach
-                                                    <tr>
-                                                        <td class="col-md-6 fw-medium">Verifier Remark</td>
-                                                        <td class="col-md-6">
-                                                            <select class="form-control" name="remark"
-                                                                    id="verify_remark" required >
-                                                                <option value="">Select Remark</option>
-                                                                <option value="other">Other Remark</option>
-                                                                @foreach ($remarks as $remark)
-                                                                    <option value="{{ $remark->id }}">
-                                                                        {{ $remark->remark }}</option>
-                                                                @endforeach
-                                                            </select>
-                                                            <input class="form-control d-none mt-4" type="text"
-                                                                   placeholder="Add Other Remark" id="other_remark"
-                                                                   name="other_remark">
-                                                        </td>
-                                                    </tr>
-
-
-                                                    </tbody>
-                                                </table>
-
-                                                <button id="approve" name="approve"
-                                                        class="btn btn-primary float-end">Approve
+                                                <button id="approve" name="approve" class="btn btn-primary float-end ms-2">
+                                                    Approve
                                                 </button>
-                                                <button id="reject" name="reject"
-                                                        class="btn btn-danger float-end">Reject
+                                                <button id="reject" name="reject" class="btn btn-danger float-end">
+                                                    Reject
+                                                </button>
+                                                <button id="send_back" name="send_back" class="btn btn-warning float-end me-2">
+                                                    Sendback
                                                 </button>
                                             </form>
-                                            <!--end table-->
                                         </div>
                                     </div>
                                 </div>
@@ -530,7 +1378,7 @@
                 <div class="modal-header">
                     <h5 class="modal-title" id="ImageModelLabel">Uploaded File Preview</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
-                            aria-label="Close"></button>
+                        aria-label="Close"></button>
                 </div>
                 <div class="modal-body text-center" id="ImageModelBody" style="padding: 15px;">
                     <!-- Image will be injected here -->
@@ -545,7 +1393,6 @@
     {{-- khushboo 15-05-25 --}}
 @endsection
 @section('scripts')
-
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
@@ -605,7 +1452,6 @@
     </script>
 
     <script>
-
         function haversineDistance(lat1, lon1, lat2, lon2) {
 
             console.log(lat1, lon1, lat2, lon2);
@@ -646,7 +1492,7 @@
             return value;
         }
 
-        $('#verify_remark').on('change', function(){
+        $('#verify_remark').on('change', function() {
             if ($('#verify_remark').val() == 'other') {
                 $('#other_remark').removeClass('d-none');
             } else {
@@ -664,7 +1510,7 @@
         //     }
         // }
 
-        document.addEventListener("DOMContentLoaded", function () {
+        document.addEventListener("DOMContentLoaded", function() {
 
             const LatLong = @json($latlongData);
 
@@ -690,7 +1536,8 @@
                     attribution: 'Â© OpenStreetMap contributors'
                 }).addTo(map);
 
-                const distributorMarker = L.marker([distributorLat, distributorLng]).addTo(map).bindPopup('Distributor Location').openPopup();
+                const distributorMarker = L.marker([distributorLat, distributorLng]).addTo(map).bindPopup(
+                    'Distributor Location').openPopup();
                 const userMarker = L.marker([userLat, userLng]).addTo(map).bindPopup('User Location');
 
                 const latlngs = [
@@ -705,7 +1552,9 @@
                 map.fitBounds(polyline.getBounds());
 
                 // ðŸŸ¢ Fetch travel/road distance using OSRM
-                fetch(`https://router.project-osrm.org/route/v1/driving/${distributorLng},${distributorLat};${userLng},${userLat}?overview=false`)
+                fetch(
+                        `https://router.project-osrm.org/route/v1/driving/${distributorLng},${distributorLat};${userLng},${userLat}?overview=false`
+                    )
                     .then(response => response.json())
                     .then(data => {
                         if (data.routes && data.routes.length > 0) {
@@ -721,7 +1570,8 @@
                             //     .setContent(`<strong>Road Distance: ${distanceInKm} km</strong>`)
                             //     .openOn(map);
 
-                            const straightLineDistance = haversineDistance(distributorLat, distributorLng, userLat, userLng);
+                            const straightLineDistance = haversineDistance(distributorLat, distributorLng,
+                                userLat, userLng);
                             console.log(`Straight-line Distance: ${straightLineDistance} km`);
 
                             const midLat = (distributorLat + userLat) / 2;
@@ -816,7 +1666,7 @@
         let isVideoLoading = false;
         let isVideoPlaying = false;
 
-        function openImageModel(filePath) {
+        function openImageModelold(filePath) {
             console.log('Original file path:', filePath);
 
             // Reset flags
@@ -847,16 +1697,33 @@
             } else if (videoExtensions.includes(extension)) {
                 // Determine mime type
                 let mimeType = 'video/';
-                switch(extension) {
-                    case 'mp4': mimeType += 'mp4'; break;
-                    case 'webm': mimeType += 'webm'; break;
-                    case 'ogg': mimeType += 'ogg'; break;
-                    case 'mov': mimeType += 'quicktime'; break;
-                    case 'avi': mimeType += 'x-msvideo'; break;
-                    case 'wmv': mimeType += 'x-ms-wmv'; break;
-                    case 'flv': mimeType += 'x-flv'; break;
-                    case 'temp': mimeType += 'mp4'; break;
-                    default: mimeType += 'mp4';
+                switch (extension) {
+                    case 'mp4':
+                        mimeType += 'mp4';
+                        break;
+                    case 'webm':
+                        mimeType += 'webm';
+                        break;
+                    case 'ogg':
+                        mimeType += 'ogg';
+                        break;
+                    case 'mov':
+                        mimeType += 'quicktime';
+                        break;
+                    case 'avi':
+                        mimeType += 'x-msvideo';
+                        break;
+                    case 'wmv':
+                        mimeType += 'x-ms-wmv';
+                        break;
+                    case 'flv':
+                        mimeType += 'x-flv';
+                        break;
+                    case 'temp':
+                        mimeType += 'mp4';
+                        break;
+                    default:
+                        mimeType += 'mp4';
                 }
 
                 // Create a direct download link with proper encoding
@@ -999,6 +1866,7 @@
             };
         }
 
+        // Replace your current playVideo function with this:
         function playVideo() {
             if (isVideoLoading) {
                 console.log('Video is still loading, please wait...');
@@ -1011,40 +1879,42 @@
 
             if (!video) return;
 
-            // Disable button while playing
-            playBtn.disabled = true;
+            // Don't disable button - let user click again if needed
             isVideoPlaying = true;
 
-            // Small delay to ensure video is ready
-            setTimeout(() => {
-                video.play().then(() => {
+            // Remove the setTimeout and play directly
+            const playPromise = video.play();
+
+            if (playPromise !== undefined) {
+                playPromise.then(() => {
                     console.log('Video playback started successfully');
                     status.textContent = 'Playing';
                     status.className = 'badge bg-success';
-                    playBtn.disabled = false;
                     playBtn.innerHTML = '<i class="fa fa-pause"></i> Pause';
                     playBtn.onclick = pauseVideo;
+                    isVideoPlaying = true;
                 }).catch(error => {
                     console.error('Error playing video:', error);
                     status.textContent = 'Play failed - try reloading';
                     status.className = 'badge bg-danger';
-                    playBtn.disabled = false;
                     isVideoPlaying = false;
 
                     // Show specific error
                     let errorMsg = 'Unknown error';
-                    switch(error.name) {
+                    switch (error.name) {
                         case 'AbortError':
-                            errorMsg = 'Playback was interrupted. Try reloading the video.';
+                            errorMsg = 'Playback was interrupted. Try clicking play again.';
+                            playBtn.innerHTML = '<i class="fa fa-play"></i> Try Again';
                             break;
                         case 'NotAllowedError':
-                            errorMsg = 'Autoplay blocked. Click play again or enable autoplay in browser settings.';
+                            errorMsg = 'Autoplay blocked. Click play again or enable autoplay.';
+                            playBtn.innerHTML = '<i class="fa fa-play"></i> Click to Play';
                             break;
                         case 'NotSupportedError':
                             errorMsg = 'Video format not supported by browser.';
                             break;
                         case 'NetworkError':
-                            errorMsg = 'Network error loading video.';
+                            errorMsg = 'Network error loading video. Try reloading.';
                             break;
                     }
 
@@ -1057,8 +1927,148 @@
                         errorDiv.classList.remove('d-none');
                     }
                 });
-            }, 100);
+            }
         }
+
+        // Also update your openImageModel function to fix the video setup:
+        function openImageModel(filePath) {
+            console.log('Original file path:', filePath);
+
+            // Reset flags
+            isVideoLoading = false;
+            isVideoPlaying = false;
+
+            // CLEAN THE PATH - Check if it has any encrypted data appended
+            let cleanPath = filePath;
+
+            // If the path contains Laravel encrypted data (starts with eyJ), remove it
+            if (filePath.includes('eyJ')) {
+                // Split by any whitespace or newline
+                const parts = filePath.split(/\s+/);
+                cleanPath = parts[0];
+                console.log('Cleaned encrypted data from path. New path:', cleanPath);
+            }
+
+            // Ensure the path is properly encoded for URLs
+            const encodedFilePath = encodeURI(cleanPath).replace(/%20/g, ' ');
+
+            const extension = cleanPath.split('.').pop().toLowerCase();
+            console.log('Clean file path:', cleanPath);
+            console.log('Encoded file path:', encodedFilePath, 'Extension:', extension);
+
+            let html = '';
+
+            const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+            const videoExtensions = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'wmv', 'flv', 'mkv', 'temp'];
+
+            if (imageExtensions.includes(extension)) {
+                html = `
+            <img
+                src="${encodedFilePath}"
+                alt="Uploaded File"
+                class="img-fluid rounded shadow-sm border"
+                style="height: 450px !important; width: auto; object-fit: contain;"
+                onerror="handleImageError(this, '${encodedFilePath}')"
+            />
+        `;
+            } else if (videoExtensions.includes(extension)) {
+                // Determine mime type
+                let mimeType = 'video/';
+                switch (extension) {
+                    case 'mp4':
+                        mimeType += 'mp4';
+                        break;
+                    case 'webm':
+                        mimeType += 'webm';
+                        break;
+                    case 'ogg':
+                        mimeType += 'ogg';
+                        break;
+                    case 'mov':
+                        mimeType += 'quicktime';
+                        break;
+                    case 'avi':
+                        mimeType += 'x-msvideo';
+                        break;
+                    case 'wmv':
+                        mimeType += 'x-ms-wmv';
+                        break;
+                    case 'flv':
+                        mimeType += 'x-flv';
+                        break;
+                    case 'temp':
+                        mimeType += 'mp4';
+                        break;
+                    default:
+                        mimeType += 'mp4';
+                }
+
+                // Create a direct download link with proper encoding
+                const downloadLink = encodedFilePath.replace(/ /g, '%20');
+
+                // SIMPLIFIED HTML - Remove complex buttons that cause conflicts
+                html = `
+            <div class="video-container">
+                <video id="modal-video" controls class="w-100 rounded shadow-sm border"
+                       style="max-height: 70vh; object-fit: contain; background: #000;"
+                       preload="auto"
+                       crossorigin="anonymous"
+                       playsinline>
+                    <source src="${encodedFilePath}" type="${mimeType}">
+                    Your browser does not support this video format.
+                </video>
+                <div class="mt-3 text-center">
+                    <a href="${downloadLink}" download class="btn btn-primary">
+                        <i class="fa fa-download"></i> Download Video
+                    </a>
+                    <button type="button" class="btn btn-secondary ms-2" data-bs-dismiss="modal">
+                        Close
+                    </button>
+                </div>
+                <div class="mt-2 text-center">
+                    <small class="text-muted">Format: .${extension} |
+                    <a href="${encodedFilePath}" target="_blank" class="text-info">Open in new tab</a></small>
+                </div>
+            </div>
+        `;
+            } else {
+                html = `
+            <div class="alert alert-warning">
+                <p class="mb-0">File type .${extension} not supported for preview.</p>
+                <a href="${encodedFilePath}" download class="btn btn-sm btn-primary mt-2">
+                    <i class="fa fa-download"></i> Download File
+                </a>
+            </div>
+        `;
+            }
+
+            $('#ImageModelBody').html(html);
+            const modal = new bootstrap.Modal(document.getElementById('ImageModel'));
+
+            // Clear any existing modal listeners
+            $('#ImageModel').off('shown.bs.modal');
+
+            // Auto-play video when modal is shown
+            $('#ImageModel').on('shown.bs.modal', function() {
+                if (videoExtensions.includes(extension)) {
+                    setTimeout(() => {
+                        const video = document.getElementById('modal-video');
+                        if (video) {
+                            // Try to play, but don't force it
+                            video.play().catch(e => {
+                                console.log('Auto-play prevented:', e.message);
+                                // That's OK - user can click play button
+                            });
+                        }
+                    }, 300);
+                }
+            });
+
+            modal.show();
+        }
+
+        // Remove the complex setupVideoListeners, pauseVideo, reloadVideo, forceLoadVideo functions
+        // They're causing conflicts with the native video controls
 
         function pauseVideo() {
             const video = document.getElementById('modal-video');
@@ -1151,12 +2161,17 @@
         function getVideoError(error) {
             if (!error) return 'Unknown error';
 
-            switch(error.code) {
-                case 1: return 'Video loading aborted';
-                case 2: return 'Network error';
-                case 3: return 'Video decoding error (common with web recordings)';
-                case 4: return 'Video format not supported';
-                default: return 'Error code: ' + error.code;
+            switch (error.code) {
+                case 1:
+                    return 'Video loading aborted';
+                case 2:
+                    return 'Network error';
+                case 3:
+                    return 'Video decoding error (common with web recordings)';
+                case 4:
+                    return 'Video format not supported';
+                default:
+                    return 'Error code: ' + error.code;
             }
         }
 
@@ -1167,11 +2182,11 @@
             img.style.border = '2px dashed #dc3545';
         }
 
-        $(document).ready(function () {
+        $(document).ready(function() {
 
             //image modal
 
-            $('.imagemodal').on('click', function(){
+            $('.imagemodal').on('click', function() {
                 let datasetval = $(this).data('setval');
                 console.log(datasetval);
                 openImageModel(datasetval);
@@ -1179,17 +2194,17 @@
 
 
             @if (session()->has('message'))
-            Swal.fire({
-                position: "top-center",
-                icon: "success",
-                title: "{{ session('message') }}",
-                showConfirmButton: false,
-                timer: 1500
-            });
+                Swal.fire({
+                    position: "top-center",
+                    icon: "success",
+                    title: "{{ session('message') }}",
+                    showConfirmButton: false,
+                    timer: 1500
+                });
             @endif
 
             const multiSelects = @json($selectArrIds);
-            $.each(multiSelects, function (index, select_id) {
+            $.each(multiSelects, function(index, select_id) {
                 console.log(select_id);
                 $(`#${select_id}`).select2({
                     theme: "bootstrap-5",
@@ -1200,7 +2215,7 @@
                 });
             })
 
-            $("#edit_answers").click(function () {
+            $("#edit_answers").click(function() {
                 // Enable all text inputs by removing readonly
                 $('input[readonly]').removeAttr('readonly');
                 // Enable all file and date inputs by removing disabled
@@ -1208,14 +2223,14 @@
                 $(".subjective_ques").removeClass('d-none');
             })
 
-            $('#approve, #reject').on('click', function () {
+            $('#approve, #reject').on('click', function() {
                 // Enable all text inputs by removing readonly
                 $('input[readonly]').removeAttr('readonly');
                 // Enable all file and date inputs by removing disabled
                 $('input[disabled], select[disabled]').removeAttr('disabled');
             });
             // this is to add the subjective question implement in the activity
-            $(".subjective_ques").change(function (event) {
+            $(".subjective_ques").change(function(event) {
                 let subjectTd = $(this).closest('td');
                 const subjectInfo = $(this).val();
                 let qid = $(this).data('q_id');
@@ -1228,13 +2243,13 @@
                             question_id: qid,
                             subject: subjectInfo
                         },
-                        success: function (response) {
+                        success: function(response) {
                             if (response.message == "success") {
                                 let subject_options_select = subjectTd.find(
                                     ".subjective_ques_option");
                                 subject_options_select.empty();
-                                $.each(response.subjectOption.get_options, function (index,
-                                                                                     subjectOptions) {
+                                $.each(response.subjectOption.get_options, function(index,
+                                    subjectOptions) {
                                     let subjectOption =
                                         `${subjectInfo} (${subjectOptions.option})`;
                                     subject_options_select.append($('<option>').text(
@@ -1265,7 +2280,7 @@
             let mediaRecorder;
             let audioChunks = {};
 
-            $(".start-recording").on("click", function () {
+            $(".start-recording").on("click", function() {
                 let id = $(this).data("id");
                 let stopBtn = $(".stop-recording[data-id='" + id + "']");
                 let deleteBtn = $(".delete-audio[data-id='" + id + "']");
@@ -1273,8 +2288,8 @@
                 let audioInput = $("input[name='" + id + "']");
 
                 navigator.mediaDevices.getUserMedia({
-                    audio: true
-                })
+                        audio: true
+                    })
                     .then(stream => {
                         mediaRecorder = new MediaRecorder(stream);
                         audioChunks[id] = [];
@@ -1293,7 +2308,7 @@
                             // Convert audio to base64 and store in hidden input
                             let reader = new FileReader();
                             reader.readAsDataURL(audioBlob);
-                            reader.onloadend = function () {
+                            reader.onloadend = function() {
                                 audioInput.val(reader.result);
                             };
                         };
@@ -1302,14 +2317,14 @@
                         stopBtn.prop("disabled", false);
                     });
             });
-            $(".stop-recording").on("click", function () {
+            $(".stop-recording").on("click", function() {
                 let id = $(this).data("id");
                 let stopBtn = $(this);
                 let startBtn = $(".start-recording[data-id='" + id + "']");
                 let deleteBtn = $(".delete-audio[data-id='" + id + "']");
                 let audioPlayer = $("#audio-player-" + id);
                 mediaRecorder.stop();
-                mediaRecorder.onstop = function () {
+                mediaRecorder.onstop = function() {
                     let audioBlob = new Blob(audioChunks[id], {
                         type: "audio/wav"
                     });
@@ -1323,14 +2338,14 @@
                     let audioInput = $("input[name='" + id + "']");
                     let reader = new FileReader();
                     reader.readAsDataURL(audioBlob);
-                    reader.onloadend = function () {
+                    reader.onloadend = function() {
                         audioInput.val(reader.result);
                     };
                 };
                 stopBtn.prop("disabled", true);
                 startBtn.prop("disabled", false);
             });
-            $(".delete-audio").on("click", function () {
+            $(".delete-audio").on("click", function() {
                 let id = $(this).data("id");
                 let audioPlayer = $("#audio-player-" + id);
                 let audioInput = $("input[name='" + id + "']");
@@ -1341,7 +2356,7 @@
                 $(this).prop("disabled", true);
             });
 
-            $('.audio-data').each(function () {
+            $('.audio-data').each(function() {
                 var audioFilePath = $(this).val(); // Get the audio file path
                 var audioPlayer = '#audio-player-' + $(this).data('id'); // Target the specific audio player
                 // Set the audio source dynamically

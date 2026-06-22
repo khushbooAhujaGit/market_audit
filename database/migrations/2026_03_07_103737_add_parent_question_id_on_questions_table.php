@@ -1,0 +1,32 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::table('questions', function (Blueprint $table) {
+            $table->bigInteger('parent_question_id')->nullable();
+            $table->string('parent_value')->nullable();
+            $table->bigInteger('parent_dropdown_id')->nullable();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::table('questions', function (Blueprint $table) {
+            $table->dropColumn('parent_question_id');
+            $table->dropColumn('parent_value');
+            $table->dropColumn('parent_dropdown_id');
+        });
+    }
+};

@@ -50,13 +50,16 @@ class CompanyController extends Controller
     public function store(Request $request)
     {
         $formFields = $request->validate([
-            'company_name' => ['required', function ($attribute, $value, $fail) use ($request) {
-                $exists = Company::where('company_name', $value)
-                    ->where('company_type', $request->input('company_type'))->first();
-                if ($exists) {
-                    $fail('The combination of company name and type already exists.');
+            'company_name' => [
+                'required',
+                function ($attribute, $value, $fail) use ($request) {
+                    $exists = Company::where('company_name', $value)
+                        ->where('company_type', $request->input('company_type'))->first();
+                    if ($exists) {
+                        $fail('The combination of company name and type already exists.');
+                    }
                 }
-            }],
+            ],
             'company_type' => ['required'],
             'company_code' => ['required', 'string', 'max:6', 'unique:companies'],
             'address' => 'required',
@@ -308,7 +311,7 @@ class CompanyController extends Controller
 
             return response()->json(['status' => true, 'data' => [$projectData, $templateRoutes, $templateALlRoutes], 'message' => 'Project Template Data Fetch Successfully']);
         } catch (\Exception $e) {
-//            dd($e->getMessage());
+            //            dd($e->getMessage());
             return response()->json(['status' => false, 'message' => 'Project Template Data Fetch Error']);
         }
     }
@@ -338,10 +341,10 @@ class CompanyController extends Controller
                 ->distinct('activity_id', 'project_template_id')
                 ->get();
 
-//             dd($userAssignedActivities);
+            //             dd($userAssignedActivities);
             foreach ($userAssignedActivities as $projectTemplateAssignData) {
-//                dd($projectTemplateAssignData);
-                $projecttemplateId = $projectTemplateAssignData->project_template_id;
+                //                dd($projectTemplateAssignData);
+                $projecttemplateId = $projectTemplateAssignData->dataAssign->project_template_id;
                 $projectTemplateData = ProjectTemplate::find($projecttemplateId);
                 $activitData = Activity::find($projectTemplateAssignData['activity_id']);
                 $templateId = $projectTemplateData->template_name_id;
@@ -372,7 +375,7 @@ class CompanyController extends Controller
 
             return response()->json(['status' => true, 'data' => [$projectData, $templateRoutes, $templateALlRoutes], 'message' => 'Project Template Data Fetch Successfully']);
         } catch (\Exception $e) {
-//            dd($e->getMessage());
+            //            dd($e->getMessage());
             return response()->json(['status' => false, 'message' => 'Project Template Data Fetch Error']);
         }
     }
@@ -384,7 +387,7 @@ class CompanyController extends Controller
 
             $projectTempInfo = ProjectTemplate::where('id', $request->template_id)->first();
 
-//            $checkDataAssign = DataAssign::where('project_id', $request->project_id)
+            //            $checkDataAssign = DataAssign::where('project_id', $request->project_id)
 //                ->where('template_name_id', $projectTempInfo->template_name_id)->first();
 
             $checkDataAssign = UserActivityDataAssign::where('project_template_id', $projectTempInfo->id)->get();
@@ -438,7 +441,7 @@ class CompanyController extends Controller
                 }
             }
 
-//            dd($activityIds);
+            //            dd($activityIds);
             $activities = [];
             if (!empty($activityIds)) {
                 $activities = Activity::whereIn('id', $activityIds)->get();
@@ -461,7 +464,7 @@ class CompanyController extends Controller
 
 
         } catch (\Exception $e) {
-//             dd($e->getMessage());
+            //             dd($e->getMessage());
             return response()->json(['status' => false, 'message' => 'Project Template Activity Data Fetch Error']);
         }
     }
@@ -532,13 +535,13 @@ class CompanyController extends Controller
 
         $projectDataAssignIds = [];
         foreach ($projectAssignedData as $projectAssignedDataData) {
-            if(!empty($projectAssignedDataData->dataAssign)){
+            if (!empty($projectAssignedDataData->dataAssign)) {
                 $projectDataAssignIds[] = $projectAssignedDataData->dataAssign->id;
             }
         }
 
         $projectDataAssignIds = array_unique($projectDataAssignIds);
-//        dd($projectDataAssignIds);
+        //        dd($projectDataAssignIds);
 
         $userAssignActivityIds = UserActivityDataAssign::whereIn('data_assign_id', $projectDataAssignIds)
             ->where('project_template_id', $projectTemplate->id)
@@ -554,7 +557,7 @@ class CompanyController extends Controller
             ->where('project_template_id', $projectTemplate->id)
             ->distinct('user_id')->pluck('user_id')->toArray();
 
-//        dd($userAssignIds, $userAssignActivityIds, $rowIds);
+        //        dd($userAssignIds, $userAssignActivityIds, $rowIds);
         $getAssignedRows = UserAuditAssigns::whereIn('common_id', $userAssignCommonIds)->pluck('row_id')->toArray();
 
         $existingRowIdsInAnswers = TempUserActivityAnswersData::whereIn('row_id', $rowIds)
@@ -566,7 +569,7 @@ class CompanyController extends Controller
             ->pluck('row_id')
             ->toArray();
 
-//        dd($existingRowIdsInAnswers);
+        //        dd($existingRowIdsInAnswers);
 
         // Get row_id => [user_id, created_at] mapping
         $rowIdDataMap = TempUserActivityAnswersData::whereIn('row_id', $rowIds)
@@ -586,7 +589,7 @@ class CompanyController extends Controller
             ->toArray();
 
 
-//        // Add `exist` key to each item
+        //        // Add `exist` key to each item
         $project_template_main_headers = $project_template_main_headers->map(function ($item) use ($existingRowIdsInAnswers, $rowIdDataMap) {
             $item['answer_exist'] = in_array($item['id'], $existingRowIdsInAnswers);
             $item['answer_row_id'] = in_array($item['id'], $existingRowIdsInAnswers) ? $item['id'] : '';
@@ -648,7 +651,7 @@ class CompanyController extends Controller
 
         // Get all their row_ids
         $rowIds = $project_template_main_headers->pluck('id');
-//        dd($rowIds);
+        //        dd($rowIds);
 
         $project = Project::find($request->project_id);
         // dd($project);
@@ -702,7 +705,7 @@ class CompanyController extends Controller
 
 
         $projectAssignedData = $projectDataAssignQuery->get();
-//         dd($projectAssignedData);
+        //         dd($projectAssignedData);
         if ($projectAssignedData->IsEmpty() && $projectTemplate->is_master == 0) {
 
 
@@ -722,7 +725,7 @@ class CompanyController extends Controller
             $projectAssignedData = DataAssign::with('getProjectTemplate', 'templateName', 'activityName', 'getActivityGroup')->whereIn("id", $distinct_data_assignIds)
                 ->get();
 
-//            dd($projectTemplate);
+            //            dd($projectTemplate);
             if ($projectTemplate->activityType == 0) {
 
                 $activityIds[] = $projectTemplate->activity_group_name_id_or_activity_id;
@@ -739,7 +742,7 @@ class CompanyController extends Controller
                 }
             }
 
-//            dd($activityIds);
+            //            dd($activityIds);
             $activities = Activity::whereIn('id', $activityIds)->select('id', 'activity_name')->get();
         } else {
 
@@ -782,7 +785,7 @@ class CompanyController extends Controller
             ->pluck('row_id')
             ->toArray();
 
-//        dd($existingRowIdsInAnswers);
+        //        dd($existingRowIdsInAnswers);
 
         // Get row_id => [user_id, created_at] mapping
         $rowIdDataMap = TempUserActivityAnswersData::whereIn('row_id', $rowIds)
@@ -802,7 +805,7 @@ class CompanyController extends Controller
             ->toArray();
 
 
-//        // Add `exist` key to each item
+        //        // Add `exist` key to each item
         $project_template_main_headers = $project_template_main_headers->map(function ($item) use ($existingRowIdsInAnswers, $rowIdDataMap) {
             $item->answer_exist = in_array($item->row_id, $existingRowIdsInAnswers);
             $item->answer_row_id = in_array($item->row_id, $existingRowIdsInAnswers) ? $item->row_id : '';
@@ -891,7 +894,7 @@ class CompanyController extends Controller
                 }
             }
         } catch (\Exception $e) {
-//            dd($e->getMessage());
+            //            dd($e->getMessage());
             return response()->json(['status' => false, 'message' => 'Question Data Fetch Error']);
         }
     }
@@ -934,7 +937,7 @@ class CompanyController extends Controller
 
                 if ($headName !== null) {
                     $projectTemplateData[] = [
-                        'head_id' => (int)$headId,
+                        'head_id' => (int) $headId,
                         'template_head_name' => $headName,
                         'value' => $value,
                     ];
@@ -965,7 +968,7 @@ class CompanyController extends Controller
         $distinct_data_assignIds = DataAssign::where('project_id', $project->id)
             ->pluck('id')->toArray();
 
-//        $distinct_data_assignIds = AuditorAssignedData::where('project_id', $project->id)
+        //        $distinct_data_assignIds = AuditorAssignedData::where('project_id', $project->id)
 //            ->distinct('data_assign_id')
 //            // ->where('user_id', $user->id)
 //            ->pluck('data_assign_id');
@@ -1004,7 +1007,7 @@ class CompanyController extends Controller
             $current_activity_name = $assigned_data->activityInfo->activity_name;
             $exists = false;
 
-//            dd($userAssignedActivityIds);
+            //            dd($userAssignedActivityIds);
 //            if(!empty($userAssignedActivityIds)){
 //                $exists = true;
 //            }
@@ -1022,7 +1025,7 @@ class CompanyController extends Controller
                     'is_master' => $is_master_temp,
                     'activity_id' => $assigned_data->activity_id,
                     'activity_name' => $assigned_data->activityInfo->activity_name,
-                    'group_id' => !empty($group_activity_info) ?$group_activity_info->id: null,
+                    'group_id' => !empty($group_activity_info) ? $group_activity_info->id : null,
                     'group_name' => $group_name,
                     'sequence' => $sequence,
                 ];

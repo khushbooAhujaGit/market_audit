@@ -45,24 +45,81 @@ class AuditorAssignedDataController extends Controller
 
             // $user_list = UserActivityDataAssign::where('data_assign_id', $request->data_assigned_id)->with('get_user_info')->get();
             
-            $user_list = UserActivityDataAssign::where('data_assign_id', $request->data_assigned_id)
-                ->select('user_id')   // only select user_id
-                ->distinct()
-                ->with('get_user_info')
-                ->get();
+            // $user_list = UserActivityDataAssign::where('data_assign_id', $request->data_assigned_id)
+            //     ->select('user_id')   // only select user_id
+            //     ->distinct()
+            //     ->with('get_user_info')
+            //     ->get();
     
-            $common_Ids = UserActivityDataAssign::where('data_assign_id', $request->data_assigned_id)->distinct()->pluck('common_id')->toArray();
-            $getAssignedData = DataAssign::find($request->data_assigned_id);
-            $getRowIds = UserAuditAssigns::whereIn('common_id', $common_Ids)->distinct()->pluck('row_id')->toArray();
-            $distinctValuesAssign = DB::table('project_template_name_values_new')
-                ->whereIn('id', $getRowIds)
-                ->select(
-                    'id as row_id',
-                    DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"$getAssignedData->template_name_head_id\"')) as head_value")
-                )
-                ->get();
+            // $assignedValues = [];
+            
+            // foreach($user_list as $user){
+            //     // dd($user->get_user_info->name);
+            //     $common_Ids = UserActivityDataAssign::where('data_assign_id', $request->data_assigned_id)->where('user_id', $user->get_user_info->id)->distinct()->pluck('common_id')->toArray();
+            //     $getAssignedData = DataAssign::find($request->data_assigned_id);
+            //     $getRowIds = UserAuditAssigns::whereIn('common_id', $common_Ids)->distinct()->pluck('row_id')->toArray();
+            //     $distinctValuesAssign = DB::table('project_template_name_values_new')
+            //         ->whereIn('id', $getRowIds)
+            //         ->select(
+            //             'id as row_id',
+            //             DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"$getAssignedData->template_name_head_id\"')) as head_value")
+            //         )
+            //         ->get();
+
+            //     $assignedValues[$user->get_user_info->name] = $distinctValuesAssign;
+            // }
+            
+            // dd($assignedValues);
+            // $common_Ids = UserActivityDataAssign::where('data_assign_id', $request->data_assigned_id)->distinct()->pluck('common_id')->toArray();
+            // $getAssignedData = DataAssign::find($request->data_assigned_id);
+            // $getRowIds = UserAuditAssigns::whereIn('common_id', $common_Ids)->distinct()->pluck('row_id')->toArray();
+            // $distinctValuesAssign = DB::table('project_template_name_values_new')
+            //     ->whereIn('id', $getRowIds)
+            //     ->select(
+            //         'id as row_id',
+            //         DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"$getAssignedData->template_name_head_id\"')) as head_value")
+            //     )
+            //     ->get();
+            
+             /* Get all assigned records at once */
+            $user_list = UserActivityDataAssign::where('data_assign_id', $request->data_assigned_id)
+                ->select('user_id', 'common_id')
+                ->with('get_user_info')
+                ->get()
+                ->groupBy('user_id');
+
+            $assignedValues = [];
+
+            foreach ($user_list as $userId => $records) {
+
+                $commonIds = $records->pluck('common_id')->unique()->toArray();
+                $getAssignedData = DataAssign::find($request->data_assigned_id);
+                $rowIds = UserAuditAssigns::whereIn('common_id', $commonIds)
+                    ->distinct()
+                    ->pluck('row_id')
+                    ->toArray();
+
+                $distinctValuesAssign = DB::table('project_template_name_values_new')
+                    ->whereIn('id', $rowIds)
+                    ->select(
+                        'id as row_id',
+                        DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$getAssignedData->template_name_head_id}\"')) as head_value")
+                    )
+                    ->get();
+
+                $userName = optional($records->first()->get_user_info)->name;
+
+                // $assignedValues[$userName] = $distinctValuesAssign;
+                $assignedValues[] = [
+                    'user_id' => $userId,
+                    'user_name' => $userName,
+                    'audits' => $distinctValuesAssign
+                ];
+            }
+            
+
         }
-        return response()->json(['message' => "Success", 'user_list' => $user_list, 'distinctValuesAssign' => $distinctValuesAssign]);
+        return response()->json(['message' => "Success", 'user_list' => $user_list,  'assignedValues' => $assignedValues]);
     }
 
     public function assignedDestroy(Request $request)
@@ -118,5 +175,45 @@ class AuditorAssignedDataController extends Controller
         return Excel::download(new DynamicTableExport($data, $headings), 'auditor_assign_data.xlsx');
     }
     //khushboo 13-05-25
+
+    //khushboo 5-03-25
+    public function destroy_assignment(Request $request)
+    {
+        try {
+            // dd($request->all());
+
+            $rowIds = $request->row_ids;
+            $userId = $request->user_id;
+
+            // Get common_ids for that user
+            $commonIds = UserActivityDataAssign::where('user_id', $userId)
+                ->distinct()
+                ->pluck('common_id')
+                ->toArray();
+
+            $userauditassign = UserAuditAssigns::whereIn('common_id', $commonIds)
+                ->whereIn('row_id', $rowIds)->get();
+
+            // dd($userauditassign);
+            // Delete selected rows
+            UserAuditAssigns::whereIn('common_id', $commonIds)
+                ->whereIn('row_id', $rowIds)
+                ->delete();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Assignments deleted successfully'
+            ]);
+
+        } catch (\Exception $e) {
+
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ]);
+        }
+    }
+    //khushboo 5-03-25
+
 
 }

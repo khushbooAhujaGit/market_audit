@@ -144,6 +144,97 @@ trait  InterventionImage
 
     }
 
+    /**
+     * Geo-tag an image and return the new relative path without touching any DB record.
+     * Used by the AJAX pre-upload endpoint so geo-tagging runs before the answer record exists.
+     */
+    public function convertToGeoImagePath(string $absoluteImagePath, $latitude, $longitude, $directory, \Carbon\Carbon $timestamp): string
+    {
+        try {
+            $info = pathinfo($absoluteImagePath);
+            $extension = $info['extension'] ?? 'jpg';
+            $filename  = uniqid() . $info['filename'];
+
+            $image_height = 1920;
+            $image_width  = 1440;
+            $img = ImageManager::gd()->read($absoluteImagePath);
+            $img->resize($image_width, $image_height);
+
+            $textBlockHeight = 150;
+            $bottomMargin    = 10;
+            $y = $image_height - $textBlockHeight - $bottomMargin;
+
+            $img->drawRectangle(0, $y - 20, function ($rectangle) {
+                $rectangle->size(1440, 190);
+                $rectangle->background('rgba(64, 63, 62, 0.8)');
+            });
+
+            $horizontalPadding = 20;
+
+            try {
+                $address_details = $this->returnAddressDetailsUsingLatLong($latitude, $longitude);
+                $main_address    = ($address_details['district'] ?? '') . ', ' . ($address_details['state'] ?? '') . ', India';
+                $location_text   = $address_details['location'] ?? '';
+            } catch (\Throwable $e) {
+                $main_address  = '';
+                $location_text = '';
+            }
+
+            if ($main_address) {
+                $img->text($main_address, $horizontalPadding, $y, function ($font) {
+                    $font->size(28);
+                    $font->filename(public_path('assets/fonts/arial/ARIAL.TTF'));
+                    $font->color('white');
+                    $font->align('start');
+                    $font->valign('middle');
+                    $font->lineHeight(1.5);
+                });
+                $y += 30;
+            }
+
+            if ($location_text) {
+                foreach (explode("\n", wordwrap($location_text, 130, "\n", false)) as $line) {
+                    $img->text($line, $horizontalPadding, $y, function ($font) {
+                        $font->size(23);
+                        $font->filename(public_path('assets/fonts/arial/ARIAL.TTF'));
+                        $font->color('white');
+                        $font->align('start');
+                        $font->valign('middle');
+                        $font->lineHeight(1.5);
+                    });
+                    $y += 30;
+                }
+            }
+
+            foreach (['Latitude : ' . $latitude, 'Longitude : ' . $longitude, 'Time : ' . $timestamp->format('d-m-Y H:i:s')] as $line) {
+                $img->text($line, $horizontalPadding, $y, function ($font) {
+                    $font->size(23);
+                    $font->filename(public_path('assets/fonts/arial/ARIAL.TTF'));
+                    $font->color('white');
+                    $font->align('start');
+                    $font->valign('middle');
+                    $font->lineHeight(1.5);
+                });
+                $y += 30;
+            }
+
+            $newFileName = $filename . '.' . $extension;
+            $newAbsPath  = public_path($directory . '/' . $newFileName);
+            $img->save($newAbsPath);
+
+            if (file_exists($absoluteImagePath)) {
+                @unlink($absoluteImagePath);
+            }
+
+            return $directory . '/' . $newFileName;
+        } catch (\Throwable $e) {
+            Log::error('convertToGeoImagePath failed: ' . $e->getMessage());
+            // Return the original relative path if geo-tagging fails
+            $rel = str_replace(public_path('/'), '', $absoluteImagePath);
+            return ltrim($rel, '/');
+        }
+    }
+
 
     function returnAddressDetailsUsingLatLong($latitude, $longitude)
     {

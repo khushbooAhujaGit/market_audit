@@ -227,6 +227,17 @@
                                                         <label class="form-check-label" for="data_add_on_${template.id}">Data Add On</label>
                                                         </div>
                                                 </div>
+                    <div class="col-xl-3 col-sm-3 ${template.is_master == 1 ? '' : 'd-none'}">
+                                                    <div class="form-check checkbox checkbox-primary mb-0">
+                                                        <input class="form-check-input activity_add_on" name="activity_add_on" id="activity_add_on_${template.id}" type="checkbox">
+                                                        <label class="form-check-label" for="activity_add_on_${template.id}">Activity Add On</label>
+                                                        </div>
+                                                </div>
+                    <div class="col-md-4 col-sm-6 activity-addon-select-wrap d-none" id="addon_wrap_${template.id}">
+                        <label class="form-label">Select Activities for Add On</label>
+                        <select class="form-select activity-addon-select" id="activity_addon_select_${template.id}" multiple>
+                        </select>
+                    </div>
                     <div class="col-xl-3 col-sm-3 ">
                                                     <div class="form-check checkbox checkbox-primary mb-0">
                                                         <input class="form-check-input with_data" name="with_data" id="with_data_${template.id}" type="checkbox">
@@ -267,6 +278,76 @@
                     if (template.data_add_on == 1) {
                         $(`#data_add_on_${template.id}`).prop("checked", true);
                     }
+                    if (template.activity_add_on == 1) {
+                        $(`#activity_add_on_${template.id}`).prop("checked", true);
+                    }
+
+                    // Helper: load group activities into the add-on select with Select2
+                    function loadAddonActivities(templateId, groupId, selectedIds, callback) {
+                        $.get('{{ url("/group_activities") }}/' + groupId, function(activities) {
+                            const sel = $(`#activity_addon_select_${templateId}`);
+                            // Destroy existing Select2 instance before clearing options
+                            if (sel.hasClass('select2-hidden-accessible')) {
+                                sel.select2('destroy');
+                            }
+                            sel.empty();
+                            activities.forEach(function(a) {
+                                sel.append($('<option>').val(a.id).text(a.name));
+                            });
+                            // Init Select2 then apply saved selections
+                            sel.select2({
+                                placeholder: 'Select activities...',
+                                width: '100%',
+                                closeOnSelect: false
+                            });
+                            if (selectedIds && selectedIds.length > 0) {
+                                sel.val(selectedIds.map(String)).trigger('change');
+                            }
+                            if (callback) callback();
+                        });
+                    }
+
+                    // Show/hide addon select based on group + checkbox state
+                    function toggleAddonWrap(templateId) {
+                        const groupVal = $(`#group_project_id_${templateId}`).val();
+                        const checked = $(`#activity_add_on_${templateId}`).is(':checked');
+                        if (groupVal && checked) {
+                            $(`#addon_wrap_${templateId}`).removeClass('d-none');
+                        } else {
+                            $(`#addon_wrap_${templateId}`).addClass('d-none');
+                        }
+                    }
+
+                    $(`#group_project_id_${template.id}`).on('change', function() {
+                        const gid = $(this).val();
+                        if (gid && $(`#activity_add_on_${template.id}`).is(':checked')) {
+                            loadAddonActivities(template.id, gid, [], function() {
+                                $(`#addon_wrap_${template.id}`).removeClass('d-none');
+                            });
+                        } else {
+                            $(`#addon_wrap_${template.id}`).addClass('d-none');
+                        }
+                    });
+
+                    $(`#activity_add_on_${template.id}`).on('change', function() {
+                        const gid = $(`#group_project_id_${template.id}`).val();
+                        if ($(this).is(':checked') && gid) {
+                            loadAddonActivities(template.id, gid, [], function() {
+                                $(`#addon_wrap_${template.id}`).removeClass('d-none');
+                            });
+                        } else {
+                            $(`#addon_wrap_${template.id}`).addClass('d-none');
+                        }
+                    });
+
+                    // Preload saved addon activity ids when editing
+                    if (template.activity_add_on == 1 && actType == 1 && preVal !== "") {
+                        const savedIds = template.activity_add_on_activity_ids ? JSON.parse(template.activity_add_on_activity_ids) : [];
+                        loadAddonActivities(template.id, preVal, savedIds.map(Number), function() {
+                            $(`#addon_wrap_${template.id}`).removeClass('d-none');
+                        });
+                    }
+
                     if (template.with_data == 1) {
                         $(`#with_data_${template.id}`).prop("checked", true);
                     }else{
@@ -461,6 +542,8 @@
                         const main_headerId = row.find(".main_header").val() ? row.find(
                             ".main_header").val() : null;
                         const is_data_add_on = row.find(".data_add_on").is(":checked") ? 1 : 0;
+                        const is_activity_add_on = row.find(".activity_add_on").is(":checked") ? 1 : 0;
+                        const addon_activity_ids = row.find(".activity-addon-select").val() || [];
                         const is_with_data = row.find(".with_data").is(":checked") ? 1 : 0;
                         const is_can_edit_data = row.find(".can_edit_data").is(":checked") ? 1 : 0;
 
@@ -479,6 +562,8 @@
                             'completion_type': completionType,
                             'min_completion': min_completion,
                             'data_add_on': is_data_add_on,
+                            'activity_add_on': is_activity_add_on,
+                            'activity_add_on_activity_ids': addon_activity_ids,
                             'with_data': is_with_data,
                             'can_edit_data': is_can_edit_data,
                             'master_head': master_headId,

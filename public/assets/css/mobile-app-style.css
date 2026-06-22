@@ -1,0 +1,1945 @@
+/* ============================================================
+   MOBILE APP STYLES — Black & White  v6
+   Applies ONLY on max-width: 767px
+   Desktop: 100% unchanged
+   ============================================================ */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
+
+:root {
+  --m-bg: #f2f2f2;
+  --m-card: #ffffff;
+  --m-dark: #111111;
+  --m-dark2: #333333;
+  --m-dark3: #555555;
+  --m-grey: #999999;
+  --m-light: #e5e5e5;
+  --m-lighter: #f5f5f5;
+  --m-border: #e0e0e0;
+  --m-r: 12px;
+  --m-r-sm: 8px;
+  --m-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+@media (max-width: 767px) {
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box !important;
+  }
+
+  body {
+    font-family: "Inter", sans-serif !important;
+    background: var(--m-bg) !important;
+    -webkit-font-smoothing: antialiased !important;
+    overflow-x: clip !important;
+    /* clip does not create stacking context like hidden does */
+  }
+
+  /* ── Hide sidebar ── */
+  .sidebar-wrapper,
+  .page-sidebar,
+  .left-header,
+  .sidebar-toggle-btn {
+    display: none !important;
+  }
+
+  .page-body-wrapper,
+  .page-wrapper .page-body-wrapper,
+  div.page-body-wrapper {
+    margin-left: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+  }
+
+  .page-body {
+    padding: 0 0 80px 0 !important;
+    background: var(--m-bg) !important;
+    /* No min-height — prevents blank space after short content lists */
+    min-height: unset !important;
+    height: auto !important;
+  }
+
+  /* Nullify any inline margin-top on card-header h4 added in blade files */
+  .card>.card-header h4[style*="margin-top"] {
+    margin-top: 0 !important;
+  }
+
+  /* ── Collapse the grey space between sticky nav and content ──
+     Scope breadcrumb hiding ONLY inside .page-header to avoid
+     accidentally hiding card-header content. */
+
+  /* Breadcrumb ONLY inside the sticky top page-header */
+  .page-header .breadcrumb,
+  .page-header ol.breadcrumb,
+  .page-header .breadcrumb-item,
+  .page-header li.breadcrumb-item,
+  .page-header .page-header-left,
+  .page-header .page-header-right {
+    display: none !important;
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* Cuba theme sub-header / breadcrumb section row */
+  .sub-header,
+  .breadcrumb-section,
+  .page-header-main {
+    display: none !important;
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* compact-wrapper injects margin-top on page-body — zero it */
+  .page-wrapper.compact-wrapper .page-body-wrapper .page-body,
+  .page-wrapper.compact-sidebar .page-body-wrapper .page-body {
+    margin-top: 0 !important;
+  }
+
+  /* Header logo wrapper in the page-header row adds blank height — hide it */
+  .page-header.row>.header-logo-wrapper,
+  .page-header>.header-logo-wrapper:first-child {
+    display: none !important;
+  }
+
+  /* Scroll-to-top button overlaps bottom nav — hide it on mobile */
+  .tap-top,
+  .scroll-to-top,
+  button.tap-top {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* Kill any padding/margin on the row wrapper inside page-body */
+  .page-body>.row {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* container-fluid padding */
+  .container-fluid,
+  .page-body .container-fluid {
+    padding: 0 !important;
+  }
+
+  .page-header,
+  header.page-header {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 998 !important;
+    background: var(--m-dark) !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 10px 16px !important;
+    min-height: 52px !important;
+  }
+
+  /* ================================================================
+     CARD HEADER — Black strip with Back + Title + Action
+     Strategy: flexbox row, title takes middle space and wraps to 2 lines
+     ================================================================ */
+  .card>.card-header {
+    background: var(--m-dark) !important;
+    border: none !important;
+    border-radius: 0 !important;
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 10px 14px !important;
+    min-height: 48px !important;
+  }
+
+  /* Back button — left, never shrinks */
+  .card>.card-header .mobile-back-btn {
+    flex: 0 0 auto !important;
+    order: 0 !important;
+  }
+
+  /* ── h4 inside card-header ──
+     Use flex so: [title text] grows, [button] stays pinned to the right
+     This correctly handles <h4>Title <button class="float-end">Add</button></h4> */
+  .card>.card-header h4 {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+    order: 1 !important;
+    color: #fff !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.2px !important;
+    margin: 0 !important;
+    line-height: 1.4 !important;
+    /* Use flex so inner text + inner button sit side by side */
+    display: flex !important;
+    align-items: center !important;
+    gap: 0 !important;
+    overflow: visible !important;
+    word-break: break-word !important;
+  }
+
+  /* Text node wrapper inside h4 — let it shrink and wrap */
+  /* We target the strong/span text part by making the btn push away */
+
+  /* When h4 is the first child (no back button present) */
+  .card>.card-header h4:first-child {
+    order: 0 !important;
+  }
+
+  /* ── Button that lives INSIDE h4 (e.g. Add, View Outlets with float-end) ──
+     margin-left: auto pushes it to the far right end of the h4 flex container */
+  .card>.card-header h4 .btn,
+  .card>.card-header h4>button,
+  .card>.card-header h4>a.btn,
+  .card>.card-header h4 .float-end {
+    display: inline-flex !important;
+    align-items: center !important;
+    float: none !important;
+    /* kill float — flex handles layout */
+    position: static !important;
+    background: #fff !important;
+    color: #111111 !important;
+    -webkit-text-fill-color: #111111 !important;
+    /* override any inherited white fill */
+    border: none !important;
+    border-radius: 20px !important;
+    padding: 5px 12px !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    white-space: nowrap !important;
+    box-shadow: none !important;
+    margin-left: auto !important;
+    /* KEY: push to far right */
+    flex-shrink: 0 !important;
+    text-decoration: none !important;
+    cursor: pointer !important;
+    line-height: 1 !important;
+  }
+
+  /* ── Button that lives DIRECTLY in card-header (not inside h4) ── */
+  .card>.card-header>.btn,
+  .card>.card-header>a.btn,
+  .card>.card-header>button.btn {
+    flex: 0 0 auto !important;
+    order: 2 !important;
+    background: #fff !important;
+    color: var(--m-dark) !important;
+    border: none !important;
+    border-radius: 20px !important;
+    padding: 5px 12px !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    white-space: nowrap !important;
+    box-shadow: none !important;
+    text-decoration: none !important;
+    margin-left: auto !important;
+  }
+
+  /* h3 subtitle below h4 */
+  .card>.card-header h3 {
+    flex: 0 0 100% !important;
+    order: 3 !important;
+    color: #bbb !important;
+    font-size: 11px !important;
+    font-weight: 500 !important;
+    margin: 3px 0 0 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  /* float-end inside headers: kill float, let flex handle it */
+  .card>.card-header .float-end {
+    float: none !important;
+  }
+
+  /* Badge (Audit Closed) in header */
+  .card>.card-header .badge-danger,
+  .card>.card-header .badge.badge-danger {
+    flex: 0 0 auto !important;
+    font-size: 10px !important;
+    padding: 3px 8px !important;
+    border-radius: 20px !important;
+    margin-left: 4px !important;
+    order: 2 !important;
+  }
+
+  /* ── Card / body ── */
+  .card {
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    margin-bottom: 0 !important;
+    background: transparent !important;
+  }
+
+  .card-body {
+    padding: 12px !important;
+    background: transparent !important;
+  }
+
+  .table-responsive {
+    overflow-x: visible !important;
+  }
+
+  /* ================================================================
+     DATATABLE CONTROLS
+     ================================================================ */
+  .dataTables_wrapper .dataTables_filter {
+    float: none !important;
+    text-align: left !important;
+    margin-bottom: 10px !important;
+  }
+
+  .dataTables_wrapper .dataTables_filter label {
+    display: flex !important;
+    align-items: center !important;
+    width: 100% !important;
+    font-size: 12px !important;
+    color: var(--m-grey) !important;
+    gap: 8px !important;
+  }
+
+  .dataTables_wrapper .dataTables_filter input {
+    flex: 1 !important;
+    border: 1.5px solid var(--m-border) !important;
+    border-radius: var(--m-r-sm) !important;
+    padding: 8px 12px !important;
+    font-size: 13px !important;
+    font-family: "Inter", sans-serif !important;
+    background: var(--m-card) !important;
+    color: var(--m-dark) !important;
+    outline: none !important;
+  }
+
+  .dataTables_wrapper .dataTables_filter input:focus {
+    border-color: var(--m-dark) !important;
+    box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06) !important;
+  }
+
+  .dataTables_wrapper .dataTables_length,
+  .dataTables_wrapper .dataTables_info {
+    font-size: 11px !important;
+    color: var(--m-grey) !important;
+    text-align: center !important;
+    float: none !important;
+    padding: 6px 0 !important;
+  }
+
+  /* ================================================================
+     PAGE 1 — MY PROJECTS  (#units_table)
+     ================================================================ */
+  #units_table,
+  #units_table tbody {
+    display: block !important;
+    width: 100% !important;
+  }
+
+  #units_table thead {
+    display: none !important;
+  }
+
+  #units_table tbody tr {
+    position: relative !important;
+    display: block !important;
+    background: var(--m-card) !important;
+    border: 1px solid var(--m-border) !important;
+    border-radius: var(--m-r) !important;
+    margin-bottom: 10px !important;
+    overflow: hidden !important;
+    box-shadow: var(--m-shadow) !important;
+    animation: mFadeUp 0.22s ease both !important;
+  }
+
+  #units_table tbody tr td:nth-child(1) {
+    position: absolute !important;
+    top: 0 !important;
+    right: 0 !important;
+    background: var(--m-dark) !important;
+    color: #fff !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    padding: 4px 12px !important;
+    border-radius: 0 var(--m-r) 0 var(--m-r-sm) !important;
+    border: none !important;
+    display: block !important;
+    min-width: 30px !important;
+    text-align: center !important;
+    line-height: 1.6 !important;
+  }
+
+  #units_table tbody tr td:nth-child(2) {
+    display: block !important;
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    color: var(--m-dark) !important;
+    padding: 14px 52px 4px 14px !important;
+    border: none !important;
+    line-height: 1.35 !important;
+  }
+
+  #units_table tbody tr td:nth-child(3),
+  #units_table tbody tr td:nth-child(4),
+  #units_table tbody tr td:nth-child(5) {
+    display: flex !important;
+    align-items: baseline !important;
+    gap: 4px !important;
+    border: none !important;
+    padding: 2px 14px !important;
+    font-size: 12px !important;
+    color: var(--m-grey) !important;
+    line-height: 1.5 !important;
+  }
+
+  #units_table tbody tr td:nth-child(3)::before,
+  #units_table tbody tr td:nth-child(4)::before,
+  #units_table tbody tr td:nth-child(5)::before {
+    font-weight: 600 !important;
+    color: var(--m-dark2) !important;
+    font-size: 11px !important;
+    flex-shrink: 0 !important;
+    min-width: 58px !important;
+    display: inline-block !important;
+  }
+
+  #units_table tbody tr td:nth-child(3)::before {
+    content: "Unit";
+  }
+
+  #units_table tbody tr td:nth-child(4)::before {
+    content: "Zone";
+  }
+
+  #units_table tbody tr td:nth-child(5)::before {
+    content: "Company";
+  }
+
+  #units_table tbody tr td:nth-child(6) {
+    display: flex !important;
+    align-items: center !important;
+    border: none !important;
+    border-top: 1px solid var(--m-border) !important;
+    padding: 10px 14px !important;
+    margin-top: 8px !important;
+  }
+
+  #units_table tbody tr td:nth-child(6) ul.action {
+    list-style: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: flex !important;
+    width: 100% !important;
+  }
+
+  #units_table tbody tr td:nth-child(6) ul.action li {
+    width: 100% !important;
+  }
+
+  #units_table tbody tr td:nth-child(6) ul.action li a {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    width: 100% !important;
+    background: var(--m-dark) !important;
+    color: #fff !important;
+    border-radius: var(--m-r-sm) !important;
+    padding: 10px 0 !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    text-decoration: none !important;
+    transition: opacity 0.15s !important;
+  }
+
+  #units_table tbody tr td:nth-child(6) ul.action li a i {
+    font-size: 16px !important;
+  }
+
+  #units_table tbody tr td:nth-child(6) ul.action li a:active {
+    opacity: 0.7 !important;
+  }
+
+  #units_table tbody tr:nth-child(1) {
+    animation-delay: 0.04s !important;
+  }
+
+  #units_table tbody tr:nth-child(2) {
+    animation-delay: 0.08s !important;
+  }
+
+  #units_table tbody tr:nth-child(3) {
+    animation-delay: 0.12s !important;
+  }
+
+  #units_table tbody tr:nth-child(4) {
+    animation-delay: 0.16s !important;
+  }
+
+  #units_table tbody tr:nth-child(5) {
+    animation-delay: 0.2s !important;
+  }
+
+  /* ================================================================
+     PAGE 2 — MY PROJECT DATA  (#projectDataTable)
+     FIX: row is flex, all cells sized correctly
+     ================================================================ */
+  #projectDataTable,
+  #projectDataTable tbody {
+    display: block !important;
+    width: 100% !important;
+  }
+
+  #projectDataTable thead {
+    display: none !important;
+  }
+
+  #projectDataTable tbody tr {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    background: var(--m-card) !important;
+    border: 1px solid var(--m-border) !important;
+    border-radius: var(--m-r) !important;
+    margin-bottom: 10px !important;
+    padding: 10px 12px !important;
+    gap: 10px !important;
+    box-shadow: var(--m-shadow) !important;
+    animation: mFadeUp 0.22s ease both !important;
+    /* Ensure all 4 cells fit */
+    width: 100% !important;
+  }
+
+  /* Cell 1 — serial number circle */
+  #projectDataTable tbody tr td:nth-child(1) {
+    flex: 0 0 34px !important;
+    width: 34px;
+    border: none !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+
+  .serial-number {
+    width: 34px !important;
+    height: 34px !important;
+    line-height: 34px !important;
+    background: var(--m-dark) !important;
+    color: #fff !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    border-radius: var(--m-r-sm) !important;
+    text-align: center !important;
+    display: block !important;
+  }
+
+  /* Cell 2 — outlet info (takes remaining space) */
+  #projectDataTable tbody tr td.outlet-cell,
+  #projectDataTable tbody tr td:nth-child(2) {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+    border: none !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+
+  .outlet-card {
+    padding: 0 !important;
+  }
+
+  /* Outlet name — one line, truncate if needed */
+  .outlet-name {
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    color: var(--m-dark) !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    margin-bottom: 2px !important;
+    display: block !important;
+    /* Reset any inherited -webkit-box from parent */
+    -webkit-line-clamp: unset !important;
+    display: block !important;
+  }
+
+  /* Hide the info icon on mobile to save space */
+  .outlet-name .show-details,
+  .outlet-name .icofont-exclamation-circle {
+    display: none !important;
+  }
+
+  .outlet-info {
+    font-size: 11px !important;
+    color: var(--m-grey) !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    display: block !important;
+  }
+
+  /* Cell 3 — status badge */
+  #projectDataTable tbody tr td:nth-child(3) {
+    flex: 0 0 auto !important;
+    border: none !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+
+  /* Status badges */
+  .badge.bg-success {
+    background: var(--m-dark) !important;
+    color: #fff !important;
+    border-radius: 5px !important;
+    padding: 3px 7px !important;
+    font-size: 9px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.3px !important;
+    box-shadow: none !important;
+    display: inline-block !important;
+    white-space: nowrap !important;
+  }
+
+  .badge.bg-warning {
+    background: var(--m-lighter) !important;
+    color: var(--m-dark) !important;
+    border: 1px solid var(--m-border) !important;
+    border-radius: 5px !important;
+    padding: 3px 7px !important;
+    font-size: 9px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    box-shadow: none !important;
+    display: inline-block !important;
+    white-space: nowrap !important;
+  }
+
+  .badge.bg-secondary {
+    background: var(--m-lighter) !important;
+    color: var(--m-grey) !important;
+    border: 1px solid var(--m-border) !important;
+    border-radius: 5px !important;
+    padding: 3px 7px !important;
+    font-size: 9px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    box-shadow: none !important;
+    display: inline-block !important;
+    white-space: nowrap !important;
+  }
+
+  /* Cell 4 — action buttons */
+  #projectDataTable tbody tr td:nth-child(4) {
+    flex: 0 0 auto !important;
+    border: none !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+
+  .action-buttons {
+    display: flex !important;
+    gap: 4px !important;
+  }
+
+  .action-buttons .btn {
+    width: 34px !important;
+    height: 34px !important;
+    padding: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: var(--m-r-sm) !important;
+    font-size: 15px !important;
+    border: none !important;
+    box-shadow: none !important;
+    transition: opacity 0.15s !important;
+    flex-shrink: 0 !important;
+  }
+
+  .action-buttons .btn:active {
+    opacity: 0.7 !important;
+  }
+
+  .action-buttons .btn-primary,
+  .action-buttons .btn-success {
+    background: var(--m-dark) !important;
+    color: #fff !important;
+  }
+
+  .action-buttons .btn-warning {
+    background: var(--m-light) !important;
+    color: var(--m-dark) !important;
+  }
+
+  .action-buttons .btn-info {
+    background: var(--m-light) !important;
+    color: var(--m-dark) !important;
+  }
+
+  /* Icon size inside action buttons */
+  .action-buttons .btn i {
+    font-size: 14px !important;
+  }
+
+  /* Stagger */
+  #projectDataTable tbody tr:nth-child(1) {
+    animation-delay: 0.04s !important;
+  }
+
+  #projectDataTable tbody tr:nth-child(2) {
+    animation-delay: 0.08s !important;
+  }
+
+  #projectDataTable tbody tr:nth-child(3) {
+    animation-delay: 0.12s !important;
+  }
+
+  #projectDataTable tbody tr:nth-child(4) {
+    animation-delay: 0.16s !important;
+  }
+
+  #projectDataTable tbody tr:nth-child(5) {
+    animation-delay: 0.2s !important;
+  }
+
+  /* ================================================================
+     PAGE 3 — ASSIGNED ACTIVITIES  (#project_activities)
+     ================================================================ */
+  #project_activities,
+  #project_activities tbody {
+    display: block !important;
+  }
+
+  #project_activities thead {
+    display: none !important;
+  }
+
+  #project_activities tbody tr {
+    display: flex !important;
+    align-items: center !important;
+    background: var(--m-card) !important;
+    border: 1px solid var(--m-border) !important;
+    border-radius: var(--m-r) !important;
+    margin-bottom: 10px !important;
+    padding: 11px 12px !important;
+    gap: 10px !important;
+    box-shadow: var(--m-shadow) !important;
+    animation: mFadeUp 0.22s ease both !important;
+  }
+
+  #project_activities tbody tr.bg-success {
+    background: var(--m-dark) !important;
+    border-color: var(--m-dark) !important;
+  }
+
+  #project_activities tbody tr td {
+    display: none !important;
+    border: none !important;
+    padding: 0 !important;
+  }
+
+  /* Serial */
+  #project_activities tbody tr td:nth-child(1) {
+    display: flex !important;
+    flex: 0 0 26px !important;
+    width: 26px !important;
+    height: 26px !important;
+    border-radius: 6px !important;
+    background: var(--m-lighter) !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    color: var(--m-dark) !important;
+  }
+
+  #project_activities tbody tr.bg-success td:nth-child(1) {
+    background: rgba(255, 255, 255, 0.15) !important;
+    color: #fff !important;
+  }
+
+  /* Activity name */
+  #project_activities tbody tr td:nth-child(4) {
+    display: flex !important;
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    color: var(--m-dark) !important;
+    line-height: 1.4 !important;
+    align-items: center !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+    overflow: hidden !important;
+    max-height: 2.8em !important;
+  }
+
+  #project_activities tbody tr.bg-success td:nth-child(4) {
+    color: #fff !important;
+  }
+
+  /* Action */
+  #project_activities tbody tr td:nth-child(6) {
+    display: flex !important;
+    flex: 0 0 auto !important;
+    align-items: center !important;
+    gap: 5px !important;
+  }
+
+  #project_activities tbody tr td:nth-child(6) ul.action {
+    list-style: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: flex !important;
+    gap: 5px !important;
+  }
+
+  #project_activities tbody tr td:nth-child(6) ul.action li a,
+  #project_activities tbody tr td:nth-child(6)>a {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 34px !important;
+    height: 34px !important;
+    background: var(--m-lighter) !important;
+    border-radius: var(--m-r-sm) !important;
+    font-size: 15px !important;
+    color: var(--m-dark) !important;
+    text-decoration: none !important;
+    flex-shrink: 0 !important;
+  }
+
+  #project_activities tbody tr.bg-success td:nth-child(6) ul.action li a,
+  #project_activities tbody tr.bg-success td:nth-child(6)>a {
+    background: rgba(255, 255, 255, 0.15) !important;
+    color: #fff !important;
+  }
+
+  /* Sent Back — red background on the eye icon link */
+  #project_activities tbody tr td:nth-child(6) ul.action li a.bg-danger {
+    background: #cc2222 !important;
+    color: #fff !important;
+    border-radius: var(--m-r-sm) !important;
+    width: 34px !important;
+    height: 34px !important;
+  }
+
+  #project_activities tbody tr td:nth-child(6) ul.action li a.bg-danger i {
+    color: #fff !important;
+  }
+
+  /* OTP Pending pill */
+  #project_activities tbody tr td:nth-child(6)>a.text-white {
+    font-size: 9px !important;
+    font-weight: 700 !important;
+    padding: 4px 7px !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: 84px !important;
+    text-align: center !important;
+    white-space: normal !important;
+    line-height: 1.3 !important;
+    background: rgba(255, 255, 255, 0.18) !important;
+    color: #fff !important;
+    border-radius: var(--m-r-sm) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  #project_activities tbody tr td:nth-child(6)>a:not([href]) {
+    background: transparent !important;
+    width: 34px !important;
+    height: 34px !important;
+    font-size: 18px !important;
+  }
+
+  /* Repeat instances — each rendered as its own card row, pulled closer
+     to its parent activity card */
+  #project_activities tbody tr.bg-success+tr.bg-success {
+    margin-top: -4px !important;
+  }
+
+  #project_activities tbody tr td:nth-child(4) .badge {
+    font-size: 9px !important;
+    font-weight: 700 !important;
+    padding: 3px 6px !important;
+    vertical-align: middle !important;
+  }
+
+  /* ================================================================
+     PAGE 4 — DISTRIBUTORS
+     ================================================================ */
+  .col-xl-4.col-md-6 {
+    flex: 0 0 100% !important;
+    max-width: 100% !important;
+    padding: 0 0 10px !important;
+  }
+
+  .prooduct-details-box {
+    background: var(--m-card) !important;
+    border: 1px solid var(--m-border) !important;
+    border-radius: var(--m-r) !important;
+    padding: 14px !important;
+    box-shadow: var(--m-shadow) !important;
+    animation: mFadeUp 0.22s ease both !important;
+    transition: transform 0.15s !important;
+  }
+
+  .prooduct-details-box:active {
+    transform: scale(0.985) !important;
+  }
+
+  .prooduct-details-box .product-name h6 {
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    color: var(--m-dark) !important;
+    margin: 0 0 4px !important;
+    line-height: 1.4 !important;
+  }
+
+  .prooduct-details-box .text-muted {
+    font-size: 12px !important;
+    color: var(--m-grey) !important;
+  }
+
+  .prooduct-details-box .btn-primary.btn-xs {
+    background: var(--m-dark) !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: var(--m-r-sm) !important;
+    padding: 6px 12px !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    text-decoration: none !important;
+  }
+
+  .prooduct-details-box .float-end.fs-5 {
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    color: var(--m-dark) !important;
+    background: var(--m-lighter) !important;
+    border-radius: 5px !important;
+    padding: 2px 7px !important;
+    float: none !important;
+    display: inline-block !important;
+  }
+
+  .prooduct-details-box.disabled {
+    opacity: 0.55 !important;
+    pointer-events: none !important;
+  }
+
+  /* ================================================================
+     PAGE 5 — ACTIVITY FORM
+     ================================================================ */
+
+  /* The outer card-header on activity_questions is empty (just whitespace).
+     Hide it completely so no black bar shows. */
+  /* Hide the empty card-header on the activity form page */
+  .form-container .card>.card-header:empty,
+  .form-container .card>.card-header:not(:has(*)) {
+    display: none !important;
+    height: 0 !important;
+    padding: 0 !important;
+    min-height: 0 !important;
+  }
+
+  /* Fallback: if card-header only has whitespace nodes, hide it */
+  .form-container .card>.card-header {
+    min-height: 0 !important;
+    padding: 0 !important;
+  }
+
+  .form-container .table-card {
+    position: relative !important;
+  }
+
+  /* "Activity Questions" h5 — style as the page's black header bar */
+  .form-container .table-card h5 {
+    display: flex !important;
+    align-items: center !important;
+    background: var(--m-dark) !important;
+    color: #fff !important;
+    -webkit-text-fill-color: #fff !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    margin: 0 !important;
+    padding: 12px 14px !important;
+    border-bottom: none !important;
+    letter-spacing: -0.1px !important;
+    line-height: 1.4 !important;
+  }
+
+  /* Edit badge inside the h5 (the "Edit" span in verify page) */
+  .form-container .table-card h5 .badge,
+  .form-container .table-card h5 .float-end {
+    margin-left: auto !important;
+    background: #fff !important;
+    color: #111 !important;
+    -webkit-text-fill-color: #111 !important;
+    border-radius: 20px !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    padding: 4px 10px !important;
+    cursor: pointer !important;
+    float: none !important;
+  }
+
+  .form-container .card-body {
+    padding: 12px !important;
+  }
+
+  .form-container .table-responsive {
+    overflow-x: visible !important;
+  }
+
+  /* CRITICAL: Allow native <select> option list to render outside bounds.
+     overflow:hidden on any ancestor clips native dropdown options on mobile. */
+  .form-container,
+  .form-container .card,
+  .form-container .card-body,
+  .form-container .table-card,
+  .form-container .table-card.table-responsive,
+  .form-container table.table,
+  .form-container table.table tbody,
+  .form-container table.table tbody tr,
+  .form-container table.table tbody tr td {
+    overflow: visible !important;
+  }
+
+  .form-container table.table {
+    background: transparent !important;
+  }
+
+  .form-container table.table thead {
+    display: none !important;
+  }
+
+  .form-container table.table tbody tr {
+    display: block;
+    background: var(--m-card) !important;
+    border: 1px solid var(--m-border) !important;
+    border-radius: var(--m-r) !important;
+    padding: 12px 14px !important;
+    margin-bottom: 8px !important;
+  }
+
+  .form-container table.table tbody tr td {
+    display: block;
+    border: none !important;
+    padding: 3px 0 !important;
+  }
+
+  .form-container .fw-medium {
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    color: var(--m-dark3) !important;
+    display: block !important;
+    margin-bottom: 6px !important;
+    line-height: 1.4 !important;
+  }
+
+  .form-container .txt-danger {
+    color: #cc0000 !important;
+  }
+
+  .form-container .form-control,
+  .form-container .form-select {
+    border: 1.5px solid var(--m-border) !important;
+    border-radius: var(--m-r-sm) !important;
+    padding: 10px 12px !important;
+    font-size: 13px !important;
+    font-family: "Inter", sans-serif !important;
+    background: #fafafa !important;
+    color: var(--m-dark) !important;
+    width: 100% !important;
+    transition: border-color 0.2s !important;
+  }
+
+  .form-container .form-control:focus,
+  .form-container .form-select:focus {
+    border-color: var(--m-dark) !important;
+    box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06) !important;
+    background: #fff !important;
+    outline: none !important;
+  }
+
+  .form-container #approve {
+    display: block !important;
+    width: 100% !important;
+    background: var(--m-dark) !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: var(--m-r) !important;
+    padding: 14px !important;
+    font-size: 15px !important;
+    font-weight: 700 !important;
+    margin-top: 16px !important;
+    float: none !important;
+    letter-spacing: 0.2px !important;
+    font-family: "Inter", sans-serif !important;
+  }
+
+  .recording-section {
+    background: var(--m-lighter) !important;
+    border: 1px solid var(--m-border) !important;
+    border-radius: var(--m-r-sm) !important;
+    padding: 12px !important;
+    margin-top: 8px !important;
+  }
+
+  .recording-section h6 {
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    color: var(--m-dark) !important;
+    margin-bottom: 8px !important;
+  }
+
+  .recording-section .btn-group {
+    display: flex !important;
+    gap: 6px !important;
+  }
+
+  .recording-section .btn-group .btn {
+    flex: 1 !important;
+    border-radius: var(--m-r-sm) !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    padding: 8px 4px !important;
+  }
+
+  .recording-section .btn-primary {
+    background: var(--m-dark) !important;
+    color: #fff !important;
+    border-color: var(--m-dark) !important;
+  }
+
+  .form-container .btn-info {
+    background: var(--m-dark) !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: var(--m-r-sm) !important;
+    padding: 8px 14px !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    margin-top: 6px !important;
+  }
+
+  .location-overlay {
+    font-family: "Inter", sans-serif !important;
+    background: rgba(0, 0, 0, 0.97) !important;
+    padding: 20px !important;
+  }
+
+  .location-overlay h3 {
+    font-size: 18px !important;
+    font-weight: 800 !important;
+    color: #fff !important;
+  }
+
+  .location-overlay p {
+    font-size: 13px !important;
+    color: #ccc !important;
+  }
+
+  #retryLocationBtn {
+    background: #fff !important;
+    color: var(--m-dark) !important;
+    border: none !important;
+    border-radius: var(--m-r-sm) !important;
+    font-weight: 700 !important;
+    font-size: 14px !important;
+    padding: 12px 28px !important;
+  }
+
+  /* ================================================================
+     BACK BUTTON
+     ================================================================ */
+  .mobile-back-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    background: rgba(255, 255, 255, 0.14) !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 20px !important;
+    padding: 5px 10px 5px 7px !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    font-family: "Inter", sans-serif !important;
+    cursor: pointer !important;
+    text-decoration: none !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    transition: background 0.15s !important;
+    letter-spacing: 0.1px !important;
+  }
+
+  .mobile-back-btn:hover,
+  .mobile-back-btn:active {
+    background: rgba(255, 255, 255, 0.24) !important;
+    color: #fff !important;
+  }
+
+  .mobile-back-btn i {
+    font-size: 12px !important;
+  }
+
+  /* ================================================================
+     MODALS — Bottom sheet
+     ================================================================ */
+  .modal-dialog {
+    margin: 0 !important;
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  .modal.fade .modal-dialog {
+    transform: translateY(60px) !important;
+    transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1) !important;
+  }
+
+  .modal.show .modal-dialog {
+    transform: translateY(0) !important;
+  }
+
+  .modal-content {
+    border-radius: 18px 18px 0 0 !important;
+    border: none !important;
+    box-shadow: 0 -6px 32px rgba(0, 0, 0, 0.14) !important;
+    max-height: 88vh !important;
+    overflow-y: auto !important;
+  }
+
+  .modal-content::before {
+    content: "" !important;
+    display: block !important;
+    width: 36px !important;
+    height: 4px !important;
+    background: var(--m-border) !important;
+    border-radius: 2px !important;
+    margin: 10px auto 0 !important;
+  }
+
+  .modal-header {
+    border-bottom: 1px solid var(--m-border) !important;
+    padding: 12px 18px 10px !important;
+    background: #fff !important;
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 2 !important;
+  }
+
+  .modal-title,
+  .modal-header h4,
+  .modal-header h5 {
+    font-size: 15px !important;
+    font-weight: 700 !important;
+    color: var(--m-dark) !important;
+    margin: 0 !important;
+    /* Reset -webkit-box in modals */
+    display: block !important;
+    -webkit-line-clamp: unset !important;
+    overflow: visible !important;
+  }
+
+  .modal-body {
+    padding: 14px 18px !important;
+    font-size: 13px !important;
+  }
+
+  .modal-body .form-control,
+  .modal-body .form-select {
+    border: 1.5px solid var(--m-border) !important;
+    border-radius: var(--m-r-sm) !important;
+    padding: 10px 12px !important;
+    font-size: 13px !important;
+    font-family: "Inter", sans-serif !important;
+  }
+
+  .modal-body label,
+  .modal-body .form-label {
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    color: var(--m-dark3) !important;
+    margin-bottom: 4px !important;
+  }
+
+  .modal-footer {
+    border-top: 1px solid var(--m-border) !important;
+    padding: 10px 18px 18px !important;
+    display: flex !important;
+    gap: 10px !important;
+  }
+
+  .modal-footer .btn {
+    flex: 1 !important;
+    border-radius: var(--m-r-sm) !important;
+    padding: 12px 0 !important;
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    border: none !important;
+    font-family: "Inter", sans-serif !important;
+  }
+
+  .modal-footer .btn-primary,
+  #submit_data_btn,
+  #submit_edit_data_btn {
+    background: var(--m-dark) !important;
+    color: #fff !important;
+  }
+
+  .modal-footer .btn-secondary {
+    background: var(--m-lighter) !important;
+    color: var(--m-dark) !important;
+  }
+
+  .template-btn {
+    border-radius: var(--m-r-sm) !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    padding: 8px 10px !important;
+    margin: 0 4px 6px 0 !important;
+  }
+
+  .template-btn.btn-primary {
+    background: var(--m-dark) !important;
+    border-color: var(--m-dark) !important;
+    color: #fff !important;
+  }
+
+  .template-btn.btn-secondary {
+    background: var(--m-lighter) !important;
+    border-color: var(--m-border) !important;
+    color: var(--m-dark) !important;
+  }
+
+  /* ================================================================
+     BOTTOM NAV
+     ================================================================ */
+  .mobile-bottom-nav {
+    display: flex !important;
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    z-index: 1000 !important;
+    background: var(--m-dark) !important;
+    border-top: none !important;
+    box-shadow: 0 -2px 20px rgba(0, 0, 0, 0.3) !important;
+    padding: 8px 0 max(10px, env(safe-area-inset-bottom)) !important;
+  }
+
+  .mobile-bottom-nav a {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-decoration: none !important;
+    color: #666 !important;
+    font-size: 10px !important;
+    font-weight: 600 !important;
+    gap: 3px !important;
+    padding: 2px 0 !important;
+    letter-spacing: 0.3px !important;
+    transition: color 0.15s !important;
+    font-family: "Inter", sans-serif !important;
+    text-transform: uppercase !important;
+  }
+
+  .mobile-bottom-nav a.active,
+  .mobile-bottom-nav a:hover {
+    color: #fff !important;
+  }
+
+  .mobile-bottom-nav a i {
+    font-size: 20px !important;
+  }
+
+  /* ================================================================
+     PAGINATION
+     ================================================================ */
+  .pagination {
+    justify-content: center !important;
+    gap: 4px !important;
+    flex-wrap: wrap !important;
+    padding: 12px 0 !important;
+    margin: 0 !important;
+  }
+
+  .page-link {
+    border-radius: var(--m-r-sm) !important;
+    padding: 7px 12px !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    border: 1px solid var(--m-border) !important;
+    color: var(--m-dark) !important;
+    background: var(--m-card) !important;
+    font-family: "Inter", sans-serif !important;
+  }
+
+  .page-item.active .page-link {
+    background: var(--m-dark) !important;
+    border-color: var(--m-dark) !important;
+    color: #fff !important;
+    box-shadow: none !important;
+  }
+
+  /* SELECT2 */
+  .select2-container .select2-selection {
+    border: 1.5px solid var(--m-border) !important;
+    border-radius: var(--m-r-sm) !important;
+    min-height: 42px !important;
+    font-size: 13px !important;
+  }
+
+  .select2-container--default .select2-selection--multiple .select2-selection__choice {
+    background: var(--m-dark) !important;
+    border: none !important;
+    color: #fff !important;
+    border-radius: 4px !important;
+    font-size: 11px !important;
+  }
+
+  /* SWAL */
+  .swal2-popup {
+    border-radius: 16px !important;
+    font-family: "Inter", sans-serif !important;
+    padding: 24px !important;
+  }
+
+  .swal2-title {
+    font-size: 16px !important;
+    font-weight: 700 !important;
+  }
+
+  .swal2-confirm {
+    background: var(--m-dark) !important;
+    border-radius: var(--m-r-sm) !important;
+    font-weight: 700 !important;
+    font-size: 14px !important;
+    font-family: "Inter", sans-serif !important;
+  }
+
+  .swal2-cancel {
+    border-radius: var(--m-r-sm) !important;
+    font-weight: 700 !important;
+    font-size: 14px !important;
+    font-family: "Inter", sans-serif !important;
+  }
+
+  /* ================================================================
+     DATATABLES WRAPPER — fix extra scroll space & hidden text
+     The wrapper div gets extra bottom padding and overflow issues
+     ================================================================ */
+  .dataTables_wrapper {
+    overflow: visible !important;
+    padding-bottom: 0 !important;
+    height: auto !important;
+    min-height: unset !important;
+  }
+
+  /* Prevent the page-wrapper/body-wrapper from adding extra height */
+  .page-wrapper,
+  .page-wrapper .page-body-wrapper {
+    height: auto !important;
+    min-height: unset !important;
+  }
+
+  /* DataTables bottom section (info + pagination) — fully visible above bottom nav.
+     page-body already has padding-bottom:80px so no extra margin needed here. */
+  .dataTables_wrapper .dataTables_paginate,
+  .dataTables_wrapper .dataTables_info {
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+  }
+
+  /* The "Showing X to Y of Z entries" text */
+  /*.dataTables_wrapper .dataTables_info {*/
+  /*  font-size: 11px !important;*/
+  /*  color: var(--m-grey) !important;*/
+  /*  text-align: center !important;*/
+  /*  float: none !important;*/
+  /*  padding: 8px 0 !important;*/
+  /*  display: block !important;*/
+  /*}*/
+
+  /* DataTables pagination buttons */
+  /*.dataTables_wrapper .dataTables_paginate {*/
+  /*  text-align: center !important;*/
+  /*  float: none !important;*/
+  /*  display: flex !important;*/
+  /*  justify-content: center !important;*/
+  /*  flex-wrap: wrap !important;*/
+  /*  gap: 4px !important;*/
+  /*  padding: 8px 0 !important;*/
+  /*}*/
+
+  /*.dataTables_wrapper .dataTables_paginate .paginate_button {*/
+  /*  display: inline-block !important;*/
+  /*  padding: 7px 12px !important;*/
+  /*  font-size: 13px !important;*/
+  /*  font-weight: 600 !important;*/
+  /*  border: 1px solid var(--m-border) !important;*/
+  /*  border-radius: var(--m-r-sm) !important;*/
+  /*  color: var(--m-dark) !important;*/
+  /*  background: var(--m-card) !important;*/
+  /*  cursor: pointer !important;*/
+  /*  font-family: "Inter", sans-serif !important;*/
+  /*  text-decoration: none !important;*/
+  /*}*/
+
+  /*.dataTables_wrapper .dataTables_paginate .paginate_button.current,*/
+  /*.dataTables_wrapper .dataTables_paginate .paginate_button:hover {*/
+  /*  background: var(--m-dark) !important;*/
+  /*  border-color: var(--m-dark) !important;*/
+  /*  color: #fff !important;*/
+  /*}*/
+
+  /*.dataTables_wrapper .dataTables_paginate .paginate_button.disabled,*/
+  /*.dataTables_wrapper .dataTables_paginate .paginate_button.disabled:hover {*/
+  /*  color: var(--m-grey) !important;*/
+  /*  background: var(--m-lighter) !important;*/
+  /*  border-color: var(--m-border) !important;*/
+  /*  cursor: default !important;*/
+  /*}*/
+
+  /* Wrapper */
+  .dataTables_wrapper .dataTables_paginate {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 4px !important;
+    padding: 8px 4px !important;
+    float: none !important;
+    width: 100% !important;
+  }
+
+  /* All buttons including Previous/Next */
+  .dataTables_wrapper .dataTables_paginate .paginate_button {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-width: 32px !important;
+    height: 32px !important;
+    padding: 0 8px !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    border: 1px solid var(--m-border) !important;
+    border-radius: var(--m-r-sm) !important;
+    color: var(--m-dark) !important;
+    background: var(--m-card) !important;
+    cursor: pointer !important;
+    font-family: "Inter", sans-serif !important;
+    white-space: nowrap !important;
+    line-height: 1 !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Active */
+  .dataTables_wrapper .dataTables_paginate .paginate_button.current,
+  .dataTables_wrapper .dataTables_paginate .paginate_button.current:hover {
+    background: var(--m-dark) !important;
+    border-color: var(--m-dark) !important;
+    color: #fff !important;
+  }
+
+  /* Hover */
+  .dataTables_wrapper .dataTables_paginate .paginate_button:hover {
+    background: var(--m-light) !important;
+    border-color: var(--m-dark) !important;
+    color: var(--m-dark) !important;
+  }
+
+  /* Disabled */
+  .dataTables_wrapper .dataTables_paginate .paginate_button.disabled,
+  .dataTables_wrapper .dataTables_paginate .paginate_button.disabled:hover {
+    color: var(--m-grey) !important;
+    background: var(--m-lighter) !important;
+    border-color: var(--m-border) !important;
+    cursor: default !important;
+    opacity: 0.5 !important;
+  }
+
+  /* Ellipsis "…" between page ranges */
+  .dataTables_wrapper .dataTables_paginate .ellipsis {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-width: 24px !important;
+    height: 32px !important;
+    font-size: 11px !important;
+    color: var(--m-grey) !important;
+    border: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    cursor: default !important;
+  }
+
+  /* Inner span wrapping page number buttons */
+  .dataTables_wrapper .dataTables_paginate span {
+    display: inline-flex !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    gap: 4px !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  /* Info line */
+  .dataTables_wrapper .dataTables_info {
+    font-size: 11px !important;
+    color: var(--m-grey) !important;
+    text-align: center !important;
+    float: none !important;
+    display: block !important;
+    padding: 6px 0 4px !important;
+    width: 100% !important;
+  }
+
+
+  /* Hide First/Last buttons on mobile — keep only Prev/Next + page numbers */
+  .dataTables_wrapper .dataTables_paginate .first,
+  .dataTables_wrapper .dataTables_paginate .last {
+    display: none !important;
+  }
+
+  /* ================================================================
+     BADGE FIXES
+     bg-gray (used for Pending/Status badges in project data page)
+     bg-danger (Sent Back badge)
+     ================================================================ */
+  .badge.bg-gray {
+    background: var(--m-lighter) !important;
+    color: var(--m-dark3) !important;
+    border: 1px solid var(--m-border) !important;
+    border-radius: 5px !important;
+    padding: 3px 7px !important;
+    font-size: 9px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.3px !important;
+    box-shadow: none !important;
+    display: inline-block !important;
+    white-space: nowrap !important;
+  }
+
+  .badge.bg-danger {
+    background: #cc2222 !important;
+    color: #fff !important;
+    border-radius: 5px !important;
+    padding: 3px 7px !important;
+    font-size: 9px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.3px !important;
+    box-shadow: none !important;
+    display: inline-block !important;
+    white-space: nowrap !important;
+  }
+
+  /* ================================================================
+     PROJECTS PAGE — units_table action button
+     Full-width black bar — cleaner app-like tap target
+     ================================================================ */
+  #units_table tbody tr td:nth-child(6) {
+    display: flex !important;
+    align-items: center !important;
+    border: none !important;
+    border-top: 1px solid var(--m-border) !important;
+    padding: 10px 14px !important;
+    margin-top: 8px !important;
+  }
+
+  #units_table tbody tr td:nth-child(6) ul.action {
+    list-style: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: flex !important;
+    width: 100% !important;
+  }
+
+  #units_table tbody tr td:nth-child(6) ul.action li {
+    width: 100% !important;
+  }
+
+  #units_table tbody tr td:nth-child(6) ul.action li a {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    width: 100% !important;
+    background: var(--m-dark) !important;
+    color: #fff !important;
+    border-radius: var(--m-r-sm) !important;
+    padding: 11px 0 !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    text-decoration: none !important;
+    transition: opacity 0.15s !important;
+  }
+
+  #units_table tbody tr td:nth-child(6) ul.action li a i {
+    font-size: 18px !important;
+  }
+
+  #units_table tbody tr td:nth-child(6) ul.action li a:active {
+    opacity: 0.7 !important;
+  }
+
+  /* ================================================================
+     FONT WEIGHT IMPROVEMENTS
+     Use weight 500 for body text, 600 for labels, 700 for headings
+     ================================================================ */
+
+  /* Card project name */
+  #units_table tbody tr td:nth-child(2) {
+    font-weight: 700 !important;
+    font-size: 14px !important;
+    letter-spacing: -0.1px !important;
+  }
+
+  /* Unit/Zone/Company labels and values */
+  #units_table tbody tr td:nth-child(3),
+  #units_table tbody tr td:nth-child(4),
+  #units_table tbody tr td:nth-child(5) {
+    font-size: 11px !important;
+    font-weight: 400 !important;
+    color: var(--m-grey) !important;
+    letter-spacing: 0 !important;
+  }
+
+  #units_table tbody tr td:nth-child(3)::before,
+  #units_table tbody tr td:nth-child(4)::before,
+  #units_table tbody tr td:nth-child(5)::before {
+    font-weight: 600 !important;
+    color: var(--m-dark2) !important;
+    font-size: 11px !important;
+    min-width: 60px !important;
+  }
+
+  /* Outlet name in project data */
+  .outlet-name {
+    font-weight: 700 !important;
+    letter-spacing: -0.1px !important;
+  }
+
+  .outlet-info {
+    font-weight: 400 !important;
+  }
+
+  /* Bottom nav labels — slightly heavier for readability */
+  .mobile-bottom-nav a {
+    font-weight: 500 !important;
+    letter-spacing: 0.5px !important;
+    font-size: 9px !important;
+  }
+
+  /* Form question labels — medium weight */
+  .form-container .fw-medium {
+    font-weight: 500 !important;
+    color: var(--m-dark2) !important;
+  }
+
+  /* ================================================================
+     FIX: page-body bottom padding — ensure last card + pagination
+     is always visible above fixed bottom nav
+     ================================================================ */
+  .page-body {
+    padding-bottom: 80px !important;
+    /* bottom nav ~58px + breathing room */
+  }
+
+  /* DataTables table wrapper — no extra horizontal scroll */
+  .dataTables_scroll,
+  .dataTables_scrollBody {
+    overflow: visible !important;
+    width: 100% !important;
+  }
+
+  /* ── Footer — keep copyright visible but remove extra blank space ── */
+  footer,
+  .footer,
+  .page-footer,
+  .footer-fix,
+  .main-footer {
+    padding: 10px 16px !important;
+    margin: 0 !important;
+    text-align: center !important;
+    font-size: 11px !important;
+    color: var(--m-grey) !important;
+    background: var(--m-bg) !important;
+    border: none !important;
+    min-height: unset !important;
+    height: auto !important;
+  }
+
+  /* Hide any empty space-injecting wrappers the theme adds after footer */
+  .footer-fix+*:empty,
+  footer+div:empty {
+    display: none !important;
+  }
+
+  /* ── Fix "View Outlets" button directly in card-header (not inside h4) ──
+     Give it proper dark text so it's readable on the white pill */
+  .card>.card-header>a.btn,
+  .card>.card-header>button.btn {
+    -webkit-text-fill-color: #111111 !important;
+    color: #111111 !important;
+  }
+
+  /* ANIMATION */
+  @keyframes mFadeUp {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* ================================================================
+     CARD HEADER TEXT — force white text on black header
+     The theme uses CSS variables that can override color even with
+     !important. We combat this by targeting every possible selector
+     and also forcing the text via a CSS filter trick as fallback.
+     ================================================================ */
+
+  /* Target h4 directly inside card-header with maximum specificity */
+  :is(.page-body, .page-wrapper, .page-body-wrapper) .card .card-header h4,
+  html body .page-body .card .card-header h4,
+  html body .page-wrapper .page-body .card .card-header h4,
+  .card>.card-header>h4,
+  .card-header h4 {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    margin: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    flex: 1 !important;
+    min-width: 0 !important;
+    line-height: 1.4 !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+  }
+
+  /* Ensure card-header itself is always the dark background */
+  .card>.card-header,
+  html body .page-body .card .card-header {
+    background: #111111 !important;
+    background-color: #111111 !important;
+    color: #ffffff !important;
+  }
+
+  /* ── Page header: fixed at top ── */
+  .page-header,
+  header.page-header {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    z-index: 300 !important;
+    background: #111 !important;
+    padding: 10px 16px !important;
+    min-height: unset !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  /* ── My Projects bar: fixed below page-header ── */
+  /* page-header is ~52px tall */
+  .card>.card-header {
+    position: fixed !important;
+    top: 52px !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    z-index: 200 !important;
+    background: #111111 !important;
+    min-height: 48px !important;
+    display: flex !important;
+    align-items: center !important;
+    padding: 10px 14px !important;
+  }
+
+  /* Search/Show bar — move down to account for actual card-header height */
+  #dt-sticky-controls {
+    position: fixed !important;
+    top: 131px !important;
+    /* was 100px — increase until search appears */
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    z-index: 199 !important;
+    background: #f2f2f2 !important;
+    padding: 10px 12px !important;
+    border-bottom: 1px solid #e0e0e0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+  }
+
+  /* Push content below all bars */
+  /* Only apply large padding-top on the My Projects page */
+  .card:has(#units_table)>.card-body {
+    padding-top: 100px !important;
+  }
+
+
+
+  .card>.card-body {
+    padding-top: 15px !important;
+    margin-top: 133px !important;
+  }
+
+  /* Hide search icon and theme toggle */
+  .page-header .header-search,
+  .page-header .mode {
+    display: none !important;
+  }
+
+  .dataTables_filter input[type="search"] {
+    /* Prevents iOS Safari from zooming and keyboard auto-popup */
+    font-size: 16px !important;
+    /* iOS only zooms when font < 16px */
+    touch-action: manipulation !important;
+  }
+
+
+  /* ── Prevent ANY input from auto-triggering keyboard on page load ── */
+  input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]),
+  textarea,
+  select,
+  .dataTables_filter input,
+  .dataTables_wrapper input[type="search"] {
+    font-size: 16px !important;
+    touch-action: manipulation !important;
+  }
+
+  /* DataTables search — readonly until intentionally tapped */
+  .dataTables_filter input[type="search"] {
+    font-size: 16px !important;
+    touch-action: manipulation !important;
+  }
+
+}
+
+/* END @media max-width: 767px */

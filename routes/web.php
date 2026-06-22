@@ -28,7 +28,7 @@ use App\Http\Controllers\PrivacyPolicyController;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Mail;
 use App\Http\Controllers\BackupController;
-
+use Illuminate\Support\Facades\Auth;
 
 /*
 |--------------------------------------------------------------------------
@@ -67,13 +67,13 @@ Route::get('/backup/files', [BackupController::class, 'listFiles']);
 //backup routes 12-09-25
 
 Route::get('privacy_policy', [PrivacyPolicyController::class, 'index']);
-Route::resource('permissions', \App\Http\Controllers\PermissionController::class)->middleware('auth');
+Route::resource('permissions', PermissionController::class)->middleware('auth');
 
 //Routes for permissions ends
 
 // Route for roles starts
 Route::middleware('permission:Role-Permission')->group(function () {
-    Route::resource('roles', \App\Http\Controllers\RoleController::class)->middleware('auth');
+    Route::resource('roles', RoleController::class)->middleware('auth');
     Route::post('roles/delete', [RoleController::class, 'destroy'])->name('role.destroy');
     Route::get("roles/{roleId}/give-permissions", [RoleController::class, 'view_addPermissionToRole'])->middleware('auth');
     Route::put("role/give-permissions/{roleId}", [RoleController::class, 'addPermissionToRole'])->name('role.givePermissions');
@@ -101,6 +101,7 @@ Route::prefix('auditorAssigned')->group(function () {
         Route::post('/assigned/users', 'get_assigned_auditors')->name('auditors.show');
         Route::post('/destroy', 'assignedDestroy')->name('assigned_data.destroy');
         Route::get('/assigned_data_export', 'auditorAssignDataExport')->name('assigned_data.export');
+        Route::post('/destroy_assignment', 'destroy_assignment')->name('assigned_auditor.delete');
     });
 });
 
@@ -138,6 +139,15 @@ Route::prefix('activities')->group(function () {
         //khushboo 13-05-2025
         Route::get('export_activity', 'exportActivityData')->name('activities.export');
         //khushboo 13-05-2025
+        //khushboo 06-03-2026
+        Route::post('get_parent_question_dropdown', 'getParentQuestionDropdown')->name('get_parent_question_dropdown');
+        //khushboo 06-03-2026
+
+        // sub-questions (new multi-child flow)
+        Route::get('questions/sub-questions/{question_id}', 'subQuestions')->name('activity.question.sub_questions');
+        Route::post('question/sub-question/store', 'storeSubQuestion')->name('activity.question.sub_question.store');
+        Route::post('question/sub-question/destroy', 'destroySubQuestion')->name('activity.question.sub_question.destroy');
+        Route::post('question/sub-question/update-sequence', 'updateSubQuestionSequence')->name('activity.question.sub_question.update_sequence');
 
     });
 });
@@ -190,6 +200,9 @@ Route::prefix('templatenames')->group(function () {
 
 
 Route::get('/', function () {
+    if (Auth::user()->hasRole('Auditor')) {
+        return redirect()->route('user.projects'); // 👈 auditor route
+    }
     return view('dashboard');
 })->middleware('auth');
 
@@ -311,6 +324,7 @@ Route::prefix('project_type')->group(function () {
 //Rotes for Projects starts
 Route::controller(ProjectController::class)->group(function () {
     Route::get('/projects', 'index')->name('project.list');
+    Route::get('search', 'searchProjects')->name('project.search');
     Route::get('/projects/create', 'create')->name('project.create');
     Route::post('/projects/store', 'store')->name('project.store');
     Route::get('projects/edit/{id}', 'edit')->name('project.edit');
@@ -335,11 +349,12 @@ Route::controller(ProjectController::class)->group(function () {
     // This is the route to get the zones of the selected company
     Route::post('/zone_units', 'get_zones_units')->name('get_zones_units');
     Route::post('/project/info', 'get_project_info')->name('get_project_info');
+    Route::get('/group_activities/{group_id}', 'getGroupActivities')->name('get_group_activities');
     // This is the route to get the zones of the selected company
     Route::post('/unit_projects', 'get_unit_projects')->name('get_unit_projects');
     Route::get("assign_data/create", 'assign_create')->name('assign_data.create');
-//    Route::get("assign_data/edit/{id}", 'assign_edit')->name('assign_data.edit');
-//    Route::get("assign_data/update", 'assign_update')->name('assign_data.update');
+    //    Route::get("assign_data/edit/{id}", 'assign_edit')->name('assign_data.edit');
+    //    Route::get("assign_data/update", 'assign_update')->name('assign_data.update');
 
     //khushboo 31-03-2025
     Route::post("/agency_user", 'get_agency_users')->name('get_agency_users');
@@ -380,7 +395,7 @@ Route::prefix('Verifier')->group(function () {
         Route::get('/my_verifications', 'user_verification')->name('user.verification.list');
         Route::get('/verifiy/group_activity/{pt}/{g}/{s}/{a}', 'group_verification_data')->name('activityGroup.verification.view');
         Route::get('/verifiy/activity/{pt}/{a}', 'activity_verification_data')->name('activity.verification.view');
-        Route::get("/data_to_verify/{r}/{a}/{g?}", 'data_to_verify')->name('data_to_verify');
+        Route::get("/data_to_verify/{r}/{a}/{g?}/{seq?}", 'data_to_verify')->name('data_to_verify');
         Route::post('auditor_activity_question_verification', 'activity_answer_verify')->name('verifier.activityQuestionAnswers');
         Route::get('verify_template/{r}/{a}/{g?}', 'viewTemplateFile')->name('verify_template');
 
@@ -388,7 +403,6 @@ Route::prefix('Verifier')->group(function () {
         Route::post('download_pdf', 'downloadPdfTemplate')->name('pdf_template');
         Route::post('/delete-temp-pdf', 'deleteTempPdf')->name('delete_temp_pdf');
         Route::post('export_answer_pdfs', 'exportAnswerPdfs')->name('export_answer_pdfs');
-
     });
 });
 // Routes for Verifiers Ends
@@ -415,16 +429,23 @@ Route::prefix('report')->group(function () {
         Route::post('/project_report', 'project_distributor_report')->name('project-distributor-report');
         Route::post('/download', 'get_report')->name('get_report.download');
         Route::get('get_report_mail/{project}/{template}/{activity?}', 'getReportMail')->name('getReportMail');
+        Route::get('/download-images-zip/{answer_id}', 'downloadImagesZip')->name('report.download.images.zip');
     });
-});
+}); 
+
 
 Route::controller(TaskHandlerController::class)->group(function () {
     Route::get('my_projects', 'userProjects')->name('user.projects');
     Route::get('my_project_distributor_data/{project}', 'userProjectMasterData')->name('user.project_master.data');
     Route::get('my_project_outlet_data/{type}/{project}/{template?}/{activity?}/{group_info?}', 'userProjectChildData')->name('user.project_child.data');
     Route::get('my_project_activities/{row_id}/{status?}', 'userProjectActivities')->name('user.project.assigned_activities');
+    Route::get('my_project_activity_instances/{row_id}/{activity}/{group_info?}', 'userActivityInstancesList')->name('user.activity.instances_list');
     Route::get('my_project_row_activity/{row_id}/{activity}/{group_info?}', 'row_data_activity')->name('user.project.row_id.activity');
-    Route::post('my_project_row_activity_answer', 'row_activity_answers')->name('user.rowId.activity.answers');
+    Route::post('my_project_row_activity_answer/{activity_sequence?}', 'row_activity_answers')->name('user.rowId.activity.answers');
+    Route::post('upload-activity-image-temp', 'upload_activity_image_temp')->name('upload.activity.image.temp');
+    Route::post('my_project_activity_add_instance', 'add_activity_instance')->name('user.activity.add_instance');
+    Route::post('my_project_activity_close_instances', 'closeActivityInstances')->name('user.activity.close_instances');
+    Route::post('my_project_activity_delete_instance', 'delete_activity_instance')->name('user.activity.delete_instance');
     Route::get('my_projects_distributor_outlets_data/{row_id}/{distributor_value}', 'userProjectActivityDistributorOutletData')->name('user.project.distributor.outlets');
 
     //khushboo 16-04-25
@@ -432,11 +453,12 @@ Route::controller(TaskHandlerController::class)->group(function () {
     //khushboo 16-04-25
     Route::post('getTemplateHeadData', 'getTemplateHeadData')->name('getTemplateHeadData');
     Route::post('edit_project_data_template', 'edit_project_data_template')->name('edit_project_data_template');
-    Route::get('otp_verification_page/{row_id}/{activity}', 'otp_verification_page')->name('otp_verification_page');
+    Route::get('otp_verification_page/{row_id}/{activity}/{project_id}', 'otp_verification_page')->name('otp_verification_page');
     Route::post('verify_otp', 'verify_otp')->name('verify_otp');
     Route::post('resend_otp', 'resend_otp')->name('resend_otp');
     Route::post('send_otp', 'send_otp')->name('send_otp');
 });
+
 
 
 // Route::get('/test', function (){

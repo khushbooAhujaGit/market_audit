@@ -29,6 +29,7 @@
                                 <thead>
                                 <tr>
                                     <th>Action</th>
+                                    <th>Instance</th>
                                     @if (!empty($verification_data))
                                         @foreach ($verification_data[0]->getProjectTemplateData->getTemplate->getTemplateHeads as $template_heads)
                                             <th>{{ $template_heads->template_head_name }}</th>
@@ -40,10 +41,16 @@
                                 @foreach ($verification_data as $projectdata)
                                     <tr>
                                         <td>
-                                            <a
-                                                href="{{ route('data_to_verify', ['r' => $projectdata->id, 'a' => $activity_info->id, 'g' => $activity_group_info->id ?? '']) }}"><i
-                                                    class="icon-eye text-secondary fs-5"></i>
+                                            <a href="{{ route('data_to_verify', ['r' => $projectdata->id, 'a' => $activity_info->id, 'g' => $activity_group_info->id ?? '', 'seq' => $projectdata->activity_sequence ?? 0]) }}">
+                                                <i class="icon-eye text-secondary fs-5"></i>
                                             </a>
+                                        </td>
+                                        <td>
+                                            @if (!empty($projectdata->activity_sequence) && $projectdata->activity_sequence > 0)
+                                                <span class="badge bg-primary">Instance {{ $projectdata->activity_sequence + 1 }}</span>
+                                            @else
+                                                <span class="text-muted">Original</span>
+                                            @endif
                                         </td>
                                         @foreach ($projectdata->templateNameValues as $project_row_data)
                                             <td>{{ $project_row_data['value'] }}</td>

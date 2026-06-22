@@ -18,12 +18,12 @@ class ProjectDataImport2
     protected $templateId;
     protected $dataFilter;
 
-    public function __construct($filePath, $projectId, $templateId, $dataFilter=0)
+    public function __construct($filePath, $projectId, $templateId, $dataFilter = 0)
     {
-        $this->filePath = $filePath;
-        $this->projectId = $projectId;
-        $this->templateId = $templateId;
-        $this->dataFilter = $dataFilter;
+        $this->filePath    = $filePath;
+        $this->projectId   = $projectId;
+        $this->templateId  = $templateId;
+        $this->dataFilter  = $dataFilter;
     }
 
     public function handle()
@@ -35,22 +35,21 @@ class ProjectDataImport2
         Log::info('import started');
         $startTime = microtime(true);
         $now = now()->format('Y-m-d H:i:s');
-        $tempCsvPath = storage_path("app/temp_upload_" . time() . ".csv");
 
         $inHandle = fopen($this->filePath, 'r');
-        $outHandle = fopen($tempCsvPath, 'w');
-
-        if ($inHandle === false || $outHandle === false) {
+        if ($inHandle === false) {
             return ['success' => false, 'message' => 'File open failed'];
         }
 
         $projectInfo = DB::table('projects')->find($this->projectId);
         if (!$projectInfo) {
+            fclose($inHandle);
             return ['success' => false, 'message' => 'Project not found'];
         }
 
         $templateInfo = DB::table('template_names')->find($this->templateId);
         if (!$templateInfo) {
+            fclose($inHandle);
             return ['success' => false, 'message' => 'Template not found'];
         }
 
@@ -60,6 +59,7 @@ class ProjectDataImport2
             ->first();
 
         if (!$projectTemplateInfo) {
+            fclose($inHandle);
             return ['success' => false, 'message' => 'Project Template not found'];
         }
 
@@ -74,21 +74,19 @@ class ProjectDataImport2
         $expectedHeaders = $templateHeads->pluck('template_head_name')->toArray();
         $templateHeadIds = $templateHeads->pluck('id')->toArray();
 
+        // Read and clean CSV headers
         $headers = fgetcsv($inHandle);
-        // Clean BOM + trim spaces from each header
         $headers = array_map(function ($h) {
             return trim(preg_replace('/\x{FEFF}/u', '', $h));
         }, $headers);
-
-        $headers = array_values(array_filter($headers, fn($h) => trim($h) !== ''));
+        $headers = array_values(array_filter($headers, function ($h) { return trim($h) !== ''; }));
 
         if ($expectedHeaders !== $headers) {
             fclose($inHandle);
-            fclose($outHandle);
-            return ['success' => false, 'message' => 'CSV headers do not match expected template'];
+            return ['success' => false, 'message' => 'CSV headers do not match expected template. Expected: [' . implode(', ', $expectedHeaders) . '] Got: [' . implode(', ', $headers) . ']'];
         }
 
-        // for distributor mapping on Outlet Data
+        // For distributor mapping on Outlet Data
         $masterData = ProjectTemplate::where('project_id', $this->projectId)->where('is_master', 1)->first();
         $masterTemplateValuesData = [];
         if ($projectTemplateInfo->is_master == 0 && $this->dataFilter == 1 && $masterData) {
@@ -97,33 +95,37 @@ class ProjectDataImport2
                 ->where('project_template_id', $masterData->id)
                 ->select('id', 'template_data_json')
                 ->get()
-                ->map(function($row) use ($masterHeadId) {
+                ->map(function ($row) use ($masterHeadId) {
                     $json = json_decode($row->template_data_json, true);
-
                     return [
-                        'id'    => $row->id,  // keep the row id
-                        'value' => $json[$masterHeadId] ?? null // keep only matched key value
+                        'id'    => $row->id,
+                        'value' => $json[$masterHeadId] ?? null,
                     ];
                 });
         }
 
         DB::connection()->disableQueryLog();
-        DB::statement('SET FOREIGN_KEY_CHECKS=0;');
+
+        $rows          = [];
+        $chunkSize     = 500;
+        $totalInserted = 0;
 
         try {
             while (($data = fgetcsv($inHandle)) !== false) {
-                $templateJson = [];
-
-                foreach ($data as $i => $value) {
-                    if (!isset($templateHeadIds[$i])) continue;
-
-                    $value = preg_replace('/[\/\\\\\'"]/', '', $value);
-                    $value = $this->sanitizeCsvValue($value);
-
-                    $templateJson[$templateHeadIds[$i]] = $value !== '' ? $value : '';
+                // Skip completely empty rows
+                $nonEmpty = array_filter($data, function ($v) { return trim($v) !== ''; });
+                if (empty($nonEmpty)) {
+                    continue;
                 }
 
-                // ðŸ”Ž Match against master values first for Mapping Distributor with Outlet
+                $templateJson = [];
+                foreach ($data as $i => $value) {
+                    if (!isset($templateHeadIds[$i])) continue;
+                    $value = $this->sanitizeCsvValue($value);
+                    $templateJson[$templateHeadIds[$i]] = $value;
+                }
+
+                // Match against master values for Distributor -> Outlet mapping
                 $matchedMasterId = null;
                 if ($this->dataFilter == 1 && !empty($masterTemplateValuesData)) {
                     foreach ($templateJson as $csvValue) {
@@ -137,69 +139,54 @@ class ProjectDataImport2
 
                 $json = json_encode(
                     $templateJson,
-                    JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+                    JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
                 );
 
-                // Step 5: Validate JSON before writing
-                if (
-                    $json === false ||
-                    !mb_check_encoding($json, 'UTF-8') ||
-                    json_last_error() !== JSON_ERROR_NONE
-                ) {
-                    Log::warning("Skipping invalid JSON row: " . json_last_error_msg());
+                if ($json === false || json_last_error() !== JSON_ERROR_NONE) {
+                    Log::warning('Skipping row with bad JSON: ' . json_last_error_msg());
                     continue;
                 }
 
-                fputcsv($outHandle, [
-                    $projectTemplateId,
-                    $json,
-                    $matchedMasterId,
-                    $now,
-                    $now,
-                ], ',', '"', "\\");
+                $rows[] = [
+                    'project_template_id' => $projectTemplateId,
+                    'template_data_json'  => $json,
+                    'distributor_id'      => $matchedMasterId,
+                    'created_at'          => $now,
+                    'updated_at'          => $now,
+                ];
+
+                // Flush chunk to DB
+                if (count($rows) >= $chunkSize) {
+                    DB::table('project_template_name_values_new')->insert($rows);
+                    $totalInserted += count($rows);
+                    $rows = [];
+                }
+            }
+
+            // Insert remaining rows
+            if (!empty($rows)) {
+                DB::table('project_template_name_values_new')->insert($rows);
+                $totalInserted += count($rows);
             }
 
         } catch (\Exception $e) {
-            Log::info('error import-'.$e->getMessage());
-        } finally {
             fclose($inHandle);
-            fclose($outHandle);
+            Log::error('import error: ' . $e->getMessage());
+            return ['success' => false, 'message' => 'Import failed: ' . $e->getMessage()];
         }
 
-        // Step 2: Import using LOAD DATA LOCAL INFILE
-        // Step 2: Import using LOAD DATA LOCAL INFILE
-        try {
-            DB::statement('ALTER TABLE project_template_name_values_new DISABLE KEYS');
-            DB::statement('SET FOREIGN_KEY_CHECKS=0');
-
-            // Normalize path for MySQL (Windows safe)
-            $mysqlFilePath = str_replace('\\', '/', $tempCsvPath);
-
-            DB::statement("
-        LOAD DATA LOCAL INFILE '" . addslashes($mysqlFilePath) . "'
-        INTO TABLE project_template_name_values_new
-        CHARACTER SET utf8mb4
-        FIELDS TERMINATED BY ','
-        ENCLOSED BY '\"'
-        LINES TERMINATED BY '\n'
-        (project_template_id, template_data_json, distributor_id, created_at, updated_at)
-    ");
-        } catch (\Exception $e) {
-            return ['success' => false, 'message' => 'LOAD DATA INFILE failed: ' . $e->getMessage()];
-        } finally {
-            DB::statement('ALTER TABLE project_template_name_values_new ENABLE KEYS');
-            // unlink($tempCsvPath);
-        }
+        fclose($inHandle);
 
         $duration = microtime(true) - $startTime;
-         Log::info('import done- '.$duration);
+        Log::info('import done - ' . $totalInserted . ' rows in ' . round($duration, 2) . 's');
+
         return [
             'success' => true,
-            'message' => "Successfully uploaded using LOAD DATA INFILE in " . round($duration, 2) . " seconds"
+            'message' => "Successfully uploaded {$totalInserted} rows in " . round($duration, 2) . " seconds",
         ];
     }
-    
-    private function sanitizeCsvValue($value) 
+
+    private function sanitizeCsvValue($value)
     {
         // Convert encoding
         $encoding = mb_detect_encoding($value, ['UTF-8', 'ISO-8859-1', 'Windows-1252'], true);
@@ -216,15 +203,12 @@ class ProjectDataImport2
         // Replace newlines inside cells
         $value = str_replace(["\r\n", "\r", "\n"], ' ', $value);
 
-        // Remove /, \, quotes
-        $value = preg_replace('/[\/\\\\\'"∕／]/u', '', $value);
+        // Remove slashes and quotes (prevent JSON/SQL issues)
+        $value = preg_replace('/[\/\\\\\'"]/u', '', $value);
 
-        // Remove control chars
+        // Remove control characters
         $value = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $value);
 
         return trim($value);
     }
-
-
-
 }

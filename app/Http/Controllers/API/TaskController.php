@@ -60,7 +60,6 @@ class TaskController extends Controller
                 'message' => 'success',
                 'data' => $userProjects
             ], 200);
-
         } catch (\Throwable $th) {
             return response([
                 'status' => 401,
@@ -69,22 +68,22 @@ class TaskController extends Controller
         }
     }
 
-    public function getAllActivity($row_id, $user_id, $is_outlet_assigned=0)
+    public function getAllActivityold($row_id, $user_id, $is_outlet_assigned = 0)
     {
 
         try {
 
             $user = $user_id;
             $userAssignedActivities = [];
-            $projectTemplateNameValue = ProjectTemplateNameValuesNew::find($row_id);
-            $projectTemplateData = ProjectTemplate::find($projectTemplateNameValue->project_template_id);
-            $projectInfo = Project::find($projectTemplateData->project_id);
-            $project_master_template = ProjectTemplate::where('project_id', $projectTemplateData->project_id)
+            $projectTemplateNameValue = DB::table('project_template_name_values_new')->where('id', $row_id)->first();
+            $projectTemplateData = DB::table('project_templates')->where('id', $projectTemplateNameValue->project_template_id)->first();
+            $projectInfo = DB::table('projects')->where('id', $projectTemplateData->project_id)->first();
+            $project_master_template = DB::table('project_templates')->where('project_id', $projectTemplateData->project_id)
                 ->where('is_master', 1)
                 ->first();
 
             $template_name_id = $projectTemplateData->template_name_id;
-            $data_add_on = $projectTemplateData->data_add_on==1?true:false;
+            $data_add_on = $projectTemplateData->data_add_on == 1 ? true : false;
 
             $getHeadValues = DB::table('project_template_name_values_new')
                 ->where('id', $row_id)
@@ -102,8 +101,8 @@ class TaskController extends Controller
 
 
             //khushboo 07-07-2025
-            
-            $distinct_data_assignIds = UserActivityDataAssign::where('user_id', $user)
+
+            $distinct_data_assignIds = DB::table('user_activity_data_assigns')->where('user_id', $user)
                 ->where('project_template_id', $projectTemplateData->id)
                 ->distinct('data_assign_id')
                 ->pluck('data_assign_id');
@@ -115,29 +114,28 @@ class TaskController extends Controller
                 ->where('project_template_id', $projectTemplateData->id)
                 ->whereIn("id", $distinct_data_assignIds)
                 ->get();
-                
+
             $checkOutletAssign =  DataAssign::with('getProjectTemplate', 'templateName', 'activityName', 'getActivityGroup')
                 ->where('project_id', $projectTemplateData->project_id)
                 ->whereIn("id", $distinct_data_assignIds)
                 ->where('is_outlet_assigned', 1)
                 ->get();
-                
+
             // dd($checkOutletAssign);
-            if(!empty($checkOutletAssign)){
-                
-                $data_assign_info = UserActivityDataAssign::with('projectTemplateData','activityInfo')
-                ->where('project_template_id', $projectTemplateData->id)
-                ->get();
-                
+            if (!empty($checkOutletAssign)) {
+
+                $data_assign_info = UserActivityDataAssign::with('projectTemplateData', 'activityInfo')
+                    ->where('project_template_id', $projectTemplateData->id)
+                    ->get();
             }
             // dd($data_assign_info);
 
             $otpRequiredStatus = false;
-            $distinct_data_assign_activity_Ids = UserActivityDataAssign::where('user_id', $user)
+            $distinct_data_assign_activity_Ids = DB::table('user_activity_data_assigns')->where('user_id', $user)
                 ->where('project_template_id', $projectTemplateData->id)
                 ->distinct('activity_id')
                 ->pluck('activity_id')->toArray();
-                // dd($distinct_data_assign_activity_Ids);
+            // dd($distinct_data_assign_activity_Ids);
 
             if (
                 $projectInfo->is_otp_required == 1 &&
@@ -149,9 +147,9 @@ class TaskController extends Controller
                     $otpRequiredStatus = true;
                 }
             }
-            
+
             $groupActivity = null;
-            if($projectTemplateData->activityType == 1){
+            if ($projectTemplateData->activityType == 1) {
                 $groupActivity = $projectTemplateData->activity_group_name_id_or_activity_id;
             }
             // dd($data_assign_info);
@@ -168,22 +166,22 @@ class TaskController extends Controller
                 }
                 $group_name = $assigned_data->getActivityGroup ? $assigned_data->getActivityGroup->activity_group_name : null;
                 $is_master_temp = $assigned_data->getProjectTemplate && $assigned_data->getProjectTemplate->is_master ? $assigned_data->getProjectTemplate->is_master : $assigned_data->projectTemplateData->is_master;
-                
+
                 $current_template_name =
-                $assigned_data->templateName ? 
-                $assigned_data->templateName->template_name : 
+                    $assigned_data->templateName ?
+                    $assigned_data->templateName->template_name :
                     $assigned_data->projectTemplateData->getTemplate->template_name;
 
-                                
-                $current_activity_name = 
-                $assigned_data->activityName ?
-                $assigned_data->activityName->activity_name :
+
+                $current_activity_name =
+                    $assigned_data->activityName ?
+                    $assigned_data->activityName->activity_name :
                     $assigned_data->activityInfo->activity_name;
-                
+
                 $exists = false;
-                
+
                 // dd($activity, $current_template_name, $current_activity_name);
-                
+
                 foreach ($userAssignedActivities as $activity) {
                     if ($activity['template_name'] == $current_template_name && $activity['activity_name'] == $current_activity_name) {
                         $exists = true;
@@ -193,8 +191,8 @@ class TaskController extends Controller
 
                 $is_activity_answered = false;
                 $status = 'pending';
-                $totalQuestions = Question::where('activity_id', $assigned_data->activity_id)->where('answer_type', 1)->count();
-                $totalQuestionsIdsArray = Question::where('activity_id', $assigned_data->activity_id)
+                $totalQuestions = DB::table('questions')->where('activity_id', $assigned_data->activity_id)->where('answer_type', 1)->count();
+                $totalQuestionsIdsArray = DB::table('questions')->where('activity_id', $assigned_data->activity_id)
                     ->where('answer_type', 1)->pluck('id')->toArray();
                 $getAnsweredQuestionsCount = DB::table('temp_user_activity_answers_data')
                     ->where('activity_id', $assigned_data->activity_id)
@@ -202,17 +200,18 @@ class TaskController extends Controller
                     ->whereIn('question_id', $totalQuestionsIdsArray)
                     // ->where('user_id', $user_id)
                     ->count();
+
                 // $getAnsweredQuestionsCount = DB::table('temp_user_activity_answers_data')
                 //     ->where('activity_id', $assigned_data->activity_id)
                 //     ->where('row_id', $row_id)
                 //     // ->where('user_id', $user_id)
                 //     ->count();
-                    
+
 
                 if ($totalQuestions == $getAnsweredQuestionsCount) {
                     $is_activity_answered = true;
-                    $getAllQuestionIds = Question::where('activity_id', $assigned_data->activity_id)->pluck('id')->toArray();
-                    
+                    $getAllQuestionIds = DB::table('questions')->where('activity_id', $assigned_data->activity_id)->pluck('id')->toArray();
+
                     //otp verified status
                     $lastQuestionAnswered = DB::table('temp_user_activity_answers_data')
                         ->where('activity_id', $assigned_data->activity_id)
@@ -220,10 +219,10 @@ class TaskController extends Controller
                         ->where('row_id', $row_id)
                         // ->where('user_id', $user_id)
                         ->orderBy('id', 'DESC')->first();
-                        
-                        
+
+
                     //rejected status
-                    $rejectedAnswersCount = TempUserActivityAnswersData::where('row_id', $row_id)
+                    $rejectedAnswersCount = DB::table('temp_user_activity_answers_data')->where('row_id', $row_id)
                         ->where('activity_id', $assigned_data->activity_id)
                         ->whereIn('question_id', $getAllQuestionIds)
                         ->where('status', 4)
@@ -231,15 +230,14 @@ class TaskController extends Controller
 
                     if (!empty($lastQuestionAnswered->mobile_otp) && ($lastQuestionAnswered->otp_verified_status == 1) && ($projectInfo->is_otp_required == 1)) {
                         $status = 'completed';
-                    } else if(($projectInfo->is_otp_required == 1)){
+                    } else if (($projectInfo->is_otp_required == 1)) {
                         $status = 'Awaiting OTP Verify';
-                    }else {
+                    } else {
                         $status = 'completed';
                     }
                     if ($rejectedAnswersCount > 0) {
                         $status = "rejected";
                     }
-
                 }
 
                 $is_distributor_assign = false;
@@ -268,7 +266,7 @@ class TaskController extends Controller
                         'is_master' => $is_master_temp,
                         'activity_id' => $assigned_data->activity_id,
                         'activity_name' => $current_activity_name,
-                        'group_id' => $groupActivity??null,
+                        'group_id' => $groupActivity ?? null,
                         'group_name' => $group_name,
                         'sequence' => (string)$sequence,
                         'otp_required' => $otpRequiredStatus,
@@ -278,71 +276,71 @@ class TaskController extends Controller
                     ];
                 }
 
-//                if($projectTemplateData->is_master == 0){
-//
-//                }
-//                if ($assigned_data->is_outlet_assigned) {
-//                    foreach ($project_other_templates as $other_project_template_info) {
-//                        if ($other_project_template_info->activityType) {
-//                            $group_info = ActivityGroup::with('get_group_activities.getActivityInfo')->find($other_project_template_info->activity_group_name_id_or_activity_id);
-//                            foreach ($group_info->get_group_activities as $group_activity_info) {
-//                                $current_template_name = $other_project_template_info->getTemplate->template_name;
-//                                $current_activity_name = $group_activity_info->getActivityInfo->activity_name;
-//                                $exists = false;
-//                                foreach ($userAssignedActivities as $activity) {
-//                                    if ($activity['template_name'] == $current_template_name && $activity['activity_name'] == $current_activity_name) {
-//                                        $exists = true;
-//                                        break; // Exit loop if a match is found
-//                                    }
-//                                }
-//
-//                                if (!$exists) {
-//                                    $userAssignedActivities[] = [
-//                                        'template_name_id' => $other_project_template_info->getTemplate->id,
-//                                        'template_name' => $other_project_template_info->getTemplate->template_name,
-//                                        'is_master' => 0,
-//                                        'activity_id' => $group_activity_info->activity_id,
-//                                        'activity_name' => $group_activity_info->getActivityInfo->activity_name,
-//                                        'group_id' => $group_info->id, // group id
-//                                        'group_name' => $group_info->activity_group_name,
-//                                        'sequence' => $group_activity_info->sequence
-//                                    ];
-//                                }
-//                            }
-//                        } else {
-//                            $current_template_name = $other_project_template_info->getTemplate->template_name;
-//                            $current_activity_name = $other_project_template_info->activity->activity_name;
-//                            $exists = false;
-//                            foreach ($userAssignedActivities as $activity) {
-//                                if ($activity['template_name'] == $current_template_name && $activity['activity_name'] == $current_activity_name) {
-//                                    $exists = true;
-//                                    break; // Exit loop if a match is found
-//                                }
-//                            }
-//
-//                            if (!$exists) {
-//                                $userAssignedActivities[] = [
-//                                    'template_name_id' => $other_project_template_info->getTemplate->id,
-//                                    'template_name' => $other_project_template_info->getTemplate->template_name,
-//                                    'is_master' => 0,
-//                                    'activity_id' => $other_project_template_info->activity->id,
-//                                    'activity_name' => $other_project_template_info->activity->activity_name,
-//                                    'group_id' => null,
-//                                    'group_name' => null,
-//                                    'sequence' => null
-//                                ];
-//                            }
-//                        }
-//                    }
-//                }
+                //                if($projectTemplateData->is_master == 0){
+                //
+                //                }
+                //                if ($assigned_data->is_outlet_assigned) {
+                //                    foreach ($project_other_templates as $other_project_template_info) {
+                //                        if ($other_project_template_info->activityType) {
+                //                            $group_info = ActivityGroup::with('get_group_activities.getActivityInfo')->find($other_project_template_info->activity_group_name_id_or_activity_id);
+                //                            foreach ($group_info->get_group_activities as $group_activity_info) {
+                //                                $current_template_name = $other_project_template_info->getTemplate->template_name;
+                //                                $current_activity_name = $group_activity_info->getActivityInfo->activity_name;
+                //                                $exists = false;
+                //                                foreach ($userAssignedActivities as $activity) {
+                //                                    if ($activity['template_name'] == $current_template_name && $activity['activity_name'] == $current_activity_name) {
+                //                                        $exists = true;
+                //                                        break; // Exit loop if a match is found
+                //                                    }
+                //                                }
+                //
+                //                                if (!$exists) {
+                //                                    $userAssignedActivities[] = [
+                //                                        'template_name_id' => $other_project_template_info->getTemplate->id,
+                //                                        'template_name' => $other_project_template_info->getTemplate->template_name,
+                //                                        'is_master' => 0,
+                //                                        'activity_id' => $group_activity_info->activity_id,
+                //                                        'activity_name' => $group_activity_info->getActivityInfo->activity_name,
+                //                                        'group_id' => $group_info->id, // group id
+                //                                        'group_name' => $group_info->activity_group_name,
+                //                                        'sequence' => $group_activity_info->sequence
+                //                                    ];
+                //                                }
+                //                            }
+                //                        } else {
+                //                            $current_template_name = $other_project_template_info->getTemplate->template_name;
+                //                            $current_activity_name = $other_project_template_info->activity->activity_name;
+                //                            $exists = false;
+                //                            foreach ($userAssignedActivities as $activity) {
+                //                                if ($activity['template_name'] == $current_template_name && $activity['activity_name'] == $current_activity_name) {
+                //                                    $exists = true;
+                //                                    break; // Exit loop if a match is found
+                //                                }
+                //                            }
+                //
+                //                            if (!$exists) {
+                //                                $userAssignedActivities[] = [
+                //                                    'template_name_id' => $other_project_template_info->getTemplate->id,
+                //                                    'template_name' => $other_project_template_info->getTemplate->template_name,
+                //                                    'is_master' => 0,
+                //                                    'activity_id' => $other_project_template_info->activity->id,
+                //                                    'activity_name' => $other_project_template_info->activity->activity_name,
+                //                                    'group_id' => null,
+                //                                    'group_name' => null,
+                //                                    'sequence' => null
+                //                                ];
+                //                            }
+                //                        }
+                //                    }
+                //                }
             }
-            
-            
+
+
             $userAssignedActivities = collect($userAssignedActivities)->sortBy([['is_master', 'desc'], ['sequence', 'asc']])->values()->toArray();
 
 
-            
-            
+
+
             return response([
                 'status' => 200,
                 'message' => 'success',
@@ -363,10 +361,264 @@ class TaskController extends Controller
         }
     }
 
+    public function getAllActivity($row_id, $user_id, $is_outlet_assigned = 0)
+    {
+        try {
+            $user = $user_id;
+            $userAssignedActivities = [];
+
+            // --- Upfront queries (no change needed here) ---
+            $projectTemplateNameValue = DB::table('project_template_name_values_new')->where('id', $row_id)->first();
+            $projectTemplateData = DB::table('project_templates')->where('id', $projectTemplateNameValue->project_template_id)->first();
+            $projectInfo = DB::table('projects')->where('id', $projectTemplateData->project_id)->first();
+            $project_master_template = DB::table('project_templates')
+                ->where('project_id', $projectTemplateData->project_id)
+                ->where('is_master', 1)
+                ->first();
+
+            $template_name_id = $projectTemplateData->template_name_id;
+            $data_add_on = $projectTemplateData->data_add_on == 1 ? true : false;
+
+            $getHeadValues = DB::table('project_template_name_values_new')
+                ->where('id', $row_id)
+                ->select(DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$projectTemplateData->main_header}\"')) as head_value"))
+                ->get();
+
+            $distributor_value = $getHeadValues[0]->head_value;
+
+            // --- Batch: assigned activity/data IDs ---
+            $userActivityDataAssigns = DB::table('user_activity_data_assigns')
+                ->where('user_id', $user)
+                ->where('project_template_id', $projectTemplateData->id)
+                ->get(['data_assign_id', 'activity_id', 'common_id']);
+
+            $distinct_data_assignIds = $userActivityDataAssigns->pluck('data_assign_id')->unique()->values();
+            $distinct_data_assign_activity_Ids = $userActivityDataAssigns->pluck('activity_id')->unique()->values()->toArray();
+
+            // --- OTP check ---
+            $otpRequiredStatus = false;
+            if ($projectInfo->is_otp_required == 1 && !empty($projectTemplateData->activity_otp_required_ids)) {
+                $otpRequiredIds = json_decode($projectTemplateData->activity_otp_required_ids, true);
+                if (!empty($otpRequiredIds) && count(array_intersect($distinct_data_assign_activity_Ids, $otpRequiredIds)) > 0) {
+                    $otpRequiredStatus = true;
+                }
+            }
+
+            // --- Fetch data_assign_info ---
+            $checkOutletAssign = DataAssign::where('project_id', $projectTemplateData->project_id)
+                ->whereIn('id', $distinct_data_assignIds)
+                ->where('is_outlet_assigned', 1)
+                ->exists(); // faster than ->get() when you only need a boolean
+
+            if ($checkOutletAssign) {
+                $data_assign_info = UserActivityDataAssign::with('projectTemplateData', 'activityInfo')
+                    ->where('project_template_id', $projectTemplateData->id)
+                    ->get();
+            } else {
+                $data_assign_info = DataAssign::with('getProjectTemplate', 'templateName', 'activityName', 'getActivityGroup')
+                    ->where('project_id', $projectTemplateData->project_id)
+                    ->where('project_template_id', $projectTemplateData->id)
+                    ->whereIn('id', $distinct_data_assignIds)
+                    ->get();
+            }
+
+            $groupActivity = null;
+            if ($projectTemplateData->activityType == 1) {
+                $groupActivity = $projectTemplateData->activity_group_name_id_or_activity_id;
+            }
+
+            // --- Batch: all activity IDs we'll need ---
+            $allActivityIds = $data_assign_info->pluck('activity_id')->unique()->toArray();
+
+            // --- Batch: questions per activity (answer_type = 1 only) ---
+            $questionsPerActivity = DB::table('questions')
+                ->whereIn('activity_id', $allActivityIds)
+                ->get(['id', 'activity_id', 'answer_type']);
+
+            // All question IDs (for OTP/rejected lookups)
+            $allQuestionIdsByActivity = $questionsPerActivity
+                ->groupBy('activity_id')
+                ->map(fn($q) => $q->pluck('id')->toArray());
+
+            // Only answer_type=1 question IDs (for count + answered check)
+            $answerType1IdsByActivity = $questionsPerActivity
+                ->where('answer_type', 1)
+                ->groupBy('activity_id')
+                ->map(fn($q) => $q->pluck('id')->toArray());
+
+            $answerType1CountByActivity = $answerType1IdsByActivity
+                ->map(fn($ids) => count($ids));
+
+            // --- Batch: answered questions count per activity ---
+            $allAnswerType1Ids = $questionsPerActivity->where('answer_type', 1)->pluck('id')->toArray();
+
+            $answeredCountByActivity = DB::table('temp_user_activity_answers_data')
+                ->where('row_id', $row_id)
+                ->whereIn('activity_id', $allActivityIds)
+                ->whereIn('question_id', $allAnswerType1Ids)
+                ->select('activity_id', DB::raw('COUNT(DISTINCT question_id) as cnt'))
+                ->groupBy('activity_id')
+                ->pluck('cnt', 'activity_id');
+
+            // --- Batch: last answered record per activity (for OTP check) ---
+            $allQuestionIds = $questionsPerActivity->pluck('id')->toArray();
+
+            $lastAnsweredByActivity = DB::table('temp_user_activity_answers_data')
+                ->where('row_id', $row_id)
+                ->whereIn('activity_id', $allActivityIds)
+                ->whereIn('question_id', $allQuestionIds)
+                ->select('activity_id', 'mobile_otp', 'otp_verified_status')
+                ->orderBy('id', 'DESC')
+                ->get()
+                ->unique('activity_id') // keeps first (latest) per activity after DESC order
+                ->keyBy('activity_id');
+
+            // --- Batch: rejected answers count per activity ---
+            $rejectedCountByActivity = DB::table('temp_user_activity_answers_data')
+                ->where('row_id', $row_id)
+                ->whereIn('activity_id', $allActivityIds)
+                ->whereIn('question_id', $allQuestionIds)
+                ->where('status', 4)
+                ->select('activity_id', DB::raw('COUNT(*) as cnt'))
+                ->groupBy('activity_id')
+                ->pluck('cnt', 'activity_id');
+
+            // --- Batch: distributor assign check (only if master template) ---
+            $is_distributor_assign_global = false;
+            if ($projectTemplateData->is_master == 1) {
+                $getAuditCommonIds = DB::table('user_audit_assigns')
+                    ->where('row_id', $row_id)
+                    ->distinct('common_id')
+                    ->pluck('common_id')
+                    ->toArray();
+
+                $assignedActivityCount = DB::table('user_activity_data_assigns')
+                    ->where('project_template_id', $projectTemplateData->id)
+                    ->whereIn('common_id', $getAuditCommonIds)
+                    ->distinct('activity_id')
+                    ->count('activity_id');
+
+                $is_distributor_assign_global = $assignedActivityCount > 0;
+            }
+
+            // --- Batch: activity group sequences ---
+            $groupSequenceByActivity = [];
+            if (!empty($allActivityIds)) {
+                $pivots = ActivityGroupPivot::whereIn('activity_id', $allActivityIds)->get(['activity_id', 'activity_group_id', 'sequence']);
+                foreach ($pivots as $pivot) {
+                    $groupSequenceByActivity[$pivot->activity_id][$pivot->activity_group_id] = $pivot->sequence;
+                }
+            }
+
+            // --- Main loop (now DB-free) ---
+            foreach ($data_assign_info as $assigned_data) {
+                $sequence = null;
+
+                if (isset($assigned_data->activity_group_id)) {
+                    $sequence = $groupSequenceByActivity[$assigned_data->activity_id][$assigned_data->activity_group_id] ?? 1;
+                }
+
+                $group_name = $assigned_data->getActivityGroup ? $assigned_data->getActivityGroup->activity_group_name : null;
+
+                $is_master_temp = $assigned_data->getProjectTemplate && $assigned_data->getProjectTemplate->is_master
+                    ? $assigned_data->getProjectTemplate->is_master
+                    : $assigned_data->projectTemplateData->is_master;
+
+                $current_template_name = $assigned_data->templateName
+                    ? $assigned_data->templateName->template_name
+                    : $assigned_data->projectTemplateData->getTemplate->template_name;
+
+                $current_activity_name = $assigned_data->activityName
+                    ? $assigned_data->activityName->activity_name
+                    : $assigned_data->activityInfo->activity_name;
+
+                // Deduplicate
+                $exists = false;
+                foreach ($userAssignedActivities as $activity) {
+                    if ($activity['template_name'] == $current_template_name && $activity['activity_name'] == $current_activity_name) {
+                        $exists = true;
+                        break;
+                    }
+                }
+
+                if ($exists) continue;
+
+                // --- Status calculation using pre-fetched batch data ---
+                $activityId = $assigned_data->activity_id;
+                $totalQuestions = $answerType1CountByActivity[$activityId] ?? 0;
+                $answeredCount = $answeredCountByActivity[$activityId] ?? 0;
+                $is_activity_answered = false;
+                $status = 'pending';
+
+                // dd($answeredCount, $totalQuestions);
+
+                if ($totalQuestions > 0 && $totalQuestions == $answeredCount) {
+                    $is_activity_answered = true;
+                    $lastAnswered = $lastAnsweredByActivity[$activityId] ?? null;
+                    $rejectedCount = $rejectedCountByActivity[$activityId] ?? 0;
+
+                    // $otp_required = $projectInfo->is_otp_required;
+                    // dd($projectInfo);
+
+                    if ($projectInfo->is_otp_required == 1 && !empty($lastAnswered->mobile_otp) && $lastAnswered->otp_verified_status == 1 && $projectInfo->is_otp_required == 1) {
+                        $status = 'completed';
+                    } elseif ($projectInfo->is_otp_required == 1) {
+                        $status = 'Awaiting OTP Verify';
+                    } else {
+                        $status = 'completed';
+                    }
+
+                    if ($rejectedCount > 0) {
+                        $status = 'rejected';
+                    }
+                }
+
+                $userAssignedActivities[] = [
+                    'template_name_id'     => $assigned_data->template_name_id,
+                    'template_name'        => $current_template_name,
+                    'is_master'            => $is_master_temp,
+                    'activity_id'          => $activityId,
+                    'activity_name'        => $current_activity_name,
+                    'group_id'             => $groupActivity ?? null,
+                    'group_name'           => $group_name,
+                    'sequence'             => (string) $sequence,
+                    'otp_required'         => $projectInfo->is_otp_required ? True : False,
+                    'status'               => $status,
+                    'is_activity_answered' => $is_activity_answered,
+                    'is_distributor_assign' => $is_distributor_assign_global,
+                ];
+            }
+
+            $userAssignedActivities = collect($userAssignedActivities)
+                ->sortBy([['is_master', 'desc'], ['sequence', 'asc']])
+                ->values()
+                ->toArray();
+
+            return response([
+                'status'           => 200,
+                'message'          => 'success',
+                'row_id'           => $row_id,
+                'activity_group_id' => $groupActivity,
+                'add_outlet'       => $data_add_on,
+                'project_id'       => $projectInfo->id,
+                'template_name_id' => $template_name_id,
+                'is_outlet_assigned' => $is_outlet_assigned,
+                'distributor_value' => $distributor_value,
+                'data'             => $userAssignedActivities,
+            ], 200);
+        } catch (\Throwable $th) {
+            return response([
+                'status'  => 401,
+                'message' => $th->getMessage(),
+            ], 401);
+        }
+    }
+
+
     public function projectDistributorData(Request $request)
     {
         $startTime = microtime(true);
-        
+
         $user = $request->user_id;
         $project_data_arr = [];
 
@@ -377,8 +629,8 @@ class TaskController extends Controller
         $project_temp_info = DB::table('project_templates')->where('project_id', $request->project_id)
             ->where('is_master', 1)
             ->first();
-            // dd($project_temp_info, $request->all());
-            
+        // dd($project_temp_info, $request->all());
+
         $template_name_id = $project_temp_info->template_name_id;
 
         //khushboo 17-05-25
@@ -398,12 +650,11 @@ class TaskController extends Controller
         ) {
             $otpRequiredIds = json_decode($project_temp_info->activity_otp_required_ids, true);
 
-//            if (!empty($otpRequiredIds) && in_array($project_temp_info->activity_group_name_id_or_activity_id, $otpRequiredIds)) {
+            //            if (!empty($otpRequiredIds) && in_array($project_temp_info->activity_group_name_id_or_activity_id, $otpRequiredIds)) {
             $otpRequiredStatus = 1;
-//            }
+            //            }
         }
         //khushboo 07-04-2025
-
 
         // dd($request->project_id, $request->template_id);
         $main_header_id = $project_temp_info->main_header;
@@ -413,26 +664,26 @@ class TaskController extends Controller
         $totalproject = 0;
 
         $isOutletAssigned = 0;
-        
+
         $distributorsValueNotAssigned = [];
         $row_renderred_arr = [];
         $project_template_details = collect($project_template_details)
-        ->sortByDesc(function ($item) {
-            return $item->is_master; // 1 first, then 0
-        })
-        ->values(); // reset keys
-        
+            ->sortByDesc(function ($item) {
+                return $item->is_master; // 1 first, then 0
+            })
+            ->values(); // reset keys
+
         $project_temp_child_info_Ids = DB::table('project_templates')
             ->where('project_id', $project_temp_info->project_id)
             ->where('is_master', 0)->pluck('id')->toArray();
-            
-        
+
+
         $childProjectTemplatesData = DB::table('project_template_name_values_new')
             ->whereIn('project_template_id', $project_temp_child_info_Ids)->get();
-            // dd($project_template_details);
+        // dd($project_template_details);
         foreach ($project_template_details as $tempKey => $tempData) {
 
- 
+
             $getDataAssignIds = DB::table('data_assigns')->where('project_id', $request->project_id)
                 ->where('template_name_id', $tempData->template_name_id)
                 ->distinct('id')
@@ -442,7 +693,7 @@ class TaskController extends Controller
                 ->where('template_name_id', $tempData->template_name_id)
                 ->where('is_outlet_assigned', 1)
                 ->exists();
-                
+
 
             $getDataAssignTemplateHeadIds = DB::table('data_assigns')->where('project_id', $request->project_id)
                 ->where('template_name_id', $tempData->template_name_id)
@@ -459,7 +710,7 @@ class TaskController extends Controller
                 ->distinct('common_id')
                 ->pluck('common_id')
                 ->toArray();
-                
+
             $activitiesids = DB::table('user_activity_data_assigns')->where('user_id', $user)
                 ->whereIn('data_assign_id', $getDataAssignIds)
                 ->where('project_template_id', $tempData->id)
@@ -469,7 +720,7 @@ class TaskController extends Controller
 
             $getRowIds = DB::table('user_audit_assigns')->whereIn('common_id', $dataAssignCommonIds)
                 ->distinct('row_id')->pluck('row_id')->toArray();
-                // dd($checkingIfProjectAssigned, $getDataAssignIds, $user);
+            // dd($checkingIfProjectAssigned, $getDataAssignIds, $user);
 
             if ($checkingIfProjectAssigned) {
 
@@ -490,7 +741,7 @@ class TaskController extends Controller
                                 ->get();
 
                             if (!empty($getHeadValues)) {
-                                $isOutletAssigned = 1;   // ✅ set true only here
+                                $isOutletAssigned = 1;   // âœ… set true only here
                             }
                         } else {
 
@@ -501,7 +752,7 @@ class TaskController extends Controller
                                 )
                                 ->distinct('head_value')
                                 ->get();
-//                            dd($getHeadValues);
+                            //                            dd($getHeadValues);
 
                             $getAllMasterRowHeads = DB::table('project_template_name_values_new')
                                 ->select(
@@ -521,18 +772,17 @@ class TaskController extends Controller
                             // Combined non-matching values
                             $nonMatching = $onlyInHeadValues->merge($onlyInMaster)->unique();
 
-                            // convert collection → array and merge
+                            // convert collection â†’ array and merge
                             $distributorsValueNotAssigned = array_merge($distributorsValueNotAssigned, $nonMatching->values()->toArray());
-
                         }
-                        
+
                         $project_templates_data = ProjectTemplate::where('project_id', $request->project_id)
                             ->where('is_master', 1)
                             ->first();
 
                         if (count($getHeadValues) > 0) {
                             foreach ($getHeadValues as $headValue) {
-//                                dd($headValue->head_value);
+                                //                                dd($headValue->head_value);
                                 if ($headValue->head_value) {
                                     $projectTemplateHeadsAssigned[] = [
                                         'project_template_id' => $project_templates_data->id,
@@ -546,7 +796,7 @@ class TaskController extends Controller
                 }
                 //khushboo 05-07-25
                 $projectTemplateIDs = array_column($projectTemplateHeadsAssigned, 'project_template_id');
-//                dd($projectTemplateIDs);
+                //                dd($projectTemplateIDs);
 
                 if ($tempData->is_master == 1) {
 
@@ -558,7 +808,6 @@ class TaskController extends Controller
                     if ($OutletAssignedExists) {
                         $isOutletAssigned = 1;
                     }
-
                 } else if ($tempData->is_master == 0) {
 
                     $templateHeadValues = array_column($projectTemplateHeadsAssigned, 'head_value');
@@ -581,7 +830,7 @@ class TaskController extends Controller
                             }
                         })
                         ->get();
-//                    dd($allTemplates, $projectTemplateIDs, $mainHeaderValues);
+                    //                    dd($allTemplates, $projectTemplateIDs, $mainHeaderValues);
 
                 }
 
@@ -598,23 +847,23 @@ class TaskController extends Controller
                     // dd($templateHeads, $jsonData);
                     foreach ($jsonData as $templateNameHeadId => $value) {
                         // if (isset($templateHeads[$templateNameHeadId])) {
-                            
-                            $head = $templateHeads[$templateNameHeadId];
-                            // dd($head, $value);
 
-                            $allTemplateValues[$row->project_template_id][] = (object)[
-                                'row_id' => $row->row_id,
-                                'project_template_id' => $row->project_template_id,
-                                'template_name_head_id' => $templateNameHeadId,
-                                'template_data_json' => $row->template_data_json,
-                                'value' => $value,
-                                'head_id' => $templateNameHeadId,
-                                'head_template_name_id' => $head->template_name_id,
-                                'template_head_name' => $head->template_head_name,
-                                'head_created_at' => $head->created_at,
-                                'head_updated_at' => $head->updated_at,
-                                'head_deleted_at' => $head->deleted_at,
-                            ];
+                        $head = $templateHeads[$templateNameHeadId];
+                        // dd($head, $value);
+
+                        $allTemplateValues[$row->project_template_id][] = (object)[
+                            'row_id' => $row->row_id,
+                            'project_template_id' => $row->project_template_id,
+                            'template_name_head_id' => $templateNameHeadId,
+                            'template_data_json' => $row->template_data_json,
+                            'value' => $value,
+                            'head_id' => $templateNameHeadId,
+                            'head_template_name_id' => $head->template_name_id,
+                            'template_head_name' => $head->template_head_name,
+                            'head_created_at' => $head->created_at,
+                            'head_updated_at' => $head->updated_at,
+                            'head_deleted_at' => $head->deleted_at,
+                        ];
                         // }
                     }
                 }
@@ -627,12 +876,12 @@ class TaskController extends Controller
 
                 $rowGroupedValues = $allTemplateValuesFlat->groupBy('row_id');
                 // dd($projectTemplateHeadsAssigned, $allTemplateValues);
-                
+
                 foreach ($projectTemplateHeadsAssigned as $assigned_value_info) {
                     $template_id = $assigned_value_info['project_template_id'];
                     // echo $assigned_value_info['head_value'];
                     $templateValues = collect($allTemplateValues[$template_id] ?? []);
-//                    dd($templateValues);
+                    //                    dd($templateValues);
                     $activities = [];
 
                     if ($tempData->activityType == 0) {
@@ -645,7 +894,7 @@ class TaskController extends Controller
                                 ->toArray()
                         );
                     }
-//                    dd($activities);
+                    //                    dd($activities);
                     $previous_sequence_answered_rows = [];
                     foreach ($activities as $activityId) {
 
@@ -691,11 +940,11 @@ class TaskController extends Controller
                         // ->whereIn('question_id', $getAllQuestionIds)
                         ->get()
                         ->groupBy('row_id'); // group it for faster per-row access
-                      
+
                     // dd($projectDataArr);
                     foreach ($projectDataArr as $projectData) {
-                        
-                            
+
+
                         if (!in_array($projectData->row_id, $row_renderred_arr)) {
                             $row_renderred_arr[] = $projectData->row_id;
 
@@ -707,28 +956,32 @@ class TaskController extends Controller
                             //     ->pluck('question_id')
                             //     ->unique()
                             //     ->count();
-                            
+
                             $answeredCount = DB::table('temp_user_activity_answers_data')
                                 ->whereIn('activity_id', $activitiesids)
-                                ->whereIn('row_id', $all_row_ids)
+                                ->where('row_id', $projectData->row_id)
                                 ->whereIn('question_id', $getAllQuestionIds)
                                 ->pluck('question_id')
                                 ->unique()
                                 ->count();
-                                
+
+                            // if($projectData->row_id == 317382){
+                            //     dd($answeredCount, $projectData->row_id);
+                            // }
+
 
                             $allAnswered = $answeredCount === $totalQuestions;
                             $otpVerificationDone = false;
 
                             // if ($allAnswered) {
-                                $lastQuestionAnswered = $filteredAnswers
-                                    ->sortByDesc('id')
-                                    ->first();
+                            $lastQuestionAnswered = $filteredAnswers
+                                ->sortByDesc('id')
+                                ->first();
 
-                                if (!empty($lastQuestionAnswered->mobile_otp) && $lastQuestionAnswered->otp_verified_status == 1) {
-                                    $otpVerificationDone = true;
-                                    $allAnswered = true;
-                                }
+                            if (!empty($lastQuestionAnswered->mobile_otp) && $lastQuestionAnswered->otp_verified_status == 1) {
+                                $otpVerificationDone = true;
+                                $allAnswered = true;
+                            }
                             // }
 
                             $get_row_header = $rowGroupedValues[$projectData->row_id]
@@ -751,7 +1004,7 @@ class TaskController extends Controller
                             $projectStatus = "pending";
                             if ($allAnswered && $otpVerificationDone && ($otpRequiredStatus == 1)) {
                                 $projectStatus = "completed";
-                            // } else if ($allAnswered && !$otpVerificationDone && ($otpRequiredStatus == 1)) {
+                                // } else if ($allAnswered && !$otpVerificationDone && ($otpRequiredStatus == 1)) {
                                 // $projectStatus = "Awaiting OTP Verify";
                             } else if ($allAnswered) {
                                 $projectStatus = "completed";
@@ -802,33 +1055,33 @@ class TaskController extends Controller
                                 $totalcompletedproject++;
                             }
 
-                            
+
                             $is_distributor_assign = true;
-                            if(in_array($assigned_value_info['head_value'], $distributorsValueNotAssigned)){
+                            if (in_array($assigned_value_info['head_value'], $distributorsValueNotAssigned)) {
                                 $is_distributor_assign = false;
                             }
-                            
+
                             $tempjsondata = json_decode($projectData->template_data_json, true);
 
-            // get only values, ignore keys
-            $allValues = array_values($tempjsondata);
-            
-            
-            $exists = $childProjectTemplatesData
-                    ->whereIn('project_template_id', $project_temp_child_info_Ids)
-                    ->contains(function ($item) use ($allValues) {
-                        $json = json_decode($item->template_data_json, true);
-                        return count(array_intersect($allValues, $json)) > 0;
-                    });
+                            // get only values, ignore keys
+                            $allValues = array_values($tempjsondata);
 
-            // dd($exists); // true or false
-                
+
+                            $exists = $childProjectTemplatesData
+                                ->whereIn('project_template_id', $project_temp_child_info_Ids)
+                                ->contains(function ($item) use ($allValues) {
+                                    $json = json_decode($item->template_data_json, true);
+                                    return count(array_intersect($allValues, $json)) > 0;
+                                });
+
+                            // dd($exists); // true or false
+
 
                             $project_data_arr[] = [
                                 'data_item' => (array)$projectData + [
-                                        'get_head_name' => $get_head_name,
-                                        'get_data_of_rows' => $rowGroupedValues[$projectData->row_id] ?? collect()
-                                    ],
+                                    'get_head_name' => $get_head_name,
+                                    'get_data_of_rows' => $rowGroupedValues[$projectData->row_id] ?? collect()
+                                ],
                                 'status' => $projectStatus,
                                 'main_header' => $main_header,
                                 'sub_header' => $sub_header,
@@ -899,9 +1152,8 @@ class TaskController extends Controller
             'add_outlet' => $add_outlet,
 
         ], 200);
-
-
     }
+
 
 
     public function projectOutletData(Request $request)
@@ -952,7 +1204,7 @@ class TaskController extends Controller
         $distributors_arr = [];
         $outlet_master_info = $projectTemplateInfo->where('is_master', 1)
             ->first(); // this is to get the info of the master template of the project
-//        dd($outlet_master_info->project_id);
+        //        dd($outlet_master_info->project_id);
         $activity_group_name_id_or_activity_id = $outlet_master_info->activity_group_name_id_or_activity_id;
 
         $master_head_id = $project_temp_info->master_head_id;
@@ -962,7 +1214,7 @@ class TaskController extends Controller
         $outlet_master_min_completion = $outlet_master_info->min_completion;
         $templateHeadName = DB::table('template_name_heads')->get();
         $master_head_info = $templateHeadName->where('id', $master_head_id)->first();
-//        dd($master_head_info);
+        //        dd($master_head_info);
         $master_head_name = !empty($master_head_info) ? $master_head_info->template_head_name : '';
         $own_head_id = $project_temp_info->own_reference_head_id;
         $own_head_info = $templateHeadName->where('id', $own_head_id)->first();
@@ -1012,8 +1264,8 @@ class TaskController extends Controller
         $allTemplateNamesValues = collect($allTemplateNamesValues);
         $allTemplateGroupedByRow = $allTemplateNamesValues->groupBy('row_id');
 
-//        dd($cur_sequence_helper);
-//        if ($cur_sequence_helper == 0 || $cur_sequence_helper == 1) {
+        //        dd($cur_sequence_helper);
+        //        if ($cur_sequence_helper == 0 || $cur_sequence_helper == 1) {
 
         $get_project_template_assigned_data = UserActivityDataAssign::where('user_id', $user->id)
             ->where('project_template_id', $project_temp_info->id)
@@ -1028,7 +1280,7 @@ class TaskController extends Controller
 
         $get_distinct_data_assigned_ids = $get_project_template_assigned_data->pluck('data_assign_id')->unique();
 
-//            dd($get_distinct_data_assigned_ids);
+        //            dd($get_distinct_data_assigned_ids);
         $getDataAssignTemplateHeadIds = DataAssign::whereIn('id', $get_distinct_data_assigned_ids)
             ->pluck('template_name_head_id')
             ->unique();
@@ -1036,7 +1288,7 @@ class TaskController extends Controller
         $getRowIds = UserAuditAssigns::whereIn('common_id', $dataAssignCommonIds)
             ->pluck('row_id');
 
-//            dd($getRowIds);
+        //            dd($getRowIds);
         foreach ($get_project_template_assigned_data as $assigned) {
 
             if ($assigned->audit_closed == 1) {
@@ -1045,7 +1297,7 @@ class TaskController extends Controller
 
             foreach ($getDataAssignTemplateHeadIds as $headId) {
 
-//                    dd($assigned->dataAssign->is_outlet_assigned);
+                //                    dd($assigned->dataAssign->is_outlet_assigned);
                 if ($assigned->dataAssign->is_outlet_assigned == 1) {
 
                     $getHeadValues = DB::table('project_template_name_values_new')
@@ -1054,7 +1306,6 @@ class TaskController extends Controller
                             DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$project_temp_info->own_reference_head_id}\"')) as head_value")
                         )
                         ->pluck('head_value');
-
                 } else {
 
                     $getHeadValues = DB::table('project_template_name_values_new')
@@ -1063,10 +1314,9 @@ class TaskController extends Controller
                             DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$headId}\"')) as head_value")
                         )
                         ->pluck('head_value');
-
                 }
 
-//                dd($getHeadValues);
+                //                dd($getHeadValues);
                 foreach ($getHeadValues as $headValue) {
                     $get_rows_of_outlet = $getRowIds;
 
@@ -1078,14 +1328,14 @@ class TaskController extends Controller
                         $row_data = $row_data_group->firstWhere('template_name_head_id', $own_head_id);
 
                         if ($row_data && !in_array($row_data->value, array_column($distributors_arr, 'value'))) {
-//                            echo 'count';
+                            //                            echo 'count';
                             $get_master_row = $allTemplateNamesValues
                                 ->where('template_name_head_id', $own_head_id)
                                 ->where('value', $row_data->value)
                                 ->where('project_template_id', $project_temp_info->id)
                                 ->first();
 
-//                                dd($get_master_row);
+                            //                                dd($get_master_row);
 
                             $dist_main_header = optional($allTemplateNamesValues
                                 ->where('row_id', $get_master_row->row_id)
@@ -1093,24 +1343,24 @@ class TaskController extends Controller
                                 ->first())->value;
 
                             $dist_info = count($distributors_arr);
-//                                dd($endIndex, $startIndex, $dist_info);
-//                                if ($dist_info >= $startIndex && $dist_info <= $endIndex) {
-//                                    continue;
-//                                }
+                            //                                dd($endIndex, $startIndex, $dist_info);
+                            //                                if ($dist_info >= $startIndex && $dist_info <= $endIndex) {
+                            //                                    continue;
+                            //                                }
 
                             $get_sub_header_val = $allTemplateNamesValues->where('row_id', $get_master_row->row_id)
                                 ->whereIn('template_name_head_id', [$project_temp_info->sub_header, $outlet_master_sub_header_id])
                                 ->first();
 
                             $dist_sub_header = optional($get_sub_header_val)->value;
-//                                dd($get_sub_header_val);
+                            //                                dd($get_sub_header_val);
 
                             $get_count_of_outlets = $allTemplateNamesValues
                                 ->where('project_template_id', $project_temp_info->id)
                                 ->where('template_name_head_id', $own_head_id)
                                 ->where('value', $row_data->value);
 
-//                                dd($get_count_of_outlets);
+                            //                                dd($get_count_of_outlets);
 
                             $completed_count = $get_count_of_outlets->filter(function ($outlet) use ($request) {
                                 return DB::table('temp_user_activity_answers_data')
@@ -1128,7 +1378,7 @@ class TaskController extends Controller
                                 ->where('activity_id', $activity->id)
                                 ->whereIn('question_id', $questionIds)
                                 ->distinct('question_id')
-                                ->count('question_id');
+                                ->count(DB::raw('DISTINCT question_id'));
 
                             $allAnswered = $answeredCount === count($questionIds);
                             $otpVerificationDone = false;
@@ -1176,11 +1426,10 @@ class TaskController extends Controller
                         }
                     }
                 }
-
             }
         }
 
-//    }
+        //    }
 
         $distributors_collection = collect($distributors_arr);
         $currentPage = request()->get('page', 1);
@@ -1216,7 +1465,6 @@ class TaskController extends Controller
             'is_audit_closed' => false, // khushboo 17-04-2025
             'add_outlet' => $add_outlet
         ]);
-
     }
 
 
@@ -1266,7 +1514,7 @@ class TaskController extends Controller
                 }
                 // Convert to array if it's a collection
                 $templateHeadIds = is_array($getAssignedTemplateHeadIds) ? $getAssignedTemplateHeadIds : $getAssignedTemplateHeadIds->toArray();
-//                dd($templateHeadIds, $distributor_value);
+                //                dd($templateHeadIds, $distributor_value);
                 $fetchRowIdWithValue = DB::table('project_template_name_values_new')
                     ->whereIn('id', $getAuditorRowIds)
                     ->where('project_template_id', $projectTemplateInfo->id)
@@ -1280,7 +1528,7 @@ class TaskController extends Controller
                     })
                     ->pluck('id')
                     ->toArray();
-//                dd($fetchRowIdWithValue);
+                //                dd($fetchRowIdWithValue);
                 $main_header = TemplateNameHead::find($projectTemplateInfo->main_header);
                 $sub_header = TemplateNameHead::find($projectTemplateInfo->sub_header);
 
@@ -1291,7 +1539,7 @@ class TaskController extends Controller
                 foreach ($fetchRowIdWithValue as $rowId) {
 
                     $checkIfAnswerAlreadySubmitted = $allAnswers->where('row_id', $rowId)->isNotEmpty();
-//                    dd($checkIfAnswerAlreadySubmitted);
+                    //                    dd($checkIfAnswerAlreadySubmitted);
 
                     if (!$checkIfAnswerAlreadySubmitted) {
                         $checkIfExists = ClosedAudits::where('project_template_id', $projectTemplateInfo->id)
@@ -1320,10 +1568,9 @@ class TaskController extends Controller
 
             return response()->json(['status' => 200, 'message' => 'Audit Closed Successfully']);
         } catch (\Exception $e) {
-//            dd($e->getMessage());
+            //            dd($e->getMessage());
             return response()->json(['status' => 201, 'message' => 'Something went wrong']);
         }
-
     }
 
 
@@ -1353,7 +1600,7 @@ class TaskController extends Controller
 
     public function myProjectsDistributorOutletsData(Request $request, $rowId, $distributor_value, $userId)
     {
-//         dd($userId);
+        //         dd($userId);
         $projectTemplateNameValue = ProjectTemplateNameValuesNew::find($rowId);
         $projectTemplateId = $projectTemplateNameValue->project_template_id;
         $projectTemplate = ProjectTemplate::find($projectTemplateId);
@@ -1419,7 +1666,7 @@ class TaskController extends Controller
             ->toArray();
 
         $childMainHeaderId = $childTemp->main_header;
-//            $parentTempJsonData = json_decode($projectTemplateNameValue->template_data_json);
+        //            $parentTempJsonData = json_decode($projectTemplateNameValue->template_data_json);
 
         $allTemplates = DB::table('project_template_name_values_new')
             ->select('id as row_id', 'project_template_id', 'template_data_json')
@@ -1471,7 +1718,7 @@ class TaskController extends Controller
             ->whereIn('activity_id', $activities)
             ->distinct('common_id')
             ->pluck('common_id');
-        
+
 
         $get_distinct_data_assigned_ids = $get_project_template_assigned_data->pluck('data_assign_id')->unique();
 
@@ -1498,33 +1745,33 @@ class TaskController extends Controller
             }
         }
 
-//        $outlet_items = $allTemplateNamesValues
-//            ->whereIn('project_template_id', $childTemplatesIds)
-//            ->where('template_name_head_id', $childTempOwnRefIds)
-//            ->where('value', $distributor_value);
+        //        $outlet_items = $allTemplateNamesValues
+        //            ->whereIn('project_template_id', $childTemplatesIds)
+        //            ->where('template_name_head_id', $childTempOwnRefIds)
+        //            ->where('value', $distributor_value);
 
         $checkPrentOutletAssign = DB::table('data_assigns')->where('project_template_id', $projectTemplate->id)
             ->where('is_outlet_assigned', 1)
             ->exists();
 
-        if($checkPrentOutletAssign){
+        if ($checkPrentOutletAssign) {
 
             $parentDataAssignIds = DB::table('data_assigns')->where('project_template_id', $projectTemplate->id)
                 ->where('is_outlet_assigned', 1)
                 ->pluck('id')->toArray();
 
-//            dd($parentDataAssignIds, $projectTemplate->id);
+            //            dd($parentDataAssignIds, $projectTemplate->id);
             $dataAssignCommonIdsnew = DB::table('user_activity_data_assigns')->where('user_id', $userId)
                 ->whereIn('data_assign_id', $parentDataAssignIds)
                 ->distinct('common_id')
                 ->pluck('common_id');
-//
+            //
 
             $getRowIdsnew = DB::table('user_audit_assigns')->whereIn('common_id', $dataAssignCommonIdsnew)
                 ->distinct('row_id')
                 ->pluck('row_id');
 
-//            dd($getRowIds);
+            //            dd($getRowIds);
 
             $outlet_items = $allTemplateNamesValues
                 ->whereIn('row_id', $getRowIdsnew)
@@ -1535,9 +1782,9 @@ class TaskController extends Controller
                     return in_array($distributor_value, $json, true);
                 });
 
-//            dd($outlet_items, $childTemplatesIds, $getRowIds, $distributor_value, $allTemplateNamesValues);
+            //            dd($outlet_items, $childTemplatesIds, $getRowIds, $distributor_value, $allTemplateNamesValues);
 
-        }else{
+        } else {
 
             $outlet_items = $allTemplateNamesValues
                 ->whereIn('row_id', $getRowIds)
@@ -1551,7 +1798,7 @@ class TaskController extends Controller
         }
 
         // dd($outlet_items->IsEmpty());
-        if($checkPrentOutletAssign && $outlet_items->IsEmpty()){
+        if ($checkPrentOutletAssign && $outlet_items->IsEmpty()) {
 
             $outlet_items = $allTemplateNamesValues
                 ->whereIn('row_id', $getRowIds)
@@ -1566,31 +1813,30 @@ class TaskController extends Controller
             // dd($outlet_items, $getRowIds);
 
         }
-       
+
         //outlet assign data with different head value
-        if($outlet_items->IsEmpty()){
-            
-            
+        if ($outlet_items->IsEmpty()) {
+
+
             $tempjsondata = json_decode($projectTemplateNameValue->template_data_json, true);
 
             // get only values, ignore keys
             $allValues = array_values($tempjsondata);
-            
-            
-            $outlet_items = $allTemplateNamesValues
-            ->whereIn('row_id', $getRowIds)
-            ->whereIn('project_template_id', $childTemplatesIds)
-            ->whereIn('template_name_head_id', $childTempOwnRefIds)
-            ->filter(function ($item) use ($allValues) {
-                $json = json_decode($item->template_data_json, true);
 
-                // check if any value from $allValues exists in this row's JSON
-                return count(array_intersect($allValues, $json)) > 0;
+
+            $outlet_items = $allTemplateNamesValues
+                ->whereIn('row_id', $getRowIds)
+                ->whereIn('project_template_id', $childTemplatesIds)
+                ->whereIn('template_name_head_id', $childTempOwnRefIds)
+                ->filter(function ($item) use ($allValues) {
+                    $json = json_decode($item->template_data_json, true);
+
+                    // check if any value from $allValues exists in this row's JSON
+                    return count(array_intersect($allValues, $json)) > 0;
                 });
-            
         }
-        
-//  dd($outlet_items->IsEmpty());
+
+        //  dd($outlet_items->IsEmpty());
         // if ($is_to_check_previous_submitted && !empty($previous_sequence_answered_rows)) {
         //     $outlet_items = $outlet_items->whereIn('row_id', $previous_sequence_answered_rows);
         // }
@@ -1606,7 +1852,7 @@ class TaskController extends Controller
             ->whereIn('row_id', $getRowIds)
             ->get());
 
-//        dd($outlet_items);
+        //        dd($outlet_items);
 
         foreach ($outlet_items as $outlet_item) {
             if (!in_array($outlet_item->row_id, $row_renderred_arr)) {
@@ -1623,11 +1869,11 @@ class TaskController extends Controller
                 })->values();
 
                 $check_if_answered = $allAnswers->where('row_id', $outlet_item->row_id)
-//                    ->where('activity_id', $activity->id)
+                    //                    ->where('activity_id', $activity->id)
                     ->isNotEmpty();
 
                 $row_group = $allTemplateGroupedByRow[$outlet_item->row_id] ?? collect();
-                
+
                 $templateNameData = DB::table('project_templates')->where('id', $outlet_item->project_template_id)->first();
 
                 //khushboo 02-05-2025
@@ -1635,7 +1881,7 @@ class TaskController extends Controller
                     ->whereIn('activity_id', $activities)
                     ->pluck('id')
                     ->toArray();
-                    
+
                 $getAllRequiredQuestionIds = DB::table('questions')
                     ->whereIn('activity_id', $activities)
                     ->where('answer_type', 1)
@@ -1643,7 +1889,7 @@ class TaskController extends Controller
                     ->toArray();
 
                 $totalQuestions = count($getAllRequiredQuestionIds);
-//                 dd($totalQuestions);
+                //                 dd($totalQuestions);
 
                 $answeredCount = $allAnswers->where('row_id', $outlet_item->row_id)
                     ->whereIn('activity_id', $activities)
@@ -1654,7 +1900,7 @@ class TaskController extends Controller
                 // $allAnswered = $answeredCount === $totalQuestions;
                 $allAnswered = false;
                 // dd($answeredCount, $totalQuestions);
-//                dd($totalQuestions, $answeredCount);
+                //                dd($totalQuestions, $answeredCount);
                 if ($answeredCount === $totalQuestions) {
                     $allAnswered = true;
                 }
@@ -1663,24 +1909,24 @@ class TaskController extends Controller
                 // $allAnswered = true;
                 $otpVerificationDone = false;
                 // if ($allAnswered) {
-                    $lastQuestionAnswered = $allAnswers->where('row_id', $outlet_item->row_id)
-//                        ->where('activity_id', $activity->id)
-                        ->whereIn('question_id', $getAllQuestionIds)
-                        ->whereNotNull('mobile_otp')
-                        ->sortByDesc('id')
-                        ->first();
-//                     dd($lastQuestionAnswered);
-                    if (!empty($lastQuestionAnswered) && !empty($lastQuestionAnswered->mobile_otp) && ($lastQuestionAnswered->otp_verified_status == 1)) {
-                        $otpVerificationDone = true;
-                        $allAnswered = true;
-                    }
+                $lastQuestionAnswered = $allAnswers->where('row_id', $outlet_item->row_id)
+                    //                        ->where('activity_id', $activity->id)
+                    ->whereIn('question_id', $getAllQuestionIds)
+                    ->whereNotNull('mobile_otp')
+                    ->sortByDesc('id')
+                    ->first();
+                //                     dd($lastQuestionAnswered);
+                if (!empty($lastQuestionAnswered) && !empty($lastQuestionAnswered->mobile_otp) && ($lastQuestionAnswered->otp_verified_status == 1)) {
+                    $otpVerificationDone = true;
+                    $allAnswered = true;
+                }
                 // }
 
-                
+
                 $projectStatus = "pending";
                 if ($allAnswered && $otpVerificationDone && ($otpRequiredStatus == 1)) {
                     $projectStatus = "completed";
-                // } else if ($allAnswered && !$otpVerificationDone && ($otpRequiredStatus == 1)) {
+                    // } else if ($allAnswered && !$otpVerificationDone && ($otpRequiredStatus == 1)) {
                     // $projectStatus = "Awaiting OTP Verify";
                 } else if ($allAnswered) {
                     $projectStatus = "completed";
@@ -1691,7 +1937,7 @@ class TaskController extends Controller
                     $projectCompletedStatus++;
                 }
 
-                
+
 
                 $main_header = optional($row_group->firstWhere('template_name_head_id', $templateNameData->main_header))->value;
                 $sub_header = optional($row_group->firstWhere('template_name_head_id', $templateNameData->sub_header))->value;
@@ -1717,14 +1963,14 @@ class TaskController extends Controller
                     'status' => $projectStatus,
                     'main_header' => $main_header,
                     'sub_header' => $sub_header,
-                    'add_outlet' => $templateNameData->data_add_on=1?true:false,
+                    'add_outlet' => $templateNameData->data_add_on = 1 ? true : false,
                 ];
             }
         }
 
-//        }
+        //        }
 
-//        Session::put('project_outlet_activity', ['projectTemplate' => $projectTemplate->id, 'distributor_value' => $distributor_value]);
+        //        Session::put('project_outlet_activity', ['projectTemplate' => $projectTemplate->id, 'distributor_value' => $distributor_value]);
         if (Session::has('project_activity')) {
             Session::forget('project_activity');
         }
@@ -1737,7 +1983,7 @@ class TaskController extends Controller
         $showCLoseAuditOption = false;
         $IsAuditClosed = false;
 
-//         dd($projectCompletedStatus, (int) $minimumCount);
+        //         dd($projectCompletedStatus, (int) $minimumCount);
         if ($minimumCount && $projectCompletedStatus > 0 && $projectCompletedStatus >= (int)$minimumCount) {
             $showCLoseAuditOption = true;
         }
@@ -1771,11 +2017,11 @@ class TaskController extends Controller
             ['path' => request()->url(), 'query' => request()->query()]
         );
 
-        
+
         $childTemplatesNameIds = ProjectTemplate::where('project_id', $projectTemplate->project_id)
             ->where('is_master', 0)
             ->pluck('template_name_id')->toArray();
-            
+
         return response([
             'status' => 200,
             'message' => 'sucesss',
@@ -1827,11 +2073,496 @@ class TaskController extends Controller
         }
     }
 
+    public function row_activity_answers_new(Request $request)
+    {
+        try {
+            $userId = $request->user_id;
+            $last_sequence = TempUserActivityAnswersData::max('same_answer_id') + 1;
+
+            $baseDirectory = 'activityAnswerImages/';
+            $projectTemp = ProjectTemplateNameValuesNew::find($request->row_id);
+            $projectName = $projectTemp->getProjectTemplateData->getProject->project_name;
+            $projectDirectory = $baseDirectory . $projectName . '/';
+            $this->checkAndCreateDirectory($projectDirectory);
+
+            $currentMonthYear = Carbon::now()->format('FY');
+            $projectMonthYearDirectory = $projectDirectory . $currentMonthYear;
+            $this->checkAndCreateDirectory($projectMonthYearDirectory);
+
+            $latitude  = $request->latitude ?? null;
+            $longitude = $request->longitude ?? null;
+            $userDetails = User::find($userId);
+
+            $excludedKeys    = ['user_id', 'row_id', 'activity_id', 'group_id', 'latitude', 'longitude'];
+            $questionAnswers = collect($request->all())->except($excludedKeys);
+
+            $submittedQuestionIds = array_map('intval', array_keys($questionAnswers->toArray()));
+
+            // ── Validate required questions ──
+            $requiredQuestions     = Question::where('activity_id', $request->activity_id)
+                ->where('answer_type', 1)
+                ->get();
+            $requiredGroupedByType = $requiredQuestions->groupBy('question_type');
+            $missingTypes          = [];
+
+            foreach ($requiredGroupedByType as $type => $questions) {
+                $questionIds  = $questions->pluck('id')->toArray();
+                $intersection = array_intersect($submittedQuestionIds, $questionIds);
+                if (empty($intersection)) {
+                    $missingTypes[] = $type;
+                }
+            }
+
+            if (!empty($missingTypes)) {
+                return response()->json([
+                    'status'                => 422,
+                    'message'               => 'Some required question types are missing from the submission.',
+                    'missing_question_types' => $missingTypes,
+                ], 422);
+            }
+
+            // ── PRE-LOAD all questions in one query instead of N queries in loop ──
+            $allQuestionIds = $questionAnswers->keys()->map(function ($key) {
+                preg_match('/^(\d+)/', (string)$key, $matches);
+                return isset($matches[1]) ? (int)$matches[1] : null;
+            })->filter()->unique()->values()->toArray();
+
+            $questionsMap = Question::whereIn('id', $allQuestionIds)
+                ->get()
+                ->keyBy('id'); // keyed by id for O(1) lookup
+
+            // ── PRE-LOAD all existing answers for this row in one query ──
+            $existingAnswers = TempUserActivityAnswersData::where('row_id', $request->row_id)
+                ->where(function ($query) use ($request) {
+                    $query->where('activity_id', $request->activity_id)
+                        ->orWhere('activity_group_name_id', $request->group_id);
+                })
+                ->whereIn('question_id', $allQuestionIds)
+                ->get()
+                ->groupBy('question_id'); // keyed by question_id for O(1) lookup
+
+            $imagesToProcess = [];
+            $toInsert        = []; // batch inserts
+            $now             = now()->toDateTimeString();
+
+            foreach ($questionAnswers as $key => $value) {
+
+                preg_match('/^(\d+)([a-zA-Z]*)$/', (string)$key, $matches);
+                $numberPart = $matches[1] ?? null;
+                $stringPart = $matches[2] ?? null;
+                $questionId = $stringPart === '' ? (int)$key : (int)$numberPart;
+
+                // O(1) lookup — no DB query
+                $question = $questionsMap->get($questionId);
+                if (empty($question)) {
+                    continue;
+                }
+
+                $user_answer = null;
+                $file_path   = null;
+
+                // ── File handling ──
+                if ($request->hasFile($key)) {
+                    $file  = $request->file($key);
+                    $rules = [];
+                    $customMessages = [];
+
+                    if ($question->question_type == 'Image') {
+                        $rules['file_input']                      = 'required|image|mimes:jpeg,png,jpg,gif,svg,webp|max:5120';
+                        $customMessages['file_input.required']    = "Image is required";
+                        $customMessages['file_input.image']       = "Only image files are allowed.";
+                        $customMessages['file_input.mimes']       = "Invalid image format";
+                    } elseif ($question->question_type == 'File Upload') {
+                        $rules['file_input']                      = 'required|file|mimetypes:application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/jpeg,image/jpg,image/png,image/webp|max:51200';
+                        $customMessages['file_input.required']    = "Invalid File Type";
+                        $customMessages['file_input.mimetypes']   = "Invalid File Type";
+                    }
+
+                    if (!empty($rules)) {
+                        $validator = Validator::make(['file_input' => $file], $rules, $customMessages);
+                        if ($validator->fails()) {
+                            return response()->json([
+                                'status'        => 422,
+                                'message'       => "Invalid file for question ID: $questionId",
+                                'question_type' => $question->question_type,
+                                'errors'        => $validator->errors()->all(),
+                            ], 422);
+                        }
+                    }
+
+                    $file_name      = uniqid() . '.' . $file->getClientOriginalExtension();
+                    $full_file_path = $projectMonthYearDirectory . '/' . $file_name;
+                    $file->move(public_path($projectMonthYearDirectory), $file_name);
+                    chmod(public_path($full_file_path), 0777);
+
+                    $user_answer = $full_file_path;
+                    $file_path   = $full_file_path;
+                } else {
+                    $user_answer = $value;
+
+                    if ($question->question_type === 'Date' && !empty($user_answer)) {
+                        try {
+                            $user_answer = Carbon::parse($user_answer)->format('d/m/Y');
+                        } catch (\Exception $e) {
+                            $user_answer = null;
+                        }
+                    }
+
+                    if ($question->question_type === 'Free Text' && !empty($user_answer)) {
+                        $user_answer = $value;
+                    }
+                }
+
+                // ── O(1) lookup from pre-loaded collection ──
+                $existingForQuestion = $existingAnswers->get($questionId);
+
+                if ($question->question_type == 'Subjective') {
+
+                    $existingCount = $existingForQuestion ? $existingForQuestion->count() : 0;
+
+                    if ($existingCount == 1) {
+                        $checkSubjectiveExistingData = $existingForQuestion->first();
+                        $subjectiveAnswer = $checkSubjectiveExistingData->user_answer;
+                        $cleanedAnswer    = preg_replace('/\s+/', ' ', trim($subjectiveAnswer));
+
+                        preg_match_all('/\(([^)]+)\)/', $cleanedAnswer, $bracketMatches);
+                        $bracketCount = count($bracketMatches[0]);
+
+                        if ($bracketCount === 1) {
+                            $answer = TempUserActivityAnswersData::create([
+                                'user_id'                => $userId,
+                                'row_id'                 => $request->row_id,
+                                'activity_id'            => $request->activity_id,
+                                'activity_group_name_id' => $request->group_id ?? 0,
+                                'question_id'            => $questionId,
+                                'user_answer'            => $user_answer,
+                                'same_answer_id'         => $last_sequence,
+                                'latitude'               => $latitude,
+                                'longitude'              => $longitude,
+                            ]);
+
+                            $isUrlOrPath = str_contains($user_answer, '/');
+                            if ($isUrlOrPath) {
+                                $userAnswerExtension = strtolower(pathinfo($user_answer, PATHINFO_EXTENSION));
+                                if ($request->hasFile($key) && $stringPart == 'Image' && in_array($userAnswerExtension, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
+                                    $file          = $request->file($key);
+                                    $fileExtension = $file->getClientOriginalExtension();
+                                    if (in_array($fileExtension, ['jpg', 'jpeg', 'png', 'webp', 'svg'])) {
+                                        $imagesToProcess[] = [
+                                            'file_path' => public_path($file_path),
+                                            'latitude'  => $latitude,
+                                            'longitude' => $longitude,
+                                            'answer'    => $answer,
+                                            'directory' => $projectMonthYearDirectory,
+                                            'user_id'   => $userDetails->id,
+                                        ];
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if ($existingCount == 0) {
+                        $answer = TempUserActivityAnswersData::create([
+                            'user_id'                => $userId,
+                            'row_id'                 => $request->row_id,
+                            'activity_id'            => $request->activity_id,
+                            'activity_group_name_id' => $request->group_id ?? 0,
+                            'question_id'            => $questionId,
+                            'user_answer'            => $user_answer,
+                            'same_answer_id'         => $last_sequence,
+                            'latitude'               => $latitude,
+                            'longitude'              => $longitude,
+                        ]);
+                    }
+                } else {
+
+                    $existingRecord = $existingForQuestion ? $existingForQuestion->first() : null;
+
+                    if (!$existingRecord) {
+                        // Collect for batch insert instead of inserting one by one
+                        $toInsert[] = [
+                            'user_id'                => $userId,
+                            'row_id'                 => $request->row_id,
+                            'activity_id'            => $request->activity_id,
+                            'activity_group_name_id' => $request->group_id ?? 0,
+                            'question_id'            => $questionId,
+                            'user_answer'            => $user_answer,
+                            'same_answer_id'         => $last_sequence,
+                            'latitude'               => $latitude,
+                            'longitude'              => $longitude,
+                            'created_at'             => $now,
+                            'updated_at'             => $now,
+                        ];
+                        // We need the inserted record for image processing below,
+                        // so handle image questions separately (can't batch those)
+                        $answer = null;
+                    } else {
+                        $answer = tap($existingRecord)->update([
+                            'user_answer'    => $user_answer,
+                            'same_answer_id' => $last_sequence,
+                            'latitude'       => $latitude,
+                            'longitude'      => $longitude,
+                            'updated_at'     => $now,
+                        ]);
+                    }
+                }
+
+                if ($question->question_type === 'Image' && $file_path && $answer) {
+                    $imagesToProcess[] = [
+                        'file_path' => public_path($file_path),
+                        'latitude'  => $latitude,
+                        'longitude' => $longitude,
+                        'answer'    => $answer,
+                        'directory' => $projectMonthYearDirectory,
+                        'user_id'   => $userDetails->id,
+                    ];
+                }
+            }
+
+            // ── Single batch insert for all new non-subjective answers ──
+            if (!empty($toInsert)) {
+                // Insert in chunks of 100 to avoid hitting query size limits
+                foreach (array_chunk($toInsert, 100) as $chunk) {
+                    TempUserActivityAnswersData::insert($chunk);
+                }
+            }
+
+            if (!empty($imagesToProcess)) {
+                dispatch(new ConvertAuditorSelfiesToGeoSelfies($imagesToProcess));
+            }
+
+            return response([
+                'status'  => 200,
+                'message' => 'Activity Answers submitted successfully.',
+            ], 200);
+        } catch (\Exception $e) {
+            Log::info($e->getMessage());
+        }
+    }
+
+
     public function row_activity_answers(Request $request)
     {
         try {
+            $userId = $request->user_id;
 
-//        dd($request->all());
+            // --- 1. Resolve project directory ONCE ---
+            $baseDirectory = 'activityAnswerImages/';
+            $projectTemp   = ProjectTemplateNameValuesNew::find($request->row_id);
+            $projectName   = $projectTemp->getProjectTemplateData->getProject->project_name;
+            $projectMonthYearDirectory = $baseDirectory . $projectName . '/' . Carbon::now()->format('FY');
+
+            $this->checkAndCreateDirectory($baseDirectory . $projectName . '/');
+            $this->checkAndCreateDirectory($projectMonthYearDirectory);
+
+            $latitude  = $request->latitude  ?? null;
+            $longitude = $request->longitude ?? null;
+
+            $userDetails = User::find($userId);
+
+            // --- 2. Build question answers map ---
+            $excludedKeys     = ['user_id', 'row_id', 'activity_id', 'group_id', 'latitude', 'longitude'];
+            $questionAnswers  = collect($request->all())->except($excludedKeys);
+
+            $submittedQuestionIds = array_map('intval', array_keys($questionAnswers->toArray()));
+
+            // --- 3. Load ALL questions for this activity in ONE query ---
+            $allQuestions = Question::where('activity_id', $request->activity_id)
+                ->get()
+                ->keyBy('id'); // keyed by id for O(1) lookup below
+
+            // --- 4. Validate required question types ---
+            $requiredQuestions    = $allQuestions->where('answer_type', 1);
+            $requiredGroupedByType = $requiredQuestions->groupBy('question_type');
+            $missingTypes = [];
+
+            foreach ($requiredGroupedByType as $type => $questions) {
+                $questionIds  = $questions->pluck('id')->toArray();
+                $intersection = array_intersect($submittedQuestionIds, $questionIds);
+                if (empty($intersection)) {
+                    $missingTypes[] = $type;
+                }
+            }
+
+            if (!empty($missingTypes)) {
+                return response()->json([
+                    'status'                => 422,
+                    'message'               => 'Some required question types are missing from the submission.',
+                    'missing_question_types' => $missingTypes,
+                ], 422);
+            }
+
+            // --- 5. Load existing answers in ONE query ---
+            $existingAnswers = TempUserActivityAnswersData::where('row_id', $request->row_id)
+                ->where(function ($query) use ($request) {
+                    $query->where('activity_id', $request->activity_id)
+                        ->orWhere('activity_group_name_id', $request->group_id);
+                })
+                ->get()
+                ->groupBy('question_id'); // group for fast lookup
+
+            // --- 6. Get last sequence ONCE ---
+            $last_sequence = TempUserActivityAnswersData::max('same_answer_id') + 1;
+
+            $imagesToProcess = [];
+            $toCreate        = [];
+            $toUpdate        = []; // [ question_id => update_payload ]
+
+            foreach ($questionAnswers as $key => $value) {
+                preg_match('/^(\d+)([a-zA-Z]*)$/', $key, $matches);
+                $numberPart = $matches[1] ?? null;
+                $stringPart = $matches[2] ?? '';
+                $questionId = (int)($stringPart === '' ? $key : $numberPart);
+
+                // --- O(1) lookup from pre-loaded collection ---
+                $question = $allQuestions->get($questionId);
+                if (!$question) {
+                    continue;
+                }
+
+                $user_answer = null;
+                $file_path   = null;
+
+                if ($request->hasFile($key)) {
+                    $file  = $request->file($key);
+                    $rules = [];
+                    $customMessages = [];
+
+                    if ($question->question_type === 'Image') {
+                        $rules['file_input'] = 'required|image|mimes:jpeg,png,jpg,gif,svg,webp|max:5120';
+                        $customMessages['file_input.image'] = 'Only image files are allowed.';
+                        $customMessages['file_input.mimes'] = 'Invalid image format.';
+                    } elseif ($question->question_type === 'File Upload') {
+                        $rules['file_input'] = 'required|file|mimetypes:application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/jpeg,image/jpg,image/png,image/webp|max:51200';
+                        $customMessages['file_input.mimetypes'] = 'Invalid File Type.';
+                    }
+
+                    $validator = Validator::make(['file_input' => $file], $rules, $customMessages);
+                    if ($validator->fails()) {
+                        return response()->json([
+                            'status'        => 422,
+                            'message'       => "Invalid file for question ID: $questionId",
+                            'question_type' => $question->question_type,
+                            'errors'        => $validator->errors()->all(),
+                        ], 422);
+                    }
+
+                    $file_name     = uniqid() . '.' . $file->getClientOriginalExtension();
+                    $full_file_path = $projectMonthYearDirectory . '/' . $file_name;
+                    $file->move(public_path($projectMonthYearDirectory), $file_name);
+                    // REMOVED: chmod() here — move() already sets adequate permissions.
+                    // Re-add only if your server requires 0777 specifically.
+
+                    $user_answer = $full_file_path;
+                    $file_path   = $full_file_path;
+                } else {
+                    $user_answer = $value;
+
+                    if ($question->question_type === 'Date' && !empty($user_answer)) {
+                        try {
+                            $user_answer = Carbon::parse($user_answer)->format('d/m/Y');
+                        } catch (\Exception $e) {
+                            $user_answer = null;
+                        }
+                    }
+                }
+
+                // --- 7. Decide create vs update using pre-loaded collection ---
+                $existing = $existingAnswers->get($questionId);
+
+                $payload = [
+                    'user_id'                => $userId,
+                    'row_id'                 => $request->row_id,
+                    'activity_id'            => $request->activity_id,
+                    'activity_group_name_id' => $request->group_id ?? 0,
+                    'question_id'            => $questionId,
+                    'user_answer'            => $user_answer,
+                    'same_answer_id'         => $last_sequence,
+                    'latitude'               => $latitude,
+                    'longitude'              => $longitude,
+                ];
+
+                if ($question->question_type === 'Subjective') {
+                    if (!$existing || $existing->isEmpty()) {
+                        $toCreate[] = $payload;
+                        $answer = null; // will be set after bulk insert for image tracking
+                    } else {
+                        $existingRecord = $existing->first();
+                        $subjectiveAnswer = $existingRecord->user_answer;
+                        $cleanedAnswer    = preg_replace('/\s+/', ' ', trim($subjectiveAnswer));
+                        preg_match_all('/\(([^)]+)\)/', $cleanedAnswer, $bMatches);
+
+                        if (count($bMatches[0]) === 1) {
+                            $toCreate[] = $payload;
+                        }
+                        $answer = $existingRecord;
+                    }
+                } else {
+                    if (!$existing || $existing->isEmpty()) {
+                        $toCreate[] = $payload;
+                    } else {
+                        $toUpdate[$questionId] = [
+                            'user_answer'    => $user_answer,
+                            'same_answer_id' => $last_sequence,
+                            'latitude'       => $latitude,
+                            'longitude'      => $longitude,
+                        ];
+                        $answer = $existing->first();
+                    }
+                }
+
+                // --- 8. Queue images for processing ---
+                if ($question->question_type === 'Image' && $file_path) {
+                    $imagesToProcess[] = [
+                        'file_path'  => public_path($file_path),
+                        'latitude'   => $latitude,
+                        'longitude'  => $longitude,
+                        'answer'     => $answer ?? null,
+                        'directory'  => $projectMonthYearDirectory,
+                        'user_id'    => $userDetails->id,
+                    ];
+                }
+            }
+
+            // --- 9. Bulk insert + bulk update inside a single transaction ---
+            DB::transaction(function () use ($toCreate, $toUpdate, $request) {
+                if (!empty($toCreate)) {
+                    TempUserActivityAnswersData::insert($toCreate); // single INSERT ... VALUES (…),(…)
+                }
+
+                foreach ($toUpdate as $questionId => $updatePayload) {
+                    TempUserActivityAnswersData::where('row_id', $request->row_id)
+                        ->where(function ($q) use ($request) {
+                            $q->where('activity_id', $request->activity_id)
+                                ->orWhere('activity_group_name_id', $request->group_id);
+                        })
+                        ->where('question_id', $questionId)
+                        ->update($updatePayload);
+                }
+            });
+
+            // --- 10. Dispatch image job ---
+            if (!empty($imagesToProcess)) {
+                dispatch(new ConvertAuditorSelfiesToGeoSelfies($imagesToProcess));
+            }
+
+            return response([
+                'status'  => 200,
+                'message' => 'Activity Answers submitted successfully.',
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error($e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json(['status' => 500, 'message' => 'Server error.'], 500);
+        }
+    }
+
+
+    public function row_activity_answers_07_may_2026(Request $request)
+    {
+        try {
+
+            //        dd($request->all());
             $userId = $request->user_id;
             $last_sequence = TempUserActivityAnswersData::max('same_answer_id') + 1;
 
@@ -1857,16 +2588,16 @@ class TaskController extends Controller
 
             $submittedQuestionIds = array_map('intval', array_keys($questionAnswers->toArray()));
 
-//        dd($submittedQuestionIds);
-// Get only **required** questions (answer_type == 1) for the given activity
+            //        dd($submittedQuestionIds);
+            // Get only **required** questions (answer_type == 1) for the given activity
             $requiredQuestions = Question::where('activity_id', $request->activity_id)
                 ->where('answer_type', 1)
                 ->get();
 
-// Group required questions by type
+            // Group required questions by type
             $requiredGroupedByType = $requiredQuestions->groupBy('question_type');
 
-// Track missing question types
+            // Track missing question types
             $missingTypes = [];
 
             foreach ($requiredGroupedByType as $type => $questions) {
@@ -1880,23 +2611,23 @@ class TaskController extends Controller
                 }
             }
 
-//        dd($missingTypes);
+            //        dd($missingTypes);
 
-        if (!empty($missingTypes)) {
-            return response()->json([
-                'status' => 422,
-                'message' => 'Some required question types are missing from the submission.',
-                'missing_question_types' => $missingTypes
-            ], 422);
-        }
+            if (!empty($missingTypes)) {
+                return response()->json([
+                    'status' => 422,
+                    'message' => 'Some required question types are missing from the submission.',
+                    'missing_question_types' => $missingTypes
+                ], 422);
+            }
             $imagesToProcess = [];
 
-//        dd($questionAnswers);
+            //        dd($questionAnswers);
 
             foreach ($questionAnswers as $key => $value) {
-//            if (!is_numeric($key)) {
-//                continue; // Ignore invalid question IDs
-//            }
+                //            if (!is_numeric($key)) {
+                //                continue; // Ignore invalid question IDs
+                //            }
 
                 $questionTypeArray = ['Dropdown', 'Image', 'Audio', 'Date', 'Date & Time', 'Dropdown', 'File Upload', 'Free Text', 'Image', 'Location', 'Multi select', 'Video'];
 
@@ -1907,7 +2638,7 @@ class TaskController extends Controller
                 $numberPart = $matches[1] ?? null; // "123"
                 $stringPart = $matches[2] ?? null; // "Image"
 
-//            echo $stringPart;
+                //            echo $stringPart;
 
                 if ($stringPart === '') {
                     $questionId = (int)$key;
@@ -1962,15 +2693,14 @@ class TaskController extends Controller
 
                     $user_answer = $full_file_path;
                     $file_path = $full_file_path;
-
                 } else {
 
-//                if (empty($value)) {
-//                    return response()->json([
-//                        'status' => 422,
-//                        'message' => "Please Enter a Valid Answer",
-//                    ], 422);
-//                }
+                    //                if (empty($value)) {
+                    //                    return response()->json([
+                    //                        'status' => 422,
+                    //                        'message' => "Please Enter a Valid Answer",
+                    //                    ], 422);
+                    //                }
 
                     // Treat as text answer
                     $user_answer = $value;
@@ -1988,23 +2718,22 @@ class TaskController extends Controller
                     if ($question->question_type === 'Free Text' && !empty($user_answer)) {
                         $user_answer = $value;
                     }
-
                 }
 
-//            dd($checkIfExists);
+                //            dd($checkIfExists);
                 if ($question->question_type == 'Subjective') {
-//                dd('dfhfgh');
-//                echo 'sub';
+                    //                dd('dfhfgh');
+                    //                echo 'sub';
                     $checkCountOfExistingData = TempUserActivityAnswersData::where('row_id', $request->row_id)
                         ->where(function ($query) use ($request) {
                             $query->where('activity_id', $request->activity_id)
                                 ->orWhere('activity_group_name_id', $request->group_id);
                         })
                         ->where('question_id', $questionId)
-//                    ->where('user_answer', 'LIKE', $user_answer)
+                        //                    ->where('user_answer', 'LIKE', $user_answer)
                         // ->where('user_id', $userId)
                         ->count();
-//                dd($checkCountOfExistingData);
+                    //                dd($checkCountOfExistingData);
 
                     if ($checkCountOfExistingData == 1) {
 
@@ -2014,7 +2743,7 @@ class TaskController extends Controller
                                     ->orWhere('activity_group_name_id', $request->group_id);
                             })
                             ->where('question_id', $questionId)
-//                        ->where('user_answer', 'LIKE', $user_answer)
+                            //                        ->where('user_answer', 'LIKE', $user_answer)
                             // ->where('user_id', $userId)
                             ->first();
 
@@ -2053,7 +2782,7 @@ class TaskController extends Controller
                                     if (in_array($fileExtension, $extension)) {
 
                                         $imagesToProcess[] = [
-//                                            'file_path' => $file_path,
+                                            //                                            'file_path' => $file_path,
                                             'file_path' => public_path($file_path), // Make absolute path,
                                             'latitude' => $latitude,
                                             'longitude' => $longitude,
@@ -2062,14 +2791,9 @@ class TaskController extends Controller
                                             'user_id' => $userDetails->id,
                                         ];
                                     }
-
                                 }
-
                             }
-
-
                         }
-
                     }
 
                     if ($checkCountOfExistingData == 0) {
@@ -2085,9 +2809,7 @@ class TaskController extends Controller
                             'latitude' => $latitude,
                             'longitude' => $longitude,
                         ]);
-
                     }
-
                 } else {
 
                     $checkIfExists = TempUserActivityAnswersData::where('row_id', $request->row_id)
@@ -2112,7 +2834,6 @@ class TaskController extends Controller
                             'latitude' => $latitude,
                             'longitude' => $longitude,
                         ]);
-
                     } else {
 
                         $answer = TempUserActivityAnswersData::where('row_id', $request->row_id)
@@ -2128,13 +2849,12 @@ class TaskController extends Controller
                                 'latitude' => $latitude,
                                 'longitude' => $longitude,
                             ]);
-
                     }
                 }
 
                 if ($question->question_type === 'Image' && $file_path) {
                     $imagesToProcess[] = [
-//                        'file_path' => $file_path,
+                        //                        'file_path' => $file_path,
                         'file_path' => public_path($file_path), // Make absolute path,
                         'latitude' => $latitude,
                         'longitude' => $longitude,
@@ -2143,16 +2863,15 @@ class TaskController extends Controller
                         'user_id' => $userDetails->id,
                     ];
                 }
-
             }
 
             // Dispatch image processing job if needed
-//        dd($imagesToProcess);
+            //        dd($imagesToProcess);
             if (!empty($imagesToProcess)) {
 
                 // dispatch(new ConvertAuditorSelfiesToGeoSelfies($imagesToProcess));
-//                ConvertAuditorSelfiesToGeoSelfies::dispatch($file_path, $latitude, $longitude, $answer, $projectMonthYearDirectory, $userDetails);
-            dispatch(new ConvertAuditorSelfiesToGeoSelfies($imagesToProcess));
+                //                ConvertAuditorSelfiesToGeoSelfies::dispatch($file_path, $latitude, $longitude, $answer, $projectMonthYearDirectory, $userDetails);
+                dispatch(new ConvertAuditorSelfiesToGeoSelfies($imagesToProcess));
                 // $job = new ConvertAuditorSelfiesToGeoSelfies($imagesToProcess);
                 // $job->handle();
 
@@ -2162,337 +2881,11 @@ class TaskController extends Controller
                 'status' => 200,
                 'message' => 'Activity Answers submitted successfully.',
             ], 200);
-
         } catch (\Exception $e) {
             Log::info($e->getMessage());
         }
-
     }
 
-
-    public function row_activity_answers_old(Request $request)
-    {
-//        dd($request->all());
-        $userId = $request->user_id;
-//        $last_sequence = TempUserActivityAnswersData::max('same_answer_id') + 1;
-        $last_sequence = (DB::table('temp_user_activity_answers_data')->max('same_answer_id') ?? 0) + 1;
-
-        $baseDirectory = 'activityAnswerImages/';
-        $projectTemp = ProjectTemplateNameValue::where('row_id', $request->row_id)->first();
-        $projectName = $projectTemp->getProjectTemplate->getProject->project_name;
-        $projectDirectory = $baseDirectory . $projectName . '/';
-        $this->checkAndCreateDirectory($projectDirectory);
-
-        $currentMonthYear = Carbon::now()->format('FY');
-        $projectMonthYearDirectory = $projectDirectory . $currentMonthYear;
-        $this->checkAndCreateDirectory($projectMonthYearDirectory);
-
-        $latitude = $request->latitude ?? null;
-        $longitude = $request->longitude ?? null;
-
-        $userDetails = User::find($userId);
-
-        // Remove non-question fields
-        $excludedKeys = ['user_id', 'row_id', 'activity_id', 'group_id', 'latitude', 'longitude'];
-        $questionAnswers = collect($request->all())->except($excludedKeys);
-
-        $submittedQuestionIds = array_map('intval', array_keys($questionAnswers->toArray()));
-
-//        dd($submittedQuestionIds);
-// Get only **required** questions (answer_type == 1) for the given activity
-        $requiredQuestions = Question::where('activity_id', $request->activity_id)
-            ->where('answer_type', 1)
-            ->get();
-
-// Group required questions by type
-        $requiredGroupedByType = $requiredQuestions->groupBy('question_type');
-
-// Track missing question types
-        $missingTypes = [];
-
-        foreach ($requiredGroupedByType as $type => $questions) {
-
-            $questionIds = $questions->pluck('id')->toArray();
-            $intersection = array_intersect($submittedQuestionIds, $questionIds);
-
-            if (empty($intersection)) {
-                // None of the required questions of this type were submitted
-                $missingTypes[] = $type;
-            }
-        }
-
-
-        $imagesToProcess = [];
-
-//        dd($questionAnswers);
-
-        foreach ($questionAnswers as $key => $value) {
-//            if (!is_numeric($key)) {
-//                continue; // Ignore invalid question IDs
-//            }
-
-            $questionTypeArray = ['Dropdown', 'Image', 'Audio', 'Date', 'Date & Time', 'Dropdown', 'File Upload', 'Free Text', 'Image', 'Location', 'Multi select', 'Video'];
-
-            $questionId = $key; // or "123"
-
-            preg_match('/^(\d+)([a-zA-Z]*)$/', $questionId, $matches);
-
-            $numberPart = $matches[1] ?? null; // "123"
-            $stringPart = $matches[2] ?? null; // "Image"
-
-//            echo $stringPart;
-
-            if ($stringPart === '') {
-                $questionId = (int)$key;
-            } else {
-                $questionId = (int)$numberPart;
-            }
-
-            $question = Question::find($questionId);
-
-            if (empty($question)) {
-                continue; // Skip if question doesn't exist
-            }
-
-            $user_answer = null;
-            $file_path = null;
-
-            // Check if answer is a file
-            if ($request->hasFile($key)) {
-                $file = $request->file($key);
-
-                $rules = [];
-                $customMessages = [];
-
-                if ($question->question_type == 'Image') {
-                    $rules['file_input'] = 'required|image|mimes:jpeg,png,jpg,gif,svg,webp|max:5120';
-                    $customMessages['file_input.required'] = "Image is required";
-                    $customMessages['file_input.image'] = "Only image files (jpeg, png, etc.) are allowed.";
-                    $customMessages['file_input.mimes'] = "Invalid image format ";
-                } elseif ($question->question_type == 'File Upload') {
-                    $rules['file_input'] = 'required|file|mimetypes:application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/jpeg,image/jpg,image/png,image/webp|max:51200';
-                    $customMessages['file_input.required'] = "Invalid File Type";
-                    $customMessages['file_input.mimetypes'] = "Invalid File Type";
-                }
-
-                $validator = Validator::make(['file_input' => $file], $rules, $customMessages);
-
-                if ($validator->fails()) {
-                    return response()->json([
-                        'status' => 422,
-                        'message' => "Invalid file for question ID: $questionId",
-                        'question_type' => $question->question_type,
-                        'errors' => $validator->errors()->all(),
-                    ], 422);
-                }
-
-
-                // Store file
-                $file_name = uniqid() . '.' . $file->getClientOriginalExtension();
-                $full_file_path = $projectMonthYearDirectory . '/' . $file_name;
-                $file->move(public_path($projectMonthYearDirectory), $file_name);
-                chmod(public_path($full_file_path), 0777);
-
-                $user_answer = $full_file_path;
-                $file_path = $full_file_path;
-
-            } else {
-
-//                if (empty($value)) {
-//                    return response()->json([
-//                        'status' => 422,
-//                        'message' => "Please Enter a Valid Answer",
-//                    ], 422);
-//                }
-
-                // Treat as text answer
-                $user_answer = $value;
-
-
-                // Handle date formatting
-                if ($question->question_type === 'Date' && !empty($user_answer)) {
-                    try {
-                        $user_answer = \Carbon\Carbon::parse($user_answer)->format('d/m/Y');
-                    } catch (\Exception $e) {
-                        // Optionally log or skip invalid date
-                        $user_answer = null;
-                    }
-                }
-
-                if ($question->question_type === 'Free Text' && !empty($user_answer)) {
-                    $user_answer = $value;
-                }
-
-            }
-
-//            dd($checkIfExists);
-            if ($question->question_type == 'Subjective') {
-//                dd('dfhfgh');
-//                echo 'sub';
-                $checkCountOfExistingData = TempUserActivityAnswersData::where('row_id', $request->row_id)
-                    ->where(function ($query) use ($request) {
-                        $query->where('activity_id', $request->activity_id)
-                            ->orWhere('activity_group_name_id', $request->group_id);
-                    })
-                    ->where('question_id', $questionId)
-//                    ->where('user_answer', 'LIKE', $user_answer)
-                    // ->where('user_id', $userId)
-                    ->count();
-//                dd($checkCountOfExistingData);
-//                echo $checkCountOfExistingData;
-                if ($checkCountOfExistingData == 1) {
-
-                    $checkSubjectiveExistingData = TempUserActivityAnswersData::where('row_id', $request->row_id)
-                        ->where(function ($query) use ($request) {
-                            $query->where('activity_id', $request->activity_id)
-                                ->orWhere('activity_group_name_id', $request->group_id);
-                        })
-                        ->where('question_id', $questionId)
-//                        ->where('user_answer', 'LIKE', $user_answer)
-                        // ->where('user_id', $userId)
-                        ->first();
-
-                    $subjectiveAnswer = $checkSubjectiveExistingData->user_answer;
-
-                    $cleanedAnswer = preg_replace('/\s+/', ' ', trim($subjectiveAnswer)); // Clean extra spaces
-
-                    // Count how many () groups are in the answer
-                    preg_match_all('/\(([^)]+)\)/', $cleanedAnswer, $matches);
-
-                    $bracketCount = count($matches[0]);
-
-//                    if ($bracketCount === 1) {
-
-                    $answer = TempUserActivityAnswersData::create([
-                        'user_id' => $userId,
-                        'row_id' => $request->row_id,
-                        'activity_id' => $request->activity_id,
-                        'activity_group_name_id' => $request->group_id ?? 0,
-                        'question_id' => $questionId,
-                        'user_answer' => $user_answer,
-                        'same_answer_id' => $last_sequence,
-                        'latitude' => $latitude,
-                        'longitude' => $longitude,
-                    ]);
-
-                    $isUrlOrPath = str_contains($user_answer, '/');
-                    if ($isUrlOrPath) {
-                        $userAnswerExtension = strtolower(pathinfo($user_answer, PATHINFO_EXTENSION));
-
-                        if ($request->hasFile($key) && $stringPart == 'Image' && in_array($userAnswerExtension, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
-                            $file = $request->file($key);
-                            $fileExtension = $file->getClientOriginalExtension();
-                            $extension = ['jpg', 'jpeg', 'png', 'webp', 'svg'];
-                            if (in_array($fileExtension, $extension)) {
-
-                                $imagesToProcess[] = [
-                                    'file_path' => $file_path,
-                                    'latitude' => $latitude,
-                                    'longitude' => $longitude,
-                                    'answer' => $answer,
-                                    'directory' => $projectMonthYearDirectory,
-                                    'user_id' => $userDetails->id,
-                                ];
-                            }
-
-                        }
-
-                    }
-
-
-//                    }
-
-                }
-
-                if ($checkCountOfExistingData == 0) {
-
-                    $answer = TempUserActivityAnswersData::create([
-                        'user_id' => $userId,
-                        'row_id' => $request->row_id,
-                        'activity_id' => $request->activity_id,
-                        'activity_group_name_id' => $request->group_id ?? 0,
-                        'question_id' => $questionId,
-                        'user_answer' => $user_answer,
-                        'same_answer_id' => $last_sequence,
-                        'latitude' => $latitude,
-                        'longitude' => $longitude,
-                    ]);
-
-                }
-
-            } else {
-
-                $checkIfExists = TempUserActivityAnswersData::where('row_id', $request->row_id)
-                    ->where(function ($query) use ($request) {
-                        $query->where('activity_id', $request->activity_id)
-                            ->orWhere('activity_group_name_id', $request->group_id);
-                    })
-                    ->where('question_id', $questionId)
-                    // ->where('user_id', $userId)
-                    ->exists();
-
-                if (!$checkIfExists) {
-
-                    $answer = TempUserActivityAnswersData::create([
-                        'user_id' => $userId,
-                        'row_id' => $request->row_id,
-                        'activity_id' => $request->activity_id,
-                        'activity_group_name_id' => $request->group_id ?? 0,
-                        'question_id' => $questionId,
-                        'user_answer' => $user_answer,
-                        'same_answer_id' => $last_sequence,
-                        'latitude' => $latitude,
-                        'longitude' => $longitude,
-                    ]);
-
-                } else {
-
-                    $answer = TempUserActivityAnswersData::where('row_id', $request->row_id)
-                        ->where(function ($query) use ($request) {
-                            $query->where('activity_id', $request->activity_id)
-                                ->orWhere('activity_group_name_id', $request->group_id);
-                        })
-                        ->where('question_id', $questionId)
-                        // ->where('user_id', $userId)
-                        ->update([
-                            'user_answer' => $user_answer,
-                            'same_answer_id' => $last_sequence,
-                            'latitude' => $latitude,
-                            'longitude' => $longitude,
-                        ]);
-
-                }
-            }
-
-            if ($question->question_type === 'Image' && $file_path) {
-                $imagesToProcess[] = [
-                    'file_path' => $file_path,
-                    'latitude' => $latitude,
-                    'longitude' => $longitude,
-                    'answer' => $answer,
-                    'directory' => $projectMonthYearDirectory,
-                    'user_id' => $userDetails->id,
-                ];
-            }
-
-        }
-
-        // Dispatch image processing job if needed
-//        dd($imagesToProcess);
-        if (!empty($imagesToProcess)) {
-//                ConvertAuditorSelfiesToGeoSelfies::dispatch($file_path, $latitude, $longitude, $answer, $projectMonthYearDirectory, $userDetails);
-//            dispatch(new ConvertAuditorSelfiesToGeoSelfies($imagesToProcess));
-            $job = new ConvertAuditorSelfiesToGeoSelfies($imagesToProcess);
-            $job->handle();
-
-        }
-
-        return response([
-            'status' => 200,
-            'message' => 'Activity Answers submitted successfully.',
-        ], 200);
-
-    }
 
 
     public function getSubjectiveDropdown(Request $request)
@@ -2500,8 +2893,8 @@ class TaskController extends Controller
 
         try {
 
-//            $data = SubjectDropdown::with('subjectiveQuestionDropdowns')->where('subject_id', $request->id)->get();
-//            $data = SubjectDropdown::with('SubjectiveQuestion')->where('subject_id', $request->id)->get();
+            //            $data = SubjectDropdown::with('subjectiveQuestionDropdowns')->where('subject_id', $request->id)->get();
+            //            $data = SubjectDropdown::with('SubjectiveQuestion')->where('subject_id', $request->id)->get();
             $data = SubjectDropdown::with('subjectiveQuestion')
                 ->where('subject_id', $request->id)
                 ->get()
@@ -2617,7 +3010,6 @@ class TaskController extends Controller
                     'status' => 200,
                     'message' => 'OTP Send Successfully',
                 ], 200);
-
             } else {
 
                 return response([
@@ -2698,14 +3090,12 @@ class TaskController extends Controller
                     'status' => 200,
                     'message' => 'OTP Verified Successfully',
                 ], 200);
-
             } else {
 
                 return response([
                     'status' => 401,
                     'message' => 'OTP Not Verified',
                 ], 401);
-
             }
         } catch (\Exception $e) {
             return response([
@@ -2779,7 +3169,7 @@ class TaskController extends Controller
                 foreach ($projectRowData as $key => $value) {
                     $rules[$key] = 'required';
                 }
-// Validate
+                // Validate
                 $validator = Validator::make($projectRowData, $rules);
 
                 if ($validator->fails()) {
@@ -2815,7 +3205,7 @@ class TaskController extends Controller
                     $templateDataJson[$projectData->id] = $value;
                 }
 
-// Insert single row with JSON data
+                // Insert single row with JSON data
                 DB::table('project_template_name_values_new')->insert([
                     'project_template_id' => $projectTemplateInfo->id,
                     'template_data_json' => json_encode($templateDataJson),
@@ -2832,7 +3222,7 @@ class TaskController extends Controller
                 $activityGroupId = $request->activity_group_id;
                 $activity_id = $request->activity_id;
                 $activityIdsArr = [];
-//            $activityGroupId = null;
+                //            $activityGroupId = null;
                 if ($activityGroupId) {
 
                     $group_activities = ActivityGroupPivot::where('activity_group_id', $activityGroupId)->get();
@@ -2876,7 +3266,7 @@ class TaskController extends Controller
 
                 foreach ($activityIdsArr as $activity) {
 
-//                if ($checkOutletAssign) {
+                    //                if ($checkOutletAssign) {
 
                     $dataAssign = DataAssign::create([
                         'company_id' => $companyId,
@@ -2905,7 +3295,6 @@ class TaskController extends Controller
                         $activityGroupId,
                         $rowIds
                     );
-
                 }
             }
 
@@ -2970,8 +3359,8 @@ class TaskController extends Controller
 
         return $commonId;
     }
-    
-    
+
+
     public function storeTemplateHeaderValues(Request $request)
     {
 
@@ -2996,9 +3385,9 @@ class TaskController extends Controller
                 ksort($projectRowData);
 
                 /**
-                * 🔹 Normalize request keys
-                * Map both original and normalized
-                */
+                 * 🔹 Normalize request keys
+                 * Map both original and normalized
+                 */
                 $normalizedRowData = [];
                 foreach ($projectRowData as $key => $val) {
                     $normalizedKey = strtolower(str_replace(' ', '_', trim($key)));
@@ -3043,7 +3432,7 @@ class TaskController extends Controller
                     $templateDataJson[$projectData->id] = $value;
                 }
 
-// Insert single row with JSON data
+                // Insert single row with JSON data
                 DB::table('project_template_name_values_new')->insert([
                     'project_template_id' => $projectTemplateInfo->id,
                     'template_data_json' => json_encode($templateDataJson),
@@ -3060,7 +3449,7 @@ class TaskController extends Controller
                 $activityGroupId = $request->activity_group_id;
                 $activity_id = $request->activity_id;
                 $activityIdsArr = [];
-//            $activityGroupId = null;
+                //            $activityGroupId = null;
                 if ($activityGroupId) {
                     $group_activities = ActivityGroupPivot::where('activity_group_id', $activityGroupId)->get();
                     foreach ($group_activities as $group_activity) {
@@ -3092,7 +3481,7 @@ class TaskController extends Controller
 
                 foreach ($activityIdsArr as $activity) {
 
-//                if ($checkOutletAssign) {
+                    //                if ($checkOutletAssign) {
 
                     $dataAssign = DataAssign::create([
                         'company_id' => $companyId,
@@ -3121,7 +3510,6 @@ class TaskController extends Controller
                         $activityGroupId,
                         $rowIds
                     );
-
                 }
             }
 
@@ -3132,6 +3520,4 @@ class TaskController extends Controller
             return response()->json(['status' => 401, 'message' => 'Something went wrong']);
         }
     }
-
-
 }

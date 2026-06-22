@@ -9,7 +9,7 @@ use App\Traits\HasEncryptedId;
 class TempUserActivityAnswersData extends Model
 {
     use HasFactory, HasEncryptedId;
-    protected $fillable = ['user_id', 'row_id', 'activity_group_name_id', 'activity_sequence', 'activity_id', 'question_id', 'user_answer', 'same_answer_id', 'status', 'is_draft', 'remark', 'verified_by', 'edited_by_verifier', 'mobile_no', 'mobile_otp','otp_verified_status', 'latitude', 'longitude'];
+    protected $fillable = ['user_id', 'row_id', 'activity_group_name_id', 'activity_sequence', 'activity_id', 'question_id', 'user_answer', 'same_answer_id', 'status', 'is_draft', 'remark', 'verified_by', 'edited_by_verifier', 'mobile_no', 'mobile_otp','otp_verified_status', 'latitude', 'longitude', 'subjective_parent'];
 
     public function getUser(){
         return $this->belongsTo(User::class, 'user_id');

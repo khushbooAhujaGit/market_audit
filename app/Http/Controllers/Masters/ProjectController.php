@@ -54,11 +54,62 @@ class ProjectController extends Controller
         return $this->middleware("auth");
     }
 
-    public function index()
+    public function index(Request $request)
     {
         $projects = Project::with('getUnit.getZone.getCompany')->orderBy('id', 'DESC')->paginate(10);
         return view('masters.projects.index', compact('projects'));
     }
+
+    public function searchProjects(Request $request)
+    {
+        $search = $request->search;
+        $page = $request->page ?? 1;
+
+        $query = Project::with('getUnit.getZone.getCompany', 'getProjectType');
+
+        if (!empty($search)) {
+            $query->where(function ($q) use ($search) {
+                $q->where('project_name', 'like', "%$search%")
+                    ->orWhereHas('getUnit', fn($q2) => $q2->where('unit_name', 'like', "%$search%"))
+                    ->orWhereHas('getUnit.getZone', fn($q2) => $q2->where('zone_name', 'like', "%$search%"))
+                    ->orWhereHas('getUnit.getZone.getCompany', fn($q2) => $q2->where('company_name', 'like', "%$search%"));
+            });
+        }
+
+        $projects = $query->orderBy('id', 'DESC')->paginate(10, ['*'], 'page', $page);
+
+        // ðŸ”¥ Generate HTML here (same as your sales page)
+        $html = '';
+
+        foreach ($projects as $index => $project) {
+            $html .= '<tr>';
+            $html .= '<td>' . ($index + 1) . '</td>';
+            $html .= '<td>' . e($project->getUnit->getZone->getCompany->company_name ?? '') . '</td>';
+            $html .= '<td>' . e($project->getUnit->getZone->zone_name ?? '') . '</td>';
+            $html .= '<td>' . e($project->getUnit->unit_name ?? '') . '</td>';
+            $html .= '<td>' . e($project->project_name) . '</td>';
+            $html .= '<td>' . e(optional($project->getProjectType)->project_type_name) . '</td>';
+            $html .= '<td>
+            <ul class="action">
+                <li class="edit">
+                    <a href="' . route('project.edit', $project->id) . '">
+                        <i class="icon-pencil-alt"></i>
+                    </a>
+                </li>
+                <li class="delete" data-id="' . $project->id . '">
+                    <i class="icon-trash"></i>
+                </li>
+            </ul>
+        </td>';
+            $html .= '</tr>';
+        }
+
+        return response()->json([
+            'html' => $html,
+            'pagination' => $projects->links()->toHtml()
+        ]);
+    }
+
 
     public function create()
     {
@@ -148,7 +199,6 @@ class ProjectController extends Controller
         }
         return redirect(route('project.list'))->with('message', "Project Created Successfully");
     }
-
 
 
     public function update(Request $request, $id)
@@ -245,7 +295,7 @@ class ProjectController extends Controller
 
     public function destroy(Request $request)
     {
-        try{
+        try {
             $project = Project::findOrFail($request->id);
 
             ProjectTemplatesCommonHeads::where('project_id', $project->id)->delete();
@@ -253,9 +303,9 @@ class ProjectController extends Controller
             AuditorAssignedData::where('project_id', $project->id)->delete();
 
             $projectTemplatesIds = ProjectTemplate::where('project_id', $project->id)->pluck('id')->toArray();
-            if(!empty($projectTemplatesIds)){
+            if (!empty($projectTemplatesIds)) {
                 $projectTemplateRowIds = ProjectTemplateNameValuesNew::whereIn('project_template_id', $projectTemplatesIds)->pluck('id')->toArray();
-                if(!empty($projectTemplateRowIds)){
+                if (!empty($projectTemplateRowIds)) {
                     TempUserActivityAnswersData::whereIn('row_id', $projectTemplateRowIds)->delete();
                 }
                 ProjectTemplateNameValuesNew::whereIn('project_template_id', $projectTemplatesIds)->delete();
@@ -264,18 +314,26 @@ class ProjectController extends Controller
 
             $project->delete();
             return "Success";
-
-        }catch(\Exception $e){
-            \Log::info('Project Deletion Error with id - '.$request->id.$e->getMessage());
+        } catch (\Exception $e) {
+            \Log::info('Project Deletion Error with id - ' . $request->id . $e->getMessage());
             return "Error";
         }
-
     }
 
     public function get_zones_units(Request $request)
     {
         $units = Unit::where('zone_id', $request->id)->get();
         return response()->json(['message' => "Success", 'related_units' => $units]);
+    }
+
+    public function getGroupActivities($group_id)
+    {
+        $activities = ActivityGroupPivot::where('activity_group_id', $group_id)
+            ->with('getActivityInfo')
+            ->orderBy('sequence')
+            ->get()
+            ->map(fn($p) => ['id' => $p->activity_id, 'name' => $p->getActivityInfo->activity_name]);
+        return response()->json($activities);
     }
 
     public function get_project_info(Request $request)
@@ -409,6 +467,7 @@ class ProjectController extends Controller
         $projects = Project::all();
         return view('masters.data_templates.upload_data', compact('data_templates', 'companies', 'projects'));
     }
+
     public function get_unit_projects(Request $request)
     {
         $projects = Project::where('unit_id', $request->id)->get();
@@ -423,7 +482,7 @@ class ProjectController extends Controller
             'data_excel' => [
                 'required',
                 'file',
-                'mimetypes:text/plain,text/csv,application/csv,application/vnd.ms-excel',
+                'mimetypes:text/plain,text/csv,application/csv',
                 'max:512000', // 500MB = 512000 KB
             ],
         ]);
@@ -458,8 +517,8 @@ class ProjectController extends Controller
             $user = User::find(Auth::user()->id);
 
             dispatch(new ProjectDataUploadWithJob($filePath, $formFields['project_id'], $formFields['template_name_id'], $user, $dataFilter));
-//            $job = new ProjectDataUploadWithJob($filePath, $formFields['project_id'], $formFields['template_name_id'], $user, $dataFilter);
-//            $job->handle();
+            //            $job = new ProjectDataUploadWithJob($filePath, $formFields['project_id'], $formFields['template_name_id'], $user, $dataFilter);
+            //            $job->handle();
 
             $filePath = storage_path('app/' . $filePath);
             if (File::exists($filePath)) {
@@ -467,7 +526,6 @@ class ProjectController extends Controller
             }
 
             return redirect()->back()->with('success', "Data import has been queued and will be processed shortly.");
-
         }
 
         $insertProjectTemplateData = [];
@@ -489,7 +547,7 @@ class ProjectController extends Controller
             $projectTemplate_id = $checkProjectTemplate->id;
         }
         $template_heads_count = count($checkProjectTemplate->getTemplate->getTemplateHeads);
-//        dd($request->hasFile('data_excel'));
+        //        dd($request->hasFile('data_excel'));
         if ($request->hasFile('data_excel')) {
 
             $file = $request->file('data_excel');
@@ -498,8 +556,8 @@ class ProjectController extends Controller
             $filePath = public_path('projectsDataFiles/' . $filename);
             $formFields['template_name_id'];
             try {
-//                dd(DB::select("SHOW VARIABLES LIKE 'local_infile'"));
-//                dd($filePath);
+                //                dd(DB::select("SHOW VARIABLES LIKE 'local_infile'"));
+                //                dd($filePath);
                 $getMasterTemplate = ProjectTemplate::where('project_id', $request->project_id)->where('is_master', 1)->first();
                 $dataFilter = 0;
                 if (!empty($getMasterTemplate)) {
@@ -512,7 +570,6 @@ class ProjectController extends Controller
 
                 $import = new ProjectDataImport2($filePath, $formFields['project_id'], $formFields['template_name_id'], $dataFilter);
                 $result = $import->handle();
-
             } catch (\Exception $e) {
                 // dd($e->getMessage());
 
@@ -525,7 +582,6 @@ class ProjectController extends Controller
                 return redirect()->back()->with('error', $result['message']);
             }
             return redirect()->back()->with('success', $result['message']);
-
         }
     }
 
@@ -537,7 +593,7 @@ class ProjectController extends Controller
             'data_excel' => [
                 'required',
                 'file',
-                'mimetypes:text/plain,text/csv,application/csv,application/vnd.ms-excel',
+                'mimetypes:text/plain,text/csv,application/csv',
                 'max:512000', // 500MB = 512000 KB
             ],
         ]);
@@ -571,7 +627,6 @@ class ProjectController extends Controller
             }
 
             return redirect()->back()->with('success', "Data import has been queued and will be processed shortly.");
-
         }
 
         $insertProjectTemplateData = [];
@@ -590,7 +645,7 @@ class ProjectController extends Controller
             $projectTemplate_id = $checkProjectTemplate->id;
         }
         $template_heads_count = count($checkProjectTemplate->getTemplate->getTemplateHeads);
-//        dd($request->hasFile('data_excel'));
+        //        dd($request->hasFile('data_excel'));
         if ($request->hasFile('data_excel')) {
 
             $file = $request->file('data_excel');
@@ -599,15 +654,13 @@ class ProjectController extends Controller
             $filePath = public_path('projectsDataFiles/' . $filename);
             $formFields['template_name_id'];
             try {
-//                dd(DB::select("SHOW VARIABLES LIKE 'local_infile'"));
-//                dd($filePath);
+                //                dd(DB::select("SHOW VARIABLES LIKE 'local_infile'"));
+                //                dd($filePath);
                 $import = new ProjectDataImport2($filePath, $formFields['project_id'], $formFields['template_name_id']);
                 $result = $import->handle();
-            }
-            catch(\Exception $e){
+            } catch (\Exception $e) {
                 dd($e->getMessage());
-            }
-            finally {
+            } finally {
                 if (file_exists($filePath)) {
                     unlink($filePath); // Ensure file is deleted even if import fails
                 }
@@ -616,7 +669,6 @@ class ProjectController extends Controller
                 return redirect()->back()->with('error', $result['message']);
             }
             return redirect()->back()->with('success', $result['message']);
-
         }
     }
 
@@ -641,7 +693,7 @@ class ProjectController extends Controller
             $filePath = $request->file('data_excel')->store('temp');
             $requestData = $request->only(['project_id', 'template_name_id']);
 
-//            Excel::queueImport(new ProjectDataImport($formFields['project_id'], $formFields['template_name_id']), $filePath);
+            //            Excel::queueImport(new ProjectDataImport($formFields['project_id'], $formFields['template_name_id']), $filePath);
             // Store the uploaded file in the `temp` directory
             $filePath = $request->file('data_excel')->store('temp');
             $requestData = $request->only(['project_id', 'template_name_id']);
@@ -667,7 +719,7 @@ class ProjectController extends Controller
 
             // Dispatch the job to queue AFTER response
             ProcessExcelImportJob::dispatch($filePath, $formFields['project_id'], $formFields['template_name_id'], $user);
-//            ProcessExcelImportJob::dispatch($filePath, $formFields['project_id'], $formFields['template_name_id']);
+            //            ProcessExcelImportJob::dispatch($filePath, $formFields['project_id'], $formFields['template_name_id']);
 
             $filePath = storage_path('app/' . $filePath);
             if (File::exists($filePath)) {
@@ -811,6 +863,7 @@ class ProjectController extends Controller
         $response = "yes";
         return view('masters.data_templates.view_project_data', compact('projectTemplate', 'response'));
     }
+
     public function render_project_upload_data_view(Request $request)
     {
         if (!$request->has('page') && !$request->has('template_name_id')) {
@@ -838,19 +891,19 @@ class ProjectController extends Controller
             return view('masters.data_templates.view_project_data', compact('response'));
         }
         $templateHeadsCount = count($checkTemplatename->getTemplateHeads); // Dynamic number of heads
-//        $perPage = 100 * $templateHeadsCount;
+        //        $perPage = 100 * $templateHeadsCount;
         $perPage = 100;
-//        $projectTemplateDataGet = DB::table('project_template_name_values')
-//            ->where("project_template_id", $projectTemplate->id)
-////            ->with('getHeadName')
-//            ->join('template_name_heads', 'project_template_name_values.template_name_head_id', '=' , 'template_name_heads.id')
-//            ->select(
-//                'project_template_name_values.*',
-//                'template_name_heads.*'
-//            )
-//            ->orderBy('project_template_name_values.id')
-//            ->paginate($perPage)
-//            ->appends($request->all());
+        //        $projectTemplateDataGet = DB::table('project_template_name_values')
+        //            ->where("project_template_id", $projectTemplate->id)
+        ////            ->with('getHeadName')
+        //            ->join('template_name_heads', 'project_template_name_values.template_name_head_id', '=' , 'template_name_heads.id')
+        //            ->select(
+        //                'project_template_name_values.*',
+        //                'template_name_heads.*'
+        //            )
+        //            ->orderBy('project_template_name_values.id')
+        //            ->paginate($perPage)
+        //            ->appends($request->all());
 
         $projectTemplateDataGet = DB::table('project_template_name_values_new')
             ->where('project_template_id', $projectTemplate->id)
@@ -859,21 +912,21 @@ class ProjectController extends Controller
             ->paginate($perPage)
             ->appends($request->all());
 
-// Decode the JSON for each row
+        // Decode the JSON for each row
         $projectTemplateDataGet->getCollection()->transform(function ($item) {
             $item->decoded_json = json_decode($item->template_data_json, true);
             return $item;
         });
 
         $response = "yes";
-//         dd($projectTemplateDataGet);
+        //         dd($projectTemplateDataGet);
         return view('masters.data_templates.view_project_data', compact('projectTemplate', 'response', 'projectTemplateDataGet'));
     }
 
 
     public function project_data_item($id)
     {
-//        dd($id);
+        //        dd($id);
         $related_values = ProjectTemplateNameValuesNew::where('id', $id)
             ->with('getProjectTemplateData')
             ->first();
@@ -891,12 +944,13 @@ class ProjectController extends Controller
         }
         return view('masters.data_templates.edit_data', compact('related_values', 'templateHeadData'));
     }
+
     public function project_data_item_update(Request $request, $id)
     {
         // Validate the incoming request data
         $request->validate([
             'values' => 'required|array',
-//            'values.*.id' => 'required|integer|exists:project_template_name_values_new,id',
+            //            'values.*.id' => 'required|integer|exists:project_template_name_values_new,id',
             'values.*.id' => 'required|integer|',
             'values.*.value' => 'nullable|string|max:255',
         ]);
@@ -904,22 +958,22 @@ class ProjectController extends Controller
         $data = ProjectTemplateNameValuesNew::find($id);
         $new_values = $request->input('values');
         $new_json_data = collect($new_values)          // make it a collection
-        ->pluck('value', 'id') // pluck value keyed by id
-        ->toArray();
-//        dd($new_json_data, $id);
+            ->pluck('value', 'id') // pluck value keyed by id
+            ->toArray();
+        //        dd($new_json_data, $id);
         $data->update([
             'template_data_json' => json_encode($new_json_data)
         ]);
 
         // Loop through the values and update them
-//        foreach ($request->input('values') as $valueData) {
-//            $value = ProjectTemplateNameValuesNew::find($valueData['id']);
-//            if ($valueData['value'] == "") {
-//                $valueData['value'] = "";
-//            }
-//            $value->value = $valueData['value']; // This can now be null or an empty string
-//            $value->save();
-//        }
+        //        foreach ($request->input('values') as $valueData) {
+        //            $value = ProjectTemplateNameValuesNew::find($valueData['id']);
+        //            if ($valueData['value'] == "") {
+        //                $valueData['value'] = "";
+        //            }
+        //            $value->value = $valueData['value']; // This can now be null or an empty string
+        //            $value->save();
+        //        }
 
         return redirect()->route('project_data.edit', ['id' => $id])->with('success', 'Data updated successfully.');
     }
@@ -964,7 +1018,7 @@ class ProjectController extends Controller
                     'user_id' => auth()->id(), // Assuming you want to assign the current user
                 ]
             );
-            return  back()->with(['message' => "Distributor Min Mapped Successfully"]);
+            return back()->with(['message' => "Distributor Min Mapped Successfully"]);
         }
         return back()->with(['message' => "Only Distributor Can be Mapped"]);
     }
@@ -999,6 +1053,8 @@ class ProjectController extends Controller
                 'completion_type' => $mapping_data['completion_type'],
                 'min_completion' => $mapping_data['min_completion'],
                 'data_add_on' => $mapping_data['data_add_on'],
+                'activity_add_on' => $mapping_data['activity_add_on'] ?? 0,
+                'activity_add_on_activity_ids' => isset($mapping_data['activity_add_on_activity_ids']) && !empty($mapping_data['activity_add_on_activity_ids']) ? json_encode($mapping_data['activity_add_on_activity_ids']) : null,
                 'with_data' => $mapping_data['with_data'],
                 'can_edit_data' => $mapping_data['can_edit_data'],
                 'master_head_id' => $mapping_data['master_head'],
@@ -1008,13 +1064,28 @@ class ProjectController extends Controller
                 'compliance_column_id' => $mapping_data['complianceColumnId'], //khushboo 02-05-2025
                 'activity_otp_required_ids' => json_encode($otpActivityData), //khushboo 05-04-2025
             ]);
-            // Update data_assigns table based on activityType
-            DataAssign::where('project_id', $request->project_id)
-                ->where('template_name_id', $mapping_data['templateNameId'])
-                ->update([
-                    'activity_id' => $type_helper == 0 ? $activity_or_group_id : null,
-                    'activity_group_id' => $type_helper == 1 ? $activity_or_group_id : null,
-                ]);
+
+            if (isset($mapping_data['activityId']) && !empty($mapping_data['activityId'])) {
+                // Update data_assigns table based on activityType
+                DataAssign::where('project_id', $request->project_id)
+                    ->where('template_name_id', $mapping_data['templateNameId'])
+                    ->update([
+                        'activity_id' => $type_helper == 0 ? $activity_or_group_id : null,
+                        'activity_group_id' => $type_helper == 1 ? $activity_or_group_id : null,
+                    ]);
+            } else {
+
+                $activity_ids = ActivityGroupPivot::where('activity_group_id', $activity_or_group_id)->pluck('activity_id')->toArray();
+                foreach ($activity_ids as $actId) {
+                    // Update data_assigns table based on activityType
+                    DataAssign::where('project_id', $request->project_id)
+                        ->where('template_name_id', $mapping_data['templateNameId'])
+                        ->update([
+                            'activity_id' => $actId,
+                            'activity_group_id' => $type_helper == 1 ? $activity_or_group_id : null,
+                        ]);
+                }
+            }
         }
 
         // for mapping distributors with outlet data
@@ -1047,7 +1118,7 @@ class ProjectController extends Controller
                 ->orderBy('id', 'DESC')
                 ->get();
 
-//            dd($projects);
+            //            dd($projects);
             $projectsIds = Project::where('is_agency_required', 1)
                 ->whereHas('dataAssigns', function ($query) use ($currentUser) {
                     $query->where('agency_id', Auth::user()->agency_user_id)
@@ -1059,7 +1130,6 @@ class ProjectController extends Controller
             $template_names = TemplateName::whereIn('id', $project_templates_ids)->get();
             $users = User::where('agency_user_id', Auth::user()->id)->role('Auditor')->get();
             $verifier_users = User::where('agency_user_id', Auth::user()->id)->role('Verifier')->get();
-
         } else {
             $template_names = TemplateName::all();
             $users = User::all();
@@ -1069,7 +1139,7 @@ class ProjectController extends Controller
 
         //khushboo 31-03-2025
 
-        return view('masters.data_templates.assign_data', compact('verifier_users','currentUser', 'currentUserRole','template_names', 'companies', 'activities', 'users', 'activity_groups', 'projects'));
+        return view('masters.data_templates.assign_data', compact('verifier_users', 'currentUser', 'currentUserRole', 'template_names', 'companies', 'activities', 'users', 'activity_groups', 'projects'));
     }
 
     // this is to make the project template a master template
@@ -1096,7 +1166,7 @@ class ProjectController extends Controller
             $project_template_make_master->save();
         }
         $other_project_templates = ProjectTemplate::where('project_id', $projectInfo->id)
-            ->where('template_name_id', '!=',  $request->mt_id)
+            ->where('template_name_id', '!=', $request->mt_id)
             ->get();
         // foreach($other_project_templates as $other_project_template){
         //     $other_project_template->completion_type = 'Percentage';
@@ -1106,7 +1176,7 @@ class ProjectController extends Controller
         $projectMasterInfo = ProjectTemplate::with('getTemplate.getTemplateHeads')->where('project_id', $projectInfo->id)
             ->where('is_master', 1)->first();
         $projectTemplateNames = ProjectTemplate::where('project_id', $projectInfo->id)->with('getTemplate.getTemplateHeads')->get();
-        return response()->json(['message' => "Success", 'projectInfo' => $projectInfo, 'projectTemplateNames' => $projectTemplateNames, 'projectMasterInfo' => $projectMasterInfo, 'isNonComplianceApplicable' => $isNonComplianceApplicable, 'otpProjectActivities' =>  $otpProjectActivities]);
+        return response()->json(['message' => "Success", 'projectInfo' => $projectInfo, 'projectTemplateNames' => $projectTemplateNames, 'projectMasterInfo' => $projectMasterInfo, 'isNonComplianceApplicable' => $isNonComplianceApplicable, 'otpProjectActivities' => $otpProjectActivities]);
     }
 
     public function master_template_row_info(Request $request)
@@ -1149,7 +1219,7 @@ class ProjectController extends Controller
                     });
             }
             //for linking outlet with distributor
-//            dd($projectRowData, $masterTemplateValuesData, $projectTemplateInfo->is_master);
+            //            dd($projectRowData, $masterTemplateValuesData, $projectTemplateInfo->is_master);
             foreach ($projectRowData as $headId => $projectData) {
 
                 if (empty($get_header_id) && !empty($projectData)) {
@@ -1167,7 +1237,7 @@ class ProjectController extends Controller
             $projectTemplateNameValues = ProjectTemplateNameValuesNew::create([
                 'project_template_id' => $projectTemplateInfo->id,
                 'template_data_json' => json_encode($json_Data),
-                'distributor_id' => $matchedMasterId??null
+                'distributor_id' => $matchedMasterId ?? null
             ]);
 
             $max_row_id = $projectTemplateNameValues->id;
@@ -1220,8 +1290,7 @@ class ProjectController extends Controller
                         $activityGroupId,
                         $rowIds
                     );
-                }
-                else {
+                } else {
                     $getDataAssign = DB::table('data_assigns')->where('project_id', $projectInfo->id)
                         ->where('activity_id', $activity)
                         ->where('template_name_id', $templateNameInfo->id)
@@ -1243,7 +1312,6 @@ class ProjectController extends Controller
                             'row_id' => $projectTemplateNameValues->id,
                             'common_id' => $getCommonId[0]
                         ]);
-
                     } else {
 
                         //if mapped with is outlet assigned
@@ -1270,7 +1338,7 @@ class ProjectController extends Controller
                             ->whereIn('activity_id', $activityIdsArrMaster)
                             ->where('template_name_id', $master_project_template->template_name_id)
                             ->where('project_template_id', $master_project_template->id)
-//                            ->where('template_name_head_id', $get_header_id)
+                            //                            ->where('template_name_head_id', $get_header_id)
                             ->where('is_outlet_assigned', 1)
                             ->orderBy('id', 'desc')
                             ->get();
@@ -1315,8 +1383,8 @@ class ProjectController extends Controller
             $projectRowData = $request->except(['_token', 'project_template_id']);
             ksort($projectRowData);
             $max_row_id = null;
-//            $max_row_id = ProjectTemplateNameValue::max('id');
-//            $max_row_id += 1;
+            //            $max_row_id = ProjectTemplateNameValue::max('id');
+            //            $max_row_id += 1;
             $is_template_master = $projectTemplateInfo->is_master;
             $get_header_id = "";
             $get_header_value = "";
@@ -1327,12 +1395,12 @@ class ProjectController extends Controller
                     $get_header_value = $projectData;
                 }
                 $json_Data[$headId] = $projectData;
-//                ProjectTemplateNameValue::create([
-//                    'row_id' => $max_row_id,
-//                    'project_template_id' => $projectTemplateInfo->id,
-//                    'template_name_head_id' => $headId,
-//                    'value' => $projectData
-//                ]);
+                //                ProjectTemplateNameValue::create([
+                //                    'row_id' => $max_row_id,
+                //                    'project_template_id' => $projectTemplateInfo->id,
+                //                    'template_name_head_id' => $headId,
+                //                    'value' => $projectData
+                //                ]);
             }
 
             $projectTemplateNameValues = ProjectTemplateNameValuesNew::create([
@@ -1389,13 +1457,13 @@ class ProjectController extends Controller
                     $rowIds
                 );
 
-//                $auditorAssigned = AuditorAssignedData::create([
-//                    'data_assign_id' => $dataAssign->id,
-//                    'project_id' => $projectInfo->id,
-//                    'template_name_id' => $templateNameInfo->id,
-//                    'user_id' => auth()->id(),
-//                    'template_name_head_value' => $get_header_value
-//                ]);
+                //                $auditorAssigned = AuditorAssignedData::create([
+                //                    'data_assign_id' => $dataAssign->id,
+                //                    'project_id' => $projectInfo->id,
+                //                    'template_name_id' => $templateNameInfo->id,
+                //                    'user_id' => auth()->id(),
+                //                    'template_name_head_value' => $get_header_value
+                //                ]);
             }
 
             $redirectUrl = route('user.project.row_id.activity', [
@@ -2022,7 +2090,6 @@ class ProjectController extends Controller
         // dd($childauditorAssignDataIds, $childrowIds, $activityIds);
 
 
-
         // dd($existingRowIdsInAnswers);
         $complianceTemplateIds = ComplianceAnswerData::pluck('project_template_id')->toArray();
 
@@ -2307,7 +2374,6 @@ class ProjectController extends Controller
         }
 
 
-
         $agencyUserIds = User::role('agency')->get();
         // dd($nonComplianceTemplateSUbHeaders, $project_template_sub_headers);
 
@@ -2546,7 +2612,7 @@ class ProjectController extends Controller
     }
 
 
-    public function  complianceActionTakenPage()
+    public function complianceActionTakenPage()
     {
 
         $nonComplianceData = ComplianceAnswerData::all();
@@ -2609,7 +2675,7 @@ class ProjectController extends Controller
                         $this->checkAndCreateDirectory($baseDirectory);
                         $full_file_path = $baseDirectory . $file_name;
                         $file->move(public_path($baseDirectory), $file_name);
-                        $complianceDocument =   $full_file_path;
+                        $complianceDocument = $full_file_path;
 
                         ProjectTemplateNameValuesNew::where('id', $findTemplateROwData->id)->update([
                             'action_taken_type' => $request->actionTaken,
@@ -2681,11 +2747,11 @@ class ProjectController extends Controller
         foreach ($templateValues as $ind => $tempdata) {
             $json_data = json_decode($tempdata->template_data_json);
             $row = [];
-            foreach($json_data as $key => $value){
+            foreach ($json_data as $key => $value) {
                 $row[] = $value;
-//                foreach ($values as $val) {
-//                    $row[] = $val->value;
-//                }
+                //                foreach ($values as $val) {
+                //                    $row[] = $val->value;
+                //                }
             }
             $data[] = $row;
         }
@@ -2770,32 +2836,32 @@ class ProjectController extends Controller
             $value = $request->input('search_value');
             $query->whereRaw('JSON_SEARCH(template_data_json, "one", ?) IS NOT NULL', [$value]);
 
-//            // Split by comma if multiple values
+            //            // Split by comma if multiple values
             $values = array_filter(array_map('trim', explode(',', $value)));
-//
-//            if(count($values) > 0){
-//                $query->where(function ($q) use ($values) {
-//                    foreach ($values as $value) {
-//                        $q->orWhereRaw('JSON_SEARCH(template_data_json, "one", ?) IS NOT NULL', [$value]);
-//                    }
-//                });
-//            }else{
-//                $query->whereRaw('JSON_SEARCH(template_data_json, "one", ?) IS NOT NULL', [$value]);
-//            }
+            //
+            //            if(count($values) > 0){
+            //                $query->where(function ($q) use ($values) {
+            //                    foreach ($values as $value) {
+            //                        $q->orWhereRaw('JSON_SEARCH(template_data_json, "one", ?) IS NOT NULL', [$value]);
+            //                    }
+            //                });
+            //            }else{
+            //                $query->whereRaw('JSON_SEARCH(template_data_json, "one", ?) IS NOT NULL', [$value]);
+            //            }
 
         }
 
         // Sorting
-//        if ($request->filled('sort_by') && in_array($request->input('sort_by'), $headIds)) {
-//            $query->orderBy(
-//                DB::raw('JSON_UNQUOTE(JSON_EXTRACT(template_data_json, "$.\"' . $request->input('sort_by') . '\""))'),
-//                $request->input('sort_order', 'asc')
-//            );
-//        }
+        //        if ($request->filled('sort_by') && in_array($request->input('sort_by'), $headIds)) {
+        //            $query->orderBy(
+        //                DB::raw('JSON_UNQUOTE(JSON_EXTRACT(template_data_json, "$.\"' . $request->input('sort_by') . '\""))'),
+        //                $request->input('sort_order', 'asc')
+        //            );
+        //        }
 
         $data = $query->paginate(100);
 
-//        dd($mainHeaderName, $subHeaderName);
+        //        dd($mainHeaderName, $subHeaderName);
         // AJAX response
         if ($request->ajax()) {
             return response()->json([
@@ -2807,7 +2873,7 @@ class ProjectController extends Controller
                 'mainHeaderId' => $mainHeaderId,
                 'subHeaderId' => $subHeaderId,
                 'values' => $values,
-                'pagination' => (string) $data->appends($request->query())->links()
+                'pagination' => (string)$data->appends($request->query())->links()
             ]);
         }
 

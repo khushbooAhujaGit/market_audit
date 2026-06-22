@@ -145,7 +145,50 @@ class GenerateReportJob implements ShouldQueue
         $activities_questions_id = [];
 //        dd($activity_questions_array);
 
+//        foreach ($activity_questions_array as $activityQuestions) {
+//            foreach ($activityQuestions as $index => $question) {
+//                if ($index == 0) {
+//                    foreach ($additionalVerifierHeaders as $additionalVerifierHeader) {
+//                        $combinedHeaders[] = $additionalVerifierHeader;
+//                    }
+//                    foreach ($additionalHeaders as $header) {
+//                        $combinedHeaders[] = $header;
+//                    }
+//                    $startingQuestionOfOtherActivity[] = $question['id'];
+//                }
+//                if ($question['question_type'] == 'Subjective') {
+//                    $combinedHeaders[] = $question['question'];
+//                    // Check if any subjective answer has a file path (contains '/')
+//                    $hasFile = DB::table('temp_user_activity_answers_data')->where('question_id', $question['id'])
+//                        ->where('activity_id', $question['activity_id'])
+//                        ->whereIn('row_id', $projectTemplateRowIds)
+//                        ->whereDate('created_at', '>=', $start_date)
+//                        ->whereDate('created_at', '<=', $end_date)
+//                        ->where(function ($query) {
+//                            $query->where('user_answer', 'like', '%/%'); // crude check for file paths
+//                        })->exists();
+//
+//                    if ($hasFile) {
+//                        $combinedHeaders[] = $question['question'] . ' - File';
+//                    }
+//                    $activities_questions_id[] = $question['id'];
+//                } else {
+//                    $combinedHeaders[] = $question['question'];
+//                    $activities_questions_id[] = $question['id'];
+//                }
+////                $combinedHeaders[] = $question['question'];
+////                $activities_questions_id[] = $question['id'];
+//            }
+//        }
+
+        // Add "Activity Instance" as the first column in the combined section
+        $combinedHeaders[] = 'Activity Instance';
+
         foreach ($activity_questions_array as $activityQuestions) {
+            // Questions with a parent_question_id are children — skip at top-level
+            $allIdsInActivity = array_column($activityQuestions, 'id');
+            $childQIds = Question::whereIn('parent_question_id', $allIdsInActivity)->pluck('id')->toArray();
+
             foreach ($activityQuestions as $index => $question) {
                 if ($index == 0) {
                     foreach ($additionalVerifierHeaders as $additionalVerifierHeader) {
@@ -156,30 +199,18 @@ class GenerateReportJob implements ShouldQueue
                     }
                     $startingQuestionOfOtherActivity[] = $question['id'];
                 }
-                if ($question['question_type'] == 'Subjective') {
-                    $combinedHeaders[] = $question['question'];
-                    // Check if any subjective answer has a file path (contains '/')
-                    $hasFile = DB::table('temp_user_activity_answers_data')->where('question_id', $question['id'])
-                        ->where('activity_id', $question['activity_id'])
-                        ->whereIn('row_id', $projectTemplateRowIds)
-                        ->whereDate('created_at', '>=', $start_date)
-                        ->whereDate('created_at', '<=', $end_date)
-                        ->where(function ($query) {
-                            $query->where('user_answer', 'like', '%/%'); // crude check for file paths
-                        })->exists();
 
-                    if ($hasFile) {
-                        $combinedHeaders[] = $question['question'] . ' - File';
-                    }
-                    $activities_questions_id[] = $question['id'];
-                } else {
-                    $combinedHeaders[] = $question['question'];
-                    $activities_questions_id[] = $question['id'];
+                if (!empty($question) && $question['is_parent'] == 1 && !in_array($question['id'], $childQIds)) {
+                    $this->buildReportHeaders(
+                        Question::find($question['id']),
+                        '',
+                        $combinedHeaders,
+                        $activities_questions_id
+                    );
                 }
-//                $combinedHeaders[] = $question['question'];
-//                $activities_questions_id[] = $question['id'];
             }
         }
+
         $projectActivitiesHeaders = array_merge($projectTemplateHeads, $combinedHeaders);
         $header_data = [$projectActivitiesHeaders];
         $fileName = $projectTemplate->getProject->project_name . $projectTemplate->getTemplate->template_name . '.xlsx';
@@ -298,74 +329,87 @@ class GenerateReportJob implements ShouldQueue
 
             //khushboo 22-05-25
 
-//            if ($counter % $templateHeadsCount === 0) {
-                $rowData = []; // Start a new row with the index
-//            }
-
-//            $rowData[] = $projectTemplate_data->value;
-            foreach ($jsondata as $key => $value) {
-                $rowData[] = $value;
+            $templateValues = [];
+            foreach ($jsondata as $value) {
+                $templateValues[] = $value;
             }
 
-//            dd($activities_questions_id);
-//            if ($counter % $templateHeadsCount === ($templateHeadsCount - 1) || $counter === ($dataCount - 1)) {
-                $combinedData[] = $rowData; // Add the completed row to the combined data array
+            $activityIds = $this->request->activity_id ?? [];
+
+            // Group by same_answer_id — each distinct value = one full submission set.
+            // First group = Original; subsequent = instances.
+            // No date filter here — same_answer_id changes on every re-submit, so the original
+            // submission's created_at may be outside the selected range even when both are valid.
+            $submissionGroupIds = TempUserActivityAnswersData::whereIn('activity_id', $activityIds)
+                ->where('row_id', $projectTemplate_data->id)
+                ->whereNotNull('same_answer_id')
+                ->distinct()
+                ->orderBy('same_answer_id')
+                ->pluck('same_answer_id')
+                ->toArray();
+
+            $repeatInstanceLabels = \App\Models\ActivityRepeatInstance::whereIn('activity_id', $activityIds)
+                ->where('row_id', $projectTemplate_data->id)
+                ->orderBy('activity_sequence')
+                ->pluck('instance_label')
+                ->toArray();
+
+            if (empty($submissionGroupIds)) {
+                $submissionGroupIds = [null];
+            }
+
+            foreach ($submissionGroupIds as $groupIndex => $groupId) {
+                $rowData = $templateValues;
+
+                // Activity Instance column
+                if ($groupIndex === 0) {
+                    $rowData[] = 'Original';
+                } else {
+                    $rowData[] = $repeatInstanceLabels[$groupIndex - 1] ?? ('Instance ' . $groupIndex);
+                }
+
                 $any_answer = 0;
                 foreach ($activities_questions_id as $questionId) {
-
                     $activityQuestionData = DB::table('questions')->find($questionId);
-                    if ($activityQuestionData->question_type == "Subjective") {
 
-                        $user_answer = TempUserActivityAnswersData::where("row_id", $projectTemplate_data->id)
-                            ->where("question_id", '=', $questionId)
-                            //->where('template_id', $questionInfo->template_id)
-                            ->whereDate('created_at', '>=', $start_date)
-                            ->whereDate('created_at', '<=', $end_date)
-                            ->with('getUser', 'getQuestionInfo')->get();
+                    if ($activityQuestionData->question_type == "Subjective") {
+                        $ansQuery = TempUserActivityAnswersData::where("row_id", $projectTemplate_data->id)
+                            ->where("question_id", $questionId);
+                        if ($groupId !== null) {
+                            $ansQuery->where('same_answer_id', $groupId);
+                        } else {
+                            $ansQuery->whereDate('created_at', '>=', $start_date)
+                                     ->whereDate('created_at', '<=', $end_date);
+                        }
+                        $user_answer = $ansQuery->with('getUser', 'getQuestionInfo')->get();
 
                         if (!empty($user_answer)) {
                             foreach ($user_answer as $userAnswer) {
-
                                 $isUrlOrPath = str_contains($userAnswer->user_answer, '/');
-
-                                if ($isUrlOrPath) {
-                                    $rowData[] = asset($userAnswer->user_answer);
-                                } else {
-                                    $rowData[] = $userAnswer->user_answer;
-                                }
+                                $rowData[] = $isUrlOrPath ? asset($userAnswer->user_answer) : $userAnswer->user_answer;
                             }
                         }
-
-                    }
-                    else {
-
-                        $user_answer = TempUserActivityAnswersData::where("row_id", $projectTemplate_data->id)
-                            ->where("question_id", '=', $questionId)
-                            ->whereDate('created_at', '>=', $start_date)
-                            ->whereDate('created_at', '<=', $end_date)
-                            ->with('getUser', 'getQuestionInfo')->first();
-
-//                        dd($user_answer, $projectTemplate_data->id, $questionId, $start_date, $end_date);
+                    } else {
+                        $ansQuery = TempUserActivityAnswersData::where("row_id", $projectTemplate_data->id)
+                            ->where("question_id", $questionId);
+                        if ($groupId !== null) {
+                            $ansQuery->where('same_answer_id', $groupId);
+                        } else {
+                            $ansQuery->whereDate('created_at', '>=', $start_date)
+                                     ->whereDate('created_at', '<=', $end_date);
+                        }
+                        $user_answer = $ansQuery->with('getUser', 'getQuestionInfo')->first();
 
                         if ($user_answer) {
-
                             $any_answer = 1;
                             if (in_array($questionId, $startingQuestionOfOtherActivity)) {
-
-                                //Auditor Name and Contact
-                                if($show_auditor == 1){
+                                if ($show_auditor == 1) {
                                     $rowData[] = $user_answer->getUser->name;
                                     $rowData[] = $user_answer->getUser->mobile;
                                 }
-
-                                //verifier details
                                 if ($user_answer->verified_by) {
                                     $verifierDetails = User::find($user_answer->verified_by);
-                                    if ($verifierDetails) {
-                                        $rowData[] = $verifierDetails->name;
-                                    } else {
-                                        $rowData[] = "User (ID: " . $user_answer->verified_by . ") has been deleted";
-                                    }
+                                    $rowData[] = $verifierDetails ? $verifierDetails->name : "User (ID: " . $user_answer->verified_by . ") has been deleted";
                                 } else {
                                     $rowData[] = '';
                                 }
@@ -376,48 +420,46 @@ class GenerateReportJob implements ShouldQueue
                                 } else {
                                     $rowData[] = '';
                                 }
-
-                                // Latitude & Longitude from answer data
+                                // Remark
+                                $get_remark = \App\Models\RemarkMaster::find($user_answer->remark);
+                                if ($get_remark) {
+                                    $rowData[] = $get_remark->remark;
+                                } else {
+                                    $rowData[] = (isset($user_answer->remark) && $user_answer->remark) ? $user_answer->remark . ' is deleted' : '';
+                                }
+                                // Verification Date & Time — only when actually verified/rejected
+                                $rowData[] = in_array($user_answer->status, [4, 5])
+                                    ? $user_answer->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i')
+                                    : '';
                                 $rowData[] = $user_answer->latitude ?? '';
                                 $rowData[] = $user_answer->longitude ?? '';
-
-                                $rowData[] = $user_answer->remark;
                                 if ($show_user) {
-                                    if ($user_answer->getUser) {
-                                        $rowData[] = $user_answer->getUser->name;
-                                    } else {
-                                        $rowData[] = "User (ID: " . $user_answer->user_id . ") has been deleted";
-                                    }
+                                    $rowData[] = $user_answer->getUser ? $user_answer->getUser->name : "User (ID: " . $user_answer->user_id . ") has been deleted";
                                 }
                                 if ($show_date) {
                                     $rowData[] = date('d-m-y', strtotime($user_answer->created_at));
-//                            $rowData[] = Carbon::parse($user_answer->created_at)->format('d-m-y');
                                 }
                                 if ($show_time) {
-//                            $rowData[] = $user_answer->created_at->format('H:i:s');
                                     $rowData[] = date('H:i:s', strtotime($user_answer->created_at));
                                 }
-                                if ($user_answer->getQuestionInfo->question_type == "Image" || $user_answer->getQuestionInfo->question_type == "File Upload" || $user_answer->getQuestionInfo->question_type == "Audio") {
-//                            $rowData[] = asset('storage/' . $user_answer->user_answer);
+                                if (in_array($user_answer->getQuestionInfo->question_type, ["Image", "File Upload", "Audio"])) {
                                     $rowData[] = asset($user_answer->user_answer);
                                 } else {
                                     $rowData[] = $user_answer->user_answer;
                                 }
                             } else {
-                                if ($user_answer->getQuestionInfo->question_type == "Image" || $user_answer->getQuestionInfo->question_type == "File Upload" || $user_answer->getQuestionInfo->question_type == "Audio") {
-//                            $rowData[] = asset('storage/' . $user_answer->user_answer);
+                                if (in_array($user_answer->getQuestionInfo->question_type, ["Image", "File Upload", "Audio"])) {
                                     $rowData[] = asset($user_answer->user_answer);
                                 } else {
                                     $rowData[] = $user_answer->user_answer;
                                 }
                             }
-
-                        }
-                        else{
+                        } else {
                             $rowData[] = '';
                         }
                     }
                 }
+
                 if ($this->request->data_get_helper == "all") {
                     $header_data[] = $rowData;
                 } elseif ($this->request->data_get_helper == "filled") {
@@ -429,10 +471,10 @@ class GenerateReportJob implements ShouldQueue
                         $header_data[] = $rowData;
                     }
                 }
-
             }
+
             $counter++;
-//        }
+        }
 //        dd($header_data);
         // After generating the report, store the file temporarily
         $fileName = 'report-' . time() . '.xlsx';
@@ -561,6 +603,24 @@ class GenerateReportJob implements ShouldQueue
 
         //khushboo 22-05-25
 
+    }
+
+    private function buildReportHeaders(
+        ?\App\Models\Question $question,
+        string $prefix,
+        array &$combinedHeaders,
+        array &$activities_questions_id
+    ): void {
+        if (!$question) return;
+        $displayName = $prefix ? $prefix . ' → ' . $question->question : $question->question;
+        if ($question->question_type !== 'Multi Response') {
+            $combinedHeaders[]        = $displayName;
+            $activities_questions_id[] = $question->id;
+        }
+        $children = Question::where('parent_question_id', $question->id)->orderBy('question_sequence')->get();
+        foreach ($children as $child) {
+            $this->buildReportHeaders($child, $displayName, $combinedHeaders, $activities_questions_id);
+        }
     }
 
 //    khushboo 22-05-25

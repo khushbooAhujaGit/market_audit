@@ -5,8 +5,6 @@
     <meta charset="UTF-8">
     <title>Audit PDF</title>
     <style>
-
-
         body {
             font-family: Arial, sans-serif;
             font-size: 12px;
@@ -14,11 +12,6 @@
             margin: 0;
             background-color: #fff;
             color: #000;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
         }
 
         .header {
@@ -27,7 +20,6 @@
             font-size: 20px;
             color: #333;
             margin: 10px 0 5px 0;
-            flex-shrink: 0;
         }
 
         .section-title {
@@ -38,35 +30,13 @@
             border: 1px solid #ccc;
             margin-top: 20px;
             margin-bottom: 10px;
-            flex-shrink: 0;
             color: floralwhite;
         }
 
-        /* Table that takes the full available height */
         .info-table-new {
             width: 100%;
             border-collapse: collapse;
-            table-layout: fixed;
-            flex-grow: 1;
-            /* Take remaining space */
-            margin-bottom: 0;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .info-table-new tbody {
-            display: flex;
-            flex-direction: column;
-            flex-grow: 1;
-            justify-content: space-between;
-            /* Spread rows to fill vertical space */
-        }
-
-        .info-table-new tr {
-            display: table;
-            width: 100%;
-            table-layout: fixed;
-            border-collapse: collapse;
+            margin-bottom: 20px;
         }
 
         .info-table-new th,
@@ -81,7 +51,6 @@
             background-color: #374462;
             text-align: left;
             color: floralwhite;
-            white-space: nowrap;
         }
 
         .info-table-new td {
@@ -90,53 +59,202 @@
             word-wrap: break-word;
         }
 
-        .image-section {
-            margin-top: 20px;
+        .checklist-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
         }
 
-        .full-page-image {
-            page-break-inside: avoid;
-            break-inside: avoid;
-            margin-bottom: 30px;
-            text-align: center;
+        .checklist-table th,
+        .checklist-table td {
+            border: 1px solid #999;
+            padding: 8px;
+            vertical-align: top;
         }
 
-        .image-block {
-            display: inline-block;
-            page-break-inside: avoid;
-            break-inside: avoid;
+        .checklist-table th {
+            background-color: #374462;
+            color: floralwhite;
+            text-align: left;
+        }
+
+        .parent-question-row {
+            background-color: #ffffff;
+        }
+
+        .child-question-row {
+            background-color: #f9f9f9;
+        }
+
+        /* Image page styles - fixed to avoid blank pages */
+        .image-page {
+            page-break-before: always;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        /* First image should not have page break before if it's the first element after checklist */
+        .image-page:first-of-type {
+            page-break-before: avoid;
+        }
+
+        .image-page-header {
             text-align: center;
             margin-bottom: 30px;
+            padding: 20px;
+            background-color: #f5f5f5;
+            border-bottom: 2px solid #374462;
             width: 100%;
         }
 
-        .image-caption {
+        .image-question-text {
+            font-size: 18px;
             font-weight: bold;
-            font-size: 14px;
-            margin-bottom: 5px;
-            text-align: center;
-            color: #333;
-            page-break-inside: avoid;
-            break-inside: avoid;
+            color: #374462;
+            margin-bottom: 10px;
         }
 
-        .image-block img {
-            max-width: 100%;
+        .image-question-type {
+            font-size: 14px;
+            color: #666;
+            font-style: italic;
+        }
+
+        .image-container {
+            text-align: center;
+            padding: 20px;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex: 1;
+        }
+
+        .image-container img {
+            max-width: 90%;
+            max-height: 80vh;
+            width: auto;
             height: auto;
             object-fit: contain;
-            border: 1px solid #ccc;
             display: block;
             margin: 0 auto;
-            page-break-inside: avoid;
+            border: 1px solid #ccc;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
         }
 
+        .file-link {
+            display: inline-block;
+            padding: 5px 10px;
+            background-color: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+
+        .audio-link {
+            display: inline-flex;
+            align-items: center;
+            padding: 5px 10px;
+            background-color: #dc3545;
+            color: white;
+            text-decoration: none;
+            border-radius: 3px;
+            font-size: 12px;
+            gap: 5px;
+        }
+
+        .audio-link:before {
+            content: "🔊";
+            font-size: 12px;
+        }
+
+        .video-link {
+            display: inline-flex;
+            align-items: center;
+            padding: 5px 10px;
+            background-color: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 3px;
+            font-size: 12px;
+            gap: 5px;
+        }
+
+        .video-link:before {
+            content: "▶";
+            font-size: 12px;
+        }
+
+        .download-link {
+            display: inline-flex;
+            align-items: center;
+            padding: 5px 10px;
+            background-color: #28a745;
+            color: white;
+            text-decoration: none;
+            border-radius: 3px;
+            font-size: 12px;
+            gap: 5px;
+        }
+
+        .download-link:before {
+            content: "⬇";
+            font-size: 12px;
+        }
+
+        .location-link {
+            display: inline-flex;
+            align-items: center;
+            padding: 5px 10px;
+            background-color: #17a2b8;
+            color: white;
+            text-decoration: none;
+            border-radius: 3px;
+            font-size: 12px;
+            gap: 5px;
+        }
+
+        .location-link:before {
+            content: "📍";
+            font-size: 12px;
+        }
+
+        .answer-text {
+            line-height: 1.5;
+        }
+
+        .inline-media {
+            display: inline-block;
+            margin: 2px;
+        }
+
+        .image-placeholder {
+            color: #0066cc;
+            font-style: italic;
+        }
+
+        /* Ensure no extra blank pages */
+        .checklist-table {
+            page-break-after: avoid;
+        }
+
+        .section-title:last-of-type {
+            page-break-after: avoid;
+        }
     </style>
 </head>
 
 <body>
 
 <div class="header">
-    @if(isset($main_header) && !empty($main_header) && isset($sub_header) && !empty($sub_header))
+    @if(isset($main_header) && isset($sub_header) && !empty($main_header) && !empty($sub_header))
         {{ $main_header . ' - ' . $sub_header }}
     @else
         {{ $value }}
@@ -162,199 +280,308 @@
 </table>
 
 <div class="section-title">Checklist</div>
-<table class="info-table-new" style="margin-top: 0; flex-grow: 3;">
-    <tbody>
+<table class="checklist-table">
+    <thead>
     <tr>
-        <th style="width: 10%;">Sr. No</th>
-        <th style="width: 40%;">Checklist Point</th>
-        <th style="width: 30%;">Response</th>
+        <th style="width: 8%;">Sr. No</th>
+        <th style="width: 52%;">Checklist Point</th>
+        <th style="width: 40%;">Response / Remarks</th>
     </tr>
+    </thead>
+    <tbody>
     @php
-        $ImageArray = [];
-        $count = 0;
         $index = 1;
-    @endphp
-    @foreach ($related_questions as $key => $related_question)
-        @php
+        $imagePages = []; // Store images to display on separate pages
 
-            if ($related_question->question_type == 'Subjective') {
-                $d_value = [];
-            }else{
-                $d_value = '';
+        // Helper function to check if answer is not empty
+        function isAnswerNotEmpty($answer) {
+            if (!$answer) {
+                return false;
             }
-//            dd($user_responses);
-            foreach ($user_responses as $user_response) {
-                if ($user_response->question_id == $related_question->id) {
 
-                    if ($related_question->question_type == 'Subjective') {
-                        $d_value[] = $user_response->user_answer;
+            $answerValue = $answer->user_answer;
 
-                        $d_answer = $user_response->user_answer;
+            // Check if answer is empty or null
+            if (empty($answerValue)) {
+                return false;
+            }
 
-                        $extension = strtolower(pathinfo($d_answer, PATHINFO_EXTENSION));
+            // For subjective or multi-select, check if array is empty
+            if (is_array($answerValue)) {
+                return !empty(array_filter($answerValue));
+            }
 
-                        if (in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp'])){
-                            $question = $related_question->question;
-                            $ImageArray[$question] = $d_answer;
+            // For other types, check if string is not empty
+            return trim($answerValue) !== '';
+        }
+
+        // Helper function to get answer for a question
+        function getAnswerForQuestion($questionId, $userResponses) {
+            foreach ($userResponses as $userResponse) {
+                if ($userResponse->question_id == $questionId) {
+                    return $userResponse;
+                }
+            }
+            return null;
+        }
+
+        // Helper function to check if value is an image
+        function isImageFile($path) {
+            $extensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'];
+            $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+            return in_array($extension, $extensions);
+        }
+
+        // Helper function to collect images for separate pages
+        function collectImage($value, $questionText, $parentQuestionText = null, &$imagePages) {
+            $displayText = $questionText;
+            if ($parentQuestionText) {
+                $displayText = $parentQuestionText . ' - ' . $questionText;
+            }
+
+            $fullPath = asset($value);
+            $imagePages[] = [
+                'title' => $displayText,
+                'path' => $fullPath,
+                'file_path' => $value
+            ];
+            return '<span class="image-placeholder">📷 See image on next page: ' . e($displayText) . '</span>';
+        }
+
+        // Helper function to format answer
+        function formatAnswer($answer, $questionObj, $questionText, &$imagePages, $parentQuestionText = null) {
+            if (!$answer) {
+                return null;
+            }
+
+            $questionType = $questionObj->question_type ?? 'Free Text';
+            $d_value = $answer->user_answer;
+
+            // Check if answer is empty
+            if (empty($d_value) || (is_array($d_value) && empty(array_filter($d_value)))) {
+                return null;
+            }
+
+            $displayText = $questionText;
+            if ($parentQuestionText) {
+                $displayText = $parentQuestionText . ' - ' . $questionText;
+            }
+
+            switch($questionType) {
+                case 'Location':
+                    if ($d_value) {
+                        return '<a href="https://www.google.com/maps?q=' . urlencode($d_value) . '" target="_blank" class="location-link">View Location</a>';
+                    }
+                    return null;
+
+                case 'Video':
+                    if ($d_value) {
+                        $fullUrl = asset($d_value);
+                        return '<a href="' . $fullUrl . '" target="_blank" class="video-link">View Video</a>';
+                    }
+                    return null;
+
+                case 'Audio':
+                    if ($d_value) {
+                        $fullUrl = asset($d_value);
+                        return '<a href="' . $fullUrl . '" target="_blank" class="audio-link">Play Audio</a>';
+                    }
+                    return null;
+
+                case 'Free Text':
+                case 'Dropdown':
+                case 'Yes / No':
+                    $textValue = trim($d_value);
+                    return !empty($textValue) ? '<div class="answer-text">' . nl2br(e($textValue)) . '</div>' : null;
+
+                case 'Subjective':
+                    $output = '';
+                    $values = is_array($d_value) ? $d_value : [$d_value];
+                    $hasContent = false;
+
+                    foreach ($values as $d_val) {
+                        if (empty($d_val)) continue;
+
+                        $extension = strtolower(pathinfo($d_val, PATHINFO_EXTENSION));
+                        $isUrlOrPath = str_contains($d_val, '/');
+
+                        if (!$isUrlOrPath) {
+                            $output .= '<div class="answer-text">' . nl2br(e($d_val)) . '</div>';
+                            $hasContent = true;
+                        } elseif (isImageFile($d_val)) {
+                            // Collect image for separate page
+                            $output .= collectImage($d_val, $questionText, $parentQuestionText, $imagePages);
+                            $hasContent = true;
+                        } elseif (in_array($extension, ['mp4', 'webm', 'ogg'])) {
+                            $fullUrl = asset($d_val);
+                            $output .= '<div class="inline-media"><a href="' . $fullUrl . '" target="_blank" class="video-link">View Video</a></div>';
+                            $hasContent = true;
+                        } elseif (in_array($extension, ['mp3', 'wav', 'webm', 'ogg'])) {
+                            $fullUrl = asset($d_val);
+                            $output .= '<div class="inline-media"><a href="' . $fullUrl . '" target="_blank" class="audio-link">Play Audio</a></div>';
+                            $hasContent = true;
+                        } else {
+                            $fullUrl = asset($d_val);
+                            $output .= '<div class="inline-media"><a href="' . $fullUrl . '" target="_blank" class="download-link">Download File</a></div>';
+                            $hasContent = true;
                         }
+                    }
+                    return $hasContent ? $output : null;
 
-                    } else {
-                        $d_value = $user_response->user_answer;
+                case 'Multi select':
+                    $values = is_array($d_value) ? implode(', ', $d_value) : $d_value;
+                    return !empty($values) ? '<div class="answer-text">' . e($values) . '</div>' : null;
+
+                case 'Date & Time':
+                    try {
+                        if (empty($d_value)) return null;
+                        $date = \Carbon\Carbon::parse($d_value);
+                        return '<div class="answer-text">' . $date->format('d-m-Y H:i') . '</div>';
+                    } catch (\Exception $e) {
+                        return !empty($d_value) ? '<div class="answer-text">' . e($d_value) . '</div>' : null;
                     }
 
-                }
+                case 'Date':
+                    try {
+                        if (empty($d_value)) return null;
+                        // Handle different date formats
+                        if (strpos($d_value, '/') !== false) {
+                            $date = \Carbon\Carbon::createFromFormat('d/m/Y', $d_value);
+                            return '<div class="answer-text">' . $date->format('d-m-Y') . '</div>';
+                        } elseif (strpos($d_value, '-') !== false) {
+                            $date = \Carbon\Carbon::parse($d_value);
+                            return '<div class="answer-text">' . $date->format('d-m-Y') . '</div>';
+                        }
+                        return '<div class="answer-text">' . e($d_value) . '</div>';
+                    } catch (\Exception $e) {
+                        return !empty($d_value) ? '<div class="answer-text">' . e($d_value) . '</div>' : null;
+                    }
 
+                case 'File Upload':
+                    if ($d_value) {
+                        $fullUrl = asset($d_value);
+                        if (isImageFile($d_value)) {
+                            // Collect image for separate page
+                            return collectImage($d_value, $questionText, $parentQuestionText, $imagePages);
+                        }
+                        return '<a href="' . $fullUrl . '" target="_blank" class="download-link">Download File</a>';
+                    }
+                    return null;
+
+                case 'Image':
+                    if ($d_value) {
+                        // Collect image for separate page
+                        return collectImage($d_value, $questionText, $parentQuestionText, $imagePages);
+                    }
+                    return null;
+
+                default:
+                    $textValue = trim($d_value);
+                    return !empty($textValue) ? '<div class="answer-text">' . nl2br(e($textValue)) . '</div>' : null;
+            }
+        }
+    @endphp
+
+    @foreach ($related_questions as $key => $related_question)
+        @php
+            // Get the answer for the current question
+            $answer = getAnswerForQuestion($related_question->id, $user_responses);
+
+            // Check if parent question has an answer
+            $hasParentAnswer = isAnswerNotEmpty($answer);
+
+            // Only process if parent has answer
+            if (!$hasParentAnswer) {
+                continue;
+            }
+
+            // Check if this question has child questions
+            $hasChildren = isset($related_question->children) && count($related_question->children) > 0;
+
+            // Format parent answer
+            $formattedAnswer = formatAnswer($answer, $related_question, $related_question->question, $imagePages);
+
+            // Only show parent if formatted answer is not null
+            if ($formattedAnswer === null) {
+                continue;
             }
         @endphp
 
-        @if ($related_question->question_type == 'Image')
-            @php
-                $question = $related_question->question;
-                $ImageArray[$question] = $d_value;
-            @endphp
-            @continue
-        @endif
-
-        <tr>
-            <td style="width: 10%;">{{ $index++ }}</td>
-            <td style="width: 40%;">{{ $related_question->question }}</td>
-            <td style="width: 30%;">
-                @switch($related_question->question_type)
-                    @case('Location')
-                        @if ($d_value)
-                            <a href="https://www.google.com/maps?q={{ $d_value }}" target="_blank"
-                               class="text-underline text-dark">
-                                Location
-                            </a>
-                        @endif
-                        @break
-                    @case('Video')
-                        @if ($d_value)
-                            <a class="badge badge-primary mt-2" href="{{ asset($d_value) }}">Click Here</a>
-                        @endif
-                        @break
-                    @case('Free Text')
-                    @case('Dropdown')
-                    @case('Yes / No')
-                        {{ $d_value }}
-                        @break
-                    @case('Subjective')
-
-                        @foreach ($d_value as $d_val)
-                            @php
-
-                                $extension = strtolower(pathinfo($d_val, PATHINFO_EXTENSION));
-                                $isUrlOrPath = str_contains($d_val, '/'); // crude check for file path
-
-                                $isDate = false;
-                                $isDateTime = false;
-                                $parsedDate = null;
-
-                                // Detect Date or DateTime format using Carbon
-                                try {
-                                    $parsedDate = \Carbon\Carbon::parse($d_val);
-                                    $isDate = $parsedDate && $parsedDate->format('Y-m-d') === $d_val;
-                                    $isDateTime = $parsedDate && !$isDate;
-                                } catch (\Exception $e) {
-                                    // Not a valid date/datetime, fallback
-                                }
-
-                            @endphp
-
-                            @if (!$isUrlOrPath)
-                                {{ $d_val }}
-                            @elseif (in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp']))
-                                {{-- Image --}}
-                                @php
-                                    $question = $related_question->question;
-                                    $ImageArray[$question] = $d_val;
-                                @endphp
-                            @elseif (in_array($extension, ['mp4', 'webm', 'ogg', 'temp']))
-                                {{-- Video --}}
-                                <a class="badge badge-primary mt-2" href="{{ asset($d_val) }}">Click Here</a>
-
-                            @elseif (in_array($extension, ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt']))
-                                {{-- File --}}
-                                <a class="badge badge-primary mt-2" href="{{ asset($d_val) }}">Click Here</a>
-
-                            @elseif ($isDate)
-                                {{ $d_value ? \Carbon\Carbon::createFromFormat('d/m/Y', $d_val)->format('Y-m-d') : '' }}
-
-                            @elseif ($isDateTime)
-                                @php
-
-                                    $formattedDateTime = \Carbon\Carbon::parse(
-                                        $d_val,
-                                    )->format('Y-m-d\TH:i');
-                                @endphp
-                                {{ $formattedDateTime }}
-                            @endif
-                        @endforeach
-
-                        @break
-                    @case('Multi select')
-                        @php
-                            $selectedValues = explode(',', $d_value ?? '');
-                        @endphp
-                        {{ $d_value }}
-                        @break
-                    @case('Date & Time')
-                        @php
-                            $formattedDateTime = \Carbon\Carbon::parse($d_value)->format('Y-m-d\TH:i');
-                        @endphp
-                        {{ $formattedDateTime }}
-                        @break
-                    @case('Date')
-                        {{ $d_value ? \Carbon\Carbon::createFromFormat('d/m/Y', $d_value)->format('Y-m-d') : '' }}
-                        @break
-                    @case('File Upload')
-                        @if ($d_value)
-                            <a class="badge badge-primary mt-2" href="{{ asset($d_value) }}">Click Here</a>
-                        @endif
-                        @break
-                    @case('Audio')
-                        <div class="audio-recorder">
-                            <audio id="audio-player-{{ $related_question->id }}" controls></audio>
-                        </div>
-                        @break
-                    @default
-                @endswitch
+            <!-- Parent Question Row -->
+        <tr class="parent-question-row">
+            <td style="width: 8%; vertical-align: top;">{{ $index++ }}</td>
+            <td style="width: 52%; font-weight: bold; vertical-align: top;">
+                {{ $related_question->question }}
+            </td>
+            <td style="width: 40%; vertical-align: top;">
+                {!! $formattedAnswer !!}
             </td>
         </tr>
-    @endforeach
 
+        <!-- Child Questions - Only show if they have answers -->
+        @if($hasChildren)
+            @foreach($related_question->children as $childQuestion)
+                @php
+                    $childAnswer = getAnswerForQuestion($childQuestion->id, $user_responses);
+                    $hasChildAnswer = isAnswerNotEmpty($childAnswer);
+
+                    // Skip child if no answer
+                    if (!$hasChildAnswer) {
+                        continue;
+                    }
+
+                    $childFormattedAnswer = formatAnswer($childAnswer, $childQuestion, $childQuestion->question, $imagePages, $related_question->question);
+
+                    // Skip if formatted answer is null
+                    if ($childFormattedAnswer === null) {
+                        continue;
+                    }
+                @endphp
+                <tr class="child-question-row">
+                    <td style="width: 8%; vertical-align: top;"></td>
+                    <td style="width: 52%; vertical-align: top; padding-left: 25px !important;">
+                        <span style="font-style: italic; color: #666;">↳ {{ $childQuestion->question }}</span>
+                    </td>
+                    <td style="width: 40%; vertical-align: top; background-color: #fefefe;">
+                        {!! $childFormattedAnswer !!}
+                    </td>
+                </tr>
+            @endforeach
+        @endif
+    @endforeach
     </tbody>
 </table>
 
-@if (count($ImageArray) > 0)
-    @php
-        $ImageArray = array_filter($ImageArray, function ($path) {
-            return file_exists(public_path($path));
-        });
-    @endphp
-
-    <div class="image-section">
-
-        @foreach ($ImageArray as $key => $value)
-            <div style="page-break-before: always;">
-                <table style="width:100%; margin-bottom: 20px;">
-                    <tr style="page-break-inside: avoid; break-inside: avoid;">
-                        <td style="text-align:center; font-weight: bold; font-size: 18px; color: #374462; padding: 10px 0; background-color: #f0f0f0; border: 1px solid #ccc;">
-                            {{ $key }}
-                        </td>
-                    </tr>
-                    <tr style="page-break-inside: avoid; break-inside: avoid;">
-                        <td style="text-align:center;">
-                            <img src="{{ $value }}"
-                                 style="max-width: 100%; max-height: 90%; display: block; margin: auto;">
-                        </td>
-                    </tr>
-                </table>
+<!-- Display all images on separate pages with their questions -->
+@if (isset($imagePages) && count($imagePages) > 0)
+    @foreach ($imagePages as $index => $image)
+        <div class="image-page">
+            <div class="image-page-header">
+                <div class="image-question-text">{{ $image['title'] }}</div>
+                <div class="image-question-type">Image Attachment</div>
             </div>
-        @endforeach
-    </div>
-@endif
+            <div class="image-container">
+                @php
+                    // Try to get the absolute path for the image
+                    $imagePath = $image['path'];
+                    $publicPath = public_path(str_replace(url('/'), '', $imagePath));
 
+                    // Check if file exists
+                    $fileExists = file_exists($publicPath);
+                @endphp
+
+                @if($fileExists)
+                    <img src="{{ $publicPath }}" style="max-width: 90%; max-height: 80vh; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto;" />
+                @else
+                    <div style="color: red; text-align: center; padding: 50px;">
+                        <p>Image not found: {{ $image['title'] }}</p>
+                        <p>Path: {{ $imagePath }}</p>
+                    </div>
+                @endif
+            </div>
+        </div>
+    @endforeach
+@endif
 
 </body>
 

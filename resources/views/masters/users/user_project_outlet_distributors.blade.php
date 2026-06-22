@@ -6,13 +6,14 @@
             <div class="col-sm-12">
                 <div class="card">
                     <div class="card-header">
+                        <a href="javascript:history.back()" class="mobile-back-btn d-md-none">
+                            <i class="icon-arrow-left"></i> Back
+                        </a>
                         <h4>Distributors
                             @if ($isAuditClosed)
                                 <span class="badge badge-danger ">Audit Closed</span>
                             @endif
-
                         </h4>
-
                         <h3>Activity : {{ $activity->activity_name }}</h3>
 
                         @if ($showCloseAuditButton)
@@ -51,10 +52,10 @@
                                         }
                                     @endphp
 
-                                    <div
-                                        class="prooduct-details-box row_data_con @if ($completed) disabled @endif">
+                                    <div class="prooduct-details-box row_data_con @if ($completed) disabled @endif">
                                         <div class="d-flex">
-                                            {{--                                    <img class="align-self-center img-fluid img-60" src="../assets/images/ecommerce/product-table-6.png" alt="#"> --}}
+                                            {{-- <img class="align-self-center img-fluid img-60"
+                                                src="../assets/images/ecommerce/product-table-6.png" alt="#"> --}}
                                             <div class="flex-grow-1 ms-3">
                                                 <div class="product-name">
                                                     <h6>
@@ -81,11 +82,11 @@
                                                     </div>
                                                     <div class="text-muted" style="margin-top: 10%;">
                                                         @php
-                                                        $type = ($currentUserROle == 'Company User') ? 1 : 0;
+                                                            $type = ($currentUserROle == 'Company User') ? 1 : 0;
                                                         @endphp
                                                         @if (!$completed)
                                                             <a class="btn btn-primary btn-xs"
-                                                                href="{{ route('user.project.distributor.outlets', ['projectTemplate' => $distributor_data['project_template_id'], 'activity' => $distributor_data['activity_id'], 'distributor_value' => $distributor_data['value'],'type'=>$type, 'group_info' => $group_session_id ? $group_session_id : null]) }}">
+                                                                href="{{ route('user.project.distributor.outlets', ['projectTemplate' => $distributor_data['project_template_id'], 'activity' => $distributor_data['activity_id'], 'distributor_value' => $distributor_data['value'], 'type' => $type, 'group_info' => $group_session_id ? $group_session_id : null]) }}">
                                                                 View Outlets
                                                             </a>
                                                         @endif
@@ -96,10 +97,10 @@
                                                 <div class="border">
                                                     <div class="show-con d-none">
                                                         <span>
-                                                            {{ $distributor_data['getDataOfRows']->template_head_name??'' }}
-                                                            {{ $distributor_data['getDataOfRows']->value??'' }}
+                                                            {{ $distributor_data['getDataOfRows']->template_head_name ?? '' }}
+                                                            {{ $distributor_data['getDataOfRows']->value ?? '' }}
                                                         </span>
-                                                         <br>
+                                                        <br>
                                                     </div>
                                                 </div>
                                             </div>
@@ -144,6 +145,57 @@
 @endsection
 @section('scripts')
     <script>
+    
+    // ── Universal mobile keyboard suppression ──
+// Runs on every page, only on mobile browsers
+if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
+    
+    // 1. Intercept DataTables BEFORE it focuses anything
+    if (typeof $.fn.DataTable !== 'undefined') {
+        var _originalDataTable = $.fn.DataTable;
+        $.fn.DataTable = function(options) {
+            var result = _originalDataTable.apply(this, arguments);
+            // After DT init, immediately kill focus on search
+            var container = this.closest('.dataTables_wrapper') || 
+                            $('#' + this.attr('id') + '_wrapper');
+            setTimeout(function() {
+                $(container).find('input[type="search"]')
+                    .attr('inputmode', 'none')
+                    .attr('readonly', 'readonly')
+                    .css('font-size', '16px')
+                    .off('focus.dtmobile')
+                    .on('focus.dtmobile touchstart.dtmobile click.dtmobile', function() {
+                        $(this)
+                            .attr('inputmode', 'text')
+                            .removeAttr('readonly');
+                        $(this).off('focus.dtmobile touchstart.dtmobile click.dtmobile');
+                    });
+                // Kill any active focus
+                if (document.activeElement && 
+                    document.activeElement.tagName !== 'BODY') {
+                    document.activeElement.blur();
+                }
+            }, 0);
+            return result;
+        };
+        // Copy all DataTable properties over
+        $.extend($.fn.DataTable, _originalDataTable);
+    }
+
+    // 2. Catch any input that gets focused on page load
+    var blurCount = 0;
+    var blurInterval = setInterval(function() {
+        if (document.activeElement && 
+            document.activeElement !== document.body &&
+            document.activeElement.tagName !== 'BUTTON' &&
+            document.activeElement.tagName !== 'A') {
+            document.activeElement.blur();
+        }
+        blurCount++;
+        if (blurCount >= 10) clearInterval(blurInterval); // Stop after 1 second
+    }, 100);
+}
+
         function closeAudit(activityId, projectId, templateId, distributorData, group_session_id) {
             // console.log(distributorData);
             $.ajax({
@@ -157,7 +209,7 @@
                     'distributorData': distributorData,
                     'group_session_id': group_session_id,
                 },
-                success: function(response) {
+                success: function (response) {
                     console.log(response);
                     if (response.status) {
                         Swal.fire({
@@ -186,7 +238,7 @@
             });
         }
 
-        $(document).ready(function() {
+        $(document).ready(function () {
             @if (session()->has('message'))
                 Swal.fire({
                     position: "top-center",
@@ -197,7 +249,7 @@
                 });
             @endif
 
-            $(".show-details").click(function(event) {
+            $(".show-details").click(function (event) {
                 const data_val = $(this).data('val');
                 const row_con = $(this).closest('.row_data_con');
                 const row_data = row_con.find('.show-con').html();

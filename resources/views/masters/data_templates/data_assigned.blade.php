@@ -30,6 +30,7 @@
                                                             <th>Sn</th>
                                                             <th id="user_type"></th>
                                                             <th>Assigned Value</th>
+                                                            <th>Action</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody></tbody>
@@ -37,6 +38,35 @@
                                             </div>
                                         </div>
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal fade" id="delete_audit_modal" tabindex="-1">
+                            <div class="modal-dialog">
+                                <div class="modal-content">
+
+                                    <div class="modal-header">
+                                        <h5>Select Audits to Delete</h5>
+                                    </div>
+
+                                    <div class="modal-body">
+
+                                        <input type="hidden" id="delete_user_name">
+                                        <input type="hidden" id="delete_user_id">
+
+                                        <label>Select Assigned Values</label>
+                                        <select id="delete_audit_select" class="form-control select2" multiple>
+
+                                        </select>
+
+                                    </div>
+
+                                    <div class="modal-footer">
+                                        <button class="btn btn-danger" id="confirm_delete_audits">
+                                            Delete Selected
+                                        </button>
+                                    </div>
+
                                 </div>
                             </div>
                         </div>
@@ -78,16 +108,16 @@
                                                 <td>{{ isset($data_assigned_value->TemplateHeadName) ? $data_assigned_value->TemplateHeadName->template_head_name : '' }}
                                                 </td>
                                                 <td class="view_auditors text-decoration-underline"
-                                                    data-id="{{ $data_assigned_value->id }}">
+                                                    data-id="{{ $data_assigned_value->id }}" style="cursor:pointer;">
                                                     {{ $data_assigned_value->getAutiors() }}
                                                 </td>
                                                 <td></td>
                                                 <td>
                                                     <ul class="action">
-{{--                                                        <li class="edit"><a--}}
-{{--                                                                href="{{ route('data_assign.edit', $data_assigned_value->id) }}"><i--}}
-{{--                                                                    class="icon-pencil-alt"></i></a>--}}
-{{--                                                        </li>--}}
+                                                        {{--                                                        <li class="edit"><a --}}
+                                                        {{--                                                                href="{{ route('data_assign.edit', $data_assigned_value->id) }}"><i --}}
+                                                        {{--                                                                    class="icon-pencil-alt"></i></a> --}}
+                                                        {{--                                                        </li> --}}
                                                         <li class="delete" data-id="{{ $data_assigned_value->id }}"><i
                                                                 class="icon-trash"></i></li>
                                                     </ul>
@@ -117,74 +147,123 @@
                 paging: false
             });
 
-            // function render_assigned_user(users) {
-            //     $("#model_title").html(`<strong class="txt-danger"></strong>Auditors List`)
-            //     $("#user_type").html("Auditor Name");
-            //     var user_table = $("#user_render_table").DataTable(); // Get reference to the DataTable instance
-            //     user_table.clear(); // Clear the existing data
-            //     $.each(users, function(index, user) {
-            //         let new_tr = $("<tr>");
-            //         let sn = $("<td>").text(index + 1);
-            //         let user_td = $("<td>").text(user.get_user_info.name);
-            //         let assigned_value_td = $("<td>").text(user.template_name_head_value);
-            //         new_tr.append(sn, user_td, assigned_value_td);
-            //         // Append the new row to the DataTable
-            //         user_table.row.add(new_tr);
-            //     });
-            //     // Redraw the DataTable to reflect the changes
-            //     user_table.draw();
-            //
-            // }
+            $('#delete_audit_select').select2({
+                dropdownParent: $('#delete_audit_modal'),
+                width: '100%'
+            });
 
-            function render_assigned_user_old(users, assignedValues) {
-                // 1. Static labels
-                $("#model_title").html(`<strong class="txt-danger"></strong>Auditors List`);
-                $("#user_type").text("Auditor Name");
+            $(document).on("click", ".delete-assigned-user", function() {
 
-                // 2. Grab the existing DataTable instance, then clear old rows
-                const dt = $("#user_render_table").DataTable();
-                dt.clear();
+                const userName = $(this).data("user");
+                const row = $(this).closest("tr");
 
-                // 3. Convert assignedValues → single comma‑separated string
-                const combinedHeadValues = assignedValues
-                    .map(v => v.head_value)
-                    .join(", ");   // e.g. "Test1, Test2, Test3"
+                Swal.fire({
+                    title: 'Delete this assignment?',
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: 'Yes Delete'
+                }).then((result) => {
 
-                // 4. Add one row per user (same head‑value string for each)
-                $.each(users, function (index, user) {
-                    dt.row.add([
-                        index + 1,                       // “#”
-                        user.get_user_info.name,         // “User Name”
-                        combinedHeadValues               // “Head Value”
-                    ]);
+                    if (result.isConfirmed) {
+
+                        $.ajax({
+                            url: "{{ route('assigned_auditor.delete') }}",
+                            type: "POST",
+                            data: {
+                                _token: "{{ csrf_token() }}",
+                                user_name: userName
+                            },
+                            success: function(response) {
+
+                                if (response.status === "success") {
+
+                                    $("#user_render_table").DataTable()
+                                        .row(row)
+                                        .remove()
+                                        .draw();
+
+                                    Swal.fire("Deleted!", "", "success");
+                                }
+                            }
+                        });
+
+                    }
+
                 });
 
-                // 5. Draw the table
-                dt.draw();
-            }
-            
-             function render_assigned_user(users, assignedValues = []) {
+            });
+
+
+            //  function render_assigned_user(users, assignedValues = []) {
+            //     // 1. Static labels
+            //     $("#model_title").html(`<strong class="txt-danger"></strong>Auditors List`);
+            //     $("#user_type").text("Auditor Name");
+
+            //     // 2. Grab the existing DataTable instance, then clear old rows
+            //     const dt = $("#user_render_table").DataTable();
+            //     dt.clear();
+
+            //     // 3. Convert assignedValues → single comma-separated string
+            //     const combinedHeadValues = (assignedValues || [])
+            //         .map(v => v.head_value?.trim())   // trim first
+            //         .filter(v => v) // keep only non-empty strings
+            //         .join(', ');
+
+            //     // 4. Add one row per user (same head-value string for each)
+            //     $.each(users || [], function (index, user) {
+            //         dt.row.add([
+            //             index + 1,                       // “#”
+            //             user.get_user_info?.name || '',  // “User Name”
+            //             combinedHeadValues               // “Head Value”
+            //         ]);
+            //     });
+
+            //     // 5. Draw the table
+            //     dt.draw();
+
+            //     $("#user_assigned_model").modal('show')
+            // }
+
+            function render_assigned_user_old(userassignedvalues) {
                 // 1. Static labels
+                // console.log(userassignedvalues);
+                // ⭐ store data globally so delete modal can access it
+                window.auditData = userassignedvalues;
+
                 $("#model_title").html(`<strong class="txt-danger"></strong>Auditors List`);
                 $("#user_type").text("Auditor Name");
 
-                // 2. Grab the existing DataTable instance, then clear old rows
+                // // 2. Grab the existing DataTable instance, then clear old rows
                 const dt = $("#user_render_table").DataTable();
                 dt.clear();
 
-                // 3. Convert assignedValues → single comma-separated string
-                const combinedHeadValues = (assignedValues || [])
-                    .map(v => v.head_value?.trim())   // trim first
-                    .filter(v => v) // keep only non-empty strings
-                    .join(', ');
+                // // 3. Convert assignedValues → single comma-separated string
+                // const combinedHeadValues = (assignedValues || [])
+                //     .map(v => v.head_value?.trim())   // trim first
+                //     .filter(v => v) // keep only non-empty strings
+                //     .join(', ');
 
                 // 4. Add one row per user (same head-value string for each)
-                $.each(users || [], function (index, user) {
+                let index = 1;
+                $.each(userassignedvalues || [], function(name, user) {
+                    console.log(user);
+                    const combinedHeadValues = (user || [])
+                        .map(v => v.head_value?.trim()) // trim first
+                        .filter(v => v) // keep only non-empty strings
+                        .join(', ');
+
+                    const deleteBtn = `
+                        <a class="text-danger  open-delete-modal" data-user="${name}">
+                            <i class="icon-trash"></i>
+                        </a>`;
+
                     dt.row.add([
-                        index + 1,                       // “#”
-                        user.get_user_info?.name || '',  // “User Name”
-                        combinedHeadValues               // “Head Value”
+                        index++, // “#”
+                        name || '', // “User Name”
+                        combinedHeadValues, // “Head Value”
+                        deleteBtn
                     ]);
+
                 });
 
                 // 5. Draw the table
@@ -192,6 +271,120 @@
 
                 $("#user_assigned_model").modal('show')
             }
+
+            function render_assigned_user(userassignedvalues) {
+
+                window.auditData = userassignedvalues;
+
+                $("#model_title").html(`<strong class="txt-danger"></strong>Auditors List`);
+                $("#user_type").text("Auditor Name");
+
+                const dt = $("#user_render_table").DataTable();
+                dt.clear();
+
+                let index = 1;
+
+                userassignedvalues.forEach(user => {
+
+                    // const combinedHeadValues = (user.audits || [])
+                    //     .map(v => v.head_value?.trim())
+                    //     .filter(v => v)
+                    //     .join(', ');
+
+                    const combinedHeadValues = [...new Set(
+                        (user.audits || [])
+                        .map(v => v.head_value?.trim())
+                        .filter(v => v)
+                    )].join(', ');
+                    
+                    const deleteBtn = `
+                        <a class="text-danger open-delete-modal"
+                           data-user-id="${user.user_id}">
+                            <i class="icon-trash"></i>
+                        </a>`;
+
+                    dt.row.add([
+                        index++,
+                        user.user_name,
+                        combinedHeadValues,
+                        deleteBtn
+                    ]);
+
+                });
+
+                dt.draw();
+                $("#user_assigned_model").modal('show');
+            }
+
+
+            $(document).on("click", ".open-delete-modal", function() {
+
+                const userId = $(this).data("user-id");
+
+                $("#delete_user_id").val(userId);
+
+                const user = window.auditData.find(u => u.user_id == userId);
+
+                const userAudits = user?.audits || [];
+
+                let options = '';
+
+                userAudits.forEach(v => {
+                    options += `<option value="${v.row_id}">${v.head_value}</option>`;
+                });
+
+                $("#delete_audit_select").html(options).trigger('change');
+
+                $("#delete_audit_modal").modal('show');
+            });
+
+            $("#confirm_delete_audits").click(function() {
+
+                const rowIds = $("#delete_audit_select").val();
+                const userName = $("#delete_user_name").val();
+                const userId = $("#delete_user_id").val();
+
+                if (!rowIds.length) {
+                    Swal.fire("Please select audits to delete");
+                    return;
+                }
+
+                Swal.fire({
+                    title: "Delete selected audits?",
+                    icon: "warning",
+                    showCancelButton: true
+                }).then((result) => {
+
+                    if (result.isConfirmed) {
+
+                        $.ajax({
+                            url: "{{ route('assigned_auditor.delete') }}",
+                            type: "POST",
+                            data: {
+                                _token: "{{ csrf_token() }}",
+                                row_ids: rowIds,
+                                user_name: userName,
+                                user_id: userId
+                            },
+                            success: function(res) {
+
+                                if (res.status === "success") {
+
+                                    Swal.fire("Deleted!", "", "success");
+
+                                    $("#delete_audit_modal").modal("hide");
+                                    location.reload();
+
+                                }
+                            }
+                        });
+
+                    }
+
+                });
+
+            });
+
 
 
             @if (session()->has('message'))
@@ -256,7 +449,8 @@
                     success: function(response) {
                         console.log(response);
                         if (response.message == "Success") {
-                            render_assigned_user(response.user_list, response.distinctValuesAssign);
+                            // render_assigned_user(response.user_list, response.distinctValuesAssign);
+                            render_assigned_user(response.assignedValues);
                         }
                     }
                 })

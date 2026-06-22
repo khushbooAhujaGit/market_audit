@@ -7,7 +7,8 @@
 
                 <div class="card shadow-lg">
                     <div class="card-header text-center">
-                        <h4>OTP Verification</h4>
+
+                        <h4 style="color:#fff !important;  margin-top: 40px !important;"></h4>OTP Verification</h4>
                     </div>
 
                     <div class="card-body">
@@ -18,9 +19,9 @@
                             {{-- MOBILE NUMBER INPUT --}}
                             <label class="form-label">Mobile Number</label>
                             <input type="text" class="form-control" id="mobile_number" name="mobile_number"
-                                   placeholder="Enter mobile number">
-                            <input type="hidden" name="activity_id" id="activity_id" value="{{$activity_id}}">
-                            <input type="hidden" name="row_id" id="row_id" value="{{$row_id}}">
+                                placeholder="Enter mobile number">
+                            <input type="hidden" name="activity_id" id="activity_id" value="{{ $activity_id }}">
+                            <input type="hidden" name="row_id" id="row_id" value="{{ $row_id }}">
                             <button type="button" class="btn btn-primary w-100 mt-3" id="sendOtpBtn">Send OTP</button>
 
                             {{-- OTP INPUT SECTION --}}
@@ -55,6 +56,15 @@
             </div>
         </div>
     </div>
+
+    {{-- Bottom Navigation (mobile only, hidden on desktop via d-md-none) --}}
+    <nav class="mobile-bottom-nav d-md-none">
+        <a href="{{ route('user.projects') }}" class="{{ request()->routeIs('user.projects') ? 'active' : '' }}">
+            <i class="icon-folder"></i>
+            Projects
+        </a>
+        
+    </nav>
 @endsection
 
 @section('scripts')
@@ -69,14 +79,14 @@
     </style>
 
     <script>
-        $(document).ready(function () {
+        $(document).ready(function() {
 
             let timerInterval;
 
             // ----------------------------
             // SEND OTP
             // ----------------------------
-            $("#sendOtpBtn").click(function (e) {
+            $("#sendOtpBtn").click(function(e) {
                 e.preventDefault();
                 let mobile = $("#mobile_number").val();
                 let activity_id = $("#activity_id").val();
@@ -92,7 +102,7 @@
                     mobile_no: mobile,
                     activity_id: activity_id,
                     row_id: row_id,
-                }, function (res) {
+                }, function(res) {
                     console.log(res);
                     if (res.success) {
                         Swal.fire("Success", res.message, "success");
@@ -108,12 +118,12 @@
             // ----------------------------
             // VERIFY OTP
             // ----------------------------
-            $("#verifyOtpBtn").click(function () {
+            $("#verifyOtpBtn").click(function() {
 
                 let activity_id = $("#activity_id").val();
                 let row_id = $("#row_id").val();
                 let otp = "";
-                $(".otp-box").each(function () {
+                $(".otp-box").each(function() {
                     otp += $(this).val();
                 });
 
@@ -128,7 +138,7 @@
                     mobile_otp: otp,
                     activity_id: activity_id,
                     row_id: row_id
-                }, function (res) {
+                }, function(res) {
                     if (res.success) {
                         Swal.fire("Verified", res.message, "success").then(() => {
                             window.location.href = res.redirectUrl;
@@ -143,7 +153,7 @@
             // ----------------------------
             // RESEND OTP
             // ----------------------------
-            $("#resendOtp").click(function (e) {
+            $("#resendOtp").click(function(e) {
                 e.preventDefault();
                 let mobile = $("#mobile_number").val();
                 let activity_id = $("#activity_id").val();
@@ -159,7 +169,7 @@
                     mobile_no: mobile,
                     activity_id: activity_id,
                     row_id: row_id,
-                }, function (res) {
+                }, function(res) {
                     console.log(res);
                     if (res.success) {
                         Swal.fire("Success", res.message, "success");
@@ -181,7 +191,7 @@
                 $("#resendOtp").addClass("d-none");
                 $("#resendTimer").removeClass("d-none");
 
-                timerInterval = setInterval(function () {
+                timerInterval = setInterval(function() {
                     $("#resendTimer b").text(seconds);
 
                     if (seconds <= 0) {
@@ -197,13 +207,13 @@
             // ----------------------------
             // OTP AUTO MOVE
             // ----------------------------
-            $(".otp-box").on("input", function () {
+            $(".otp-box").on("input", function() {
                 if (this.value.length === 1) {
                     $(this).next(".otp-box").focus();
                 }
             });
 
-            $(".otp-box").on("keydown", function (e) {
+            $(".otp-box").on("keydown", function(e) {
                 if (e.key === "Backspace" && this.value === "") {
                     $(this).prev(".otp-box").focus();
                 }

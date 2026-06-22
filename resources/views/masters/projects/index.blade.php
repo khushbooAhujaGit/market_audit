@@ -24,6 +24,41 @@
             border-width: 0.4rem;
             /* Optional: Increase border thickness */
         }
+
+        /* Pagination container */
+        .pagination {
+            justify-content: right;
+        }
+
+        /* Default buttons */
+        .pagination .page-link {
+            background-color: #ffffff; /* white */
+            color: #000000; /* black text */
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            margin: 0 3px;
+            transition: all 0.2s ease;
+        }
+
+        /* Hover effect */
+        .pagination .page-link:hover {
+            background-color: #f1f1f1;
+            color: #000;
+        }
+
+        /* Active page */
+        .pagination .active .page-link {
+            background-color: #000000; /* black */
+            color: #ffffff; /* white text */
+            border-color: #000;
+        }
+
+        /* Disabled (prev/next) */
+        .pagination .disabled .page-link {
+            background-color: #e0e0e0;
+            color: #888;
+            border-color: #ddd;
+        }
     </style>
 @endsection
 @section('content')
@@ -42,7 +77,8 @@
     cursor: not-allowed;
     pointer-events: all;
 ">
-        <div style="position: absolute; top: 50%; left: 50%; color: white; transform: translate(-50%, -50%); font-size: 20px;">
+        <div
+            style="position: absolute; top: 50%; left: 50%; color: white; transform: translate(-50%, -50%); font-size: 20px;">
             Please wait... Deletion in progress.
         </div>
     </div>
@@ -55,29 +91,37 @@
                     <div class="card-header">
                         <h4>Projects
                             <a href="{{ route('project.export') }}">
-                                <button class = "btn btn-primary ms-3">Export Data</button>
+                                <button class="btn btn-primary ms-3">Export Data</button>
                             </a>
                             <a href="{{ route('project.create') }}">
-                                <button class = "btn btn-primary float-end">Project Create</button>
+                                <button class="btn btn-primary float-end">Project Create</button>
                             </a>
                         </h4>
 
                     </div>
                     <div class="card-body">
                         <div class="table-responsive theme-scrollbar">
-                            <table class="display" id="projects_table">
-                                <thead>
+                            <div class="d-flex mb-3">
+                                <div class="col-3 ms-auto">
+                                    <input type="text" id="project-search" name="project-search"
+                                           class="form-control"
+                                           placeholder="Search project, company, zone...">
+                                </div>
+                            </div>
+                            <div id="project-table-data">
+                                <table class="display" id="projects_table">
+                                    <thead>
                                     <tr>
                                         <th>Sno</th>
-                                        <th>Company </th>
+                                        <th>Company</th>
                                         <th>Zone</th>
                                         <th>Unit</th>
                                         <th>Project</th>
                                         <th>Project Type</th>
                                         <th>Action</th>
                                     </tr>
-                                </thead>
-                                <tbody>
+                                    </thead>
+                                    <tbody>
                                     @foreach ($projects as $project)
                                         <tr>
                                             <td>{{ $loop->iteration }}</td>
@@ -88,7 +132,7 @@
                                             <td>{{ optional($project->getProjectType)->project_type_name }}</td>
                                             <td>
                                                 <ul class="action">
-                                                    <li class="edit"> <a
+                                                    <li class="edit"><a
                                                             href="{{ route('project.edit', ['id' => $project->id]) }}"><i
                                                                 class="icon-pencil-alt"></i></a></li>
                                                     <li class="delete" data-id="{{ $project->id }}"><i
@@ -97,10 +141,11 @@
                                             </td>
                                         </tr>
                                     @endforeach
-                                </tbody>
-                            </table>
-                            <div>
-                              
+                                    </tbody>
+                                </table>
+                                <div class="pagination-wrapper">
+                                    {{ $projects->links() }}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -114,11 +159,72 @@
 @section('scripts')
     <script>
 
+        // Initialize DataTable
+        const projects_table = $("#projects_table").DataTable({
+            paging: false,
+            searching: false
+        });
+
+        let timer;
+
+        $('#project-search').on('keyup', function () {
+            clearTimeout(timer);
+            console.log(timer);
+
+            const value = $(this).val();
+
+            timer = setTimeout(() => {
+                fetchProjects(value, 1);
+            }, 400);
+        });
+
+        function fetchProjects(search = '', page = 1) {
+            $.ajax({
+                url: "{{ route('project.search') }}",
+                type: "GET",
+                data: {
+                    search: search,
+                    page: page
+                },
+                success: function (res) {
+
+                    // ❗ Destroy DataTable FIRST
+                    if ($.fn.DataTable.isDataTable('#projects_table')) {
+                        $('#projects_table').DataTable().destroy();
+                    }
+
+                    // ✅ Update table body
+                    $('#projects_table tbody').html(res.html);
+
+                    // ✅ Update pagination
+                    $('#project-table-data .pagination-wrapper').html(res.pagination);
+
+                    // ✅ Reinitialize DataTable
+                    $("#projects_table").DataTable({
+                        paging: false,
+                        searching: false,
+                        info: false
+                    });
+                }
+            });
+        }
+
+        // Pagination click
+        $(document).on('click', '#project-table-data .pagination a', function (e) {
+            e.preventDefault();
+
+            let url = $(this).attr('href');
+            let page = new URL(url).searchParams.get("page");
+            let search = $('#project-search').val();
+
+            fetchProjects(search, page);
+        });
+
         function lockPage() {
             $('#page-lock-overlay').show();
 
             // Disable F5 and Ctrl+R
-            $(document).on('keydown.preventRefresh', function(e) {
+            $(document).on('keydown.preventRefresh', function (e) {
                 if ((e.which || e.keyCode) === 116 ||  // F5
                     (e.ctrlKey && e.which === 82)) {   // Ctrl + R
                     e.preventDefault();
@@ -141,23 +247,22 @@
         }
 
 
-        $(document).ready(function() {
+        $(document).ready(function () {
+
+
             $('.loader-backdrop').addClass('d-none');
-            // Initialize DataTable
-            const projects_table = $("#projects_table").DataTable({
-                paging: true
-            });
+
 
             @if (session()->has('message'))
-                Swal.fire({
-                    position: "top-center",
-                    icon: "success",
-                    title: "{{ session('message') }}",
-                    showConfirmButton: false,
-                    timer: 1500
-                });
+            Swal.fire({
+                position: "top-center",
+                icon: "success",
+                title: "{{ session('message') }}",
+                showConfirmButton: false,
+                timer: 1500
+            });
             @endif
-            $("#projects_table").on("click", ".delete", function(event) {
+            $("#projects_table").on("click", ".delete", function (event) {
                 const project_id = $(this).data('id');
                 const tar_row = $(this).closest('tr');
                 Swal.fire({
@@ -171,7 +276,7 @@
                 }).then((result) => {
                     if (result.isConfirmed) {
                         $('.loader-backdrop').removeClass('d-none');
-                        lockPage(); // 🚫 LOCK
+                        lockPage(); // ðŸš« LOCK
 
                         $.ajax({
                             url: '{{ route('project.destroy') }}',
@@ -180,9 +285,9 @@
                                 "_token": "{{ csrf_token() }}", // Add the CSRF token to the data
                                 "id": project_id
                             },
-                            success: function(response) {
+                            success: function (response) {
                                 $('.loader-backdrop').addClass('d-none');
-                                unlockPage(); // ✅ UNLOCK
+                                unlockPage(); // âœ… UNLOCK
 
                                 if (response == "Success") {
 
@@ -194,8 +299,8 @@
                                     );
 
 
-                                }else{
-                                    unlockPage(); // ✅ UNLOCK
+                                } else {
+                                    unlockPage(); // âœ… UNLOCK
 
                                     Swal.fire(
                                         'Warning!',

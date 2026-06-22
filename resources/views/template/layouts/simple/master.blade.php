@@ -1,10 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Market Audit project by Raj Singh Rajput, designed for efficient market audit analysis and audit management.">
+    <meta name="description"
+        content="Market Audit project by Raj Singh Rajput, designed for efficient market audit analysis and audit management.">
     <meta name="keywords" content="market audit, market audit management, analysis, reporting, Raj Singh Rajput">
     <meta name="author" content="Raj Singh Rajput">
     <link rel="icon" href="{{asset('assets/images/favicontnbt.png')}}" type="image/x-icon">
@@ -18,39 +20,43 @@
         rel="stylesheet">
 
     @include('template.layouts.simple.css')
+    <!-- Mobile app overrides — loaded LAST so !important rules win over style.css/responsive.css -->
+    <link rel="stylesheet" href="{{ asset('assets/css/mobile-app-style.css') }}">
     @yield('style')
 </head>
+
 <body>
-<div class="loader-wrapper">
-    <div class="loader loader-1">
-        <div class="loader-outter"></div>
-        <div class="loader-inner"></div>
-        <div class="loader-inner-1"></div>
+    <div class="loader-wrapper">
+        <div class="loader loader-1">
+            <div class="loader-outter"></div>
+            <div class="loader-inner"></div>
+            <div class="loader-inner-1"></div>
+        </div>
     </div>
-</div>
-<!-- loader ends-->
-<!-- tap on top starts-->
-<div class="tap-top"><i data-feather="chevrons-up"></i></div>
-<!-- tap on tap ends-->
-<!-- page-wrapper Start-->
-<div class="page-wrapper compact-wrapper" id="pageWrapper">
+    <!-- loader ends-->
+    <!-- tap on top starts-->
+    <div class="tap-top"><i data-feather="chevrons-up"></i></div>
+    <!-- tap on tap ends-->
+    <!-- page-wrapper Start-->
+    <div class="page-wrapper compact-wrapper" id="pageWrapper">
 
 
-    <!-- Page Header Start-->
-    @include('template.layouts.simple.header')
-    <!-- Page Body Start-->
-    <div class="page-body-wrapper">
-        <!-- Page Sidebar Start-->
-        @include('template.layouts.simple.sidebar')
-        <!-- Page Sidebar Ends-->
+        <!-- Page Header Start-->
+        @include('template.layouts.simple.header')
+        <!-- Page Body Start-->
+        <div class="page-body-wrapper">
+            <!-- Page Sidebar Start-->
+            @include('template.layouts.simple.sidebar')
+            <!-- Page Sidebar Ends-->
             <!-- Container-fluid starts-->
             @yield('content')
 
-        <!-- footer start-->
-        @include('template.layouts.simple.footer')
+            <!-- footer start-->
+            @include('template.layouts.simple.footer')
+        </div>
     </div>
-</div>
-@include('template.layouts.simple.script')
-@yield('scripts')
+    @include('template.layouts.simple.script')
+    @yield('scripts')
 </body>
+
 </html>

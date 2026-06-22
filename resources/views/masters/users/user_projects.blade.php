@@ -6,44 +6,47 @@
             <div class="col-sm-12">
                 <div class="card">
                     <div class="card-header">
-                        <h4>My Projects
-                            {{--                            <a href="{{route('unit.create')}}"><button class = "btn btn-primary float-end">Create</button></a>--}}
-                        </h4>
+                        <h4 style="color:#fff !important; margin-top: 40px !important;">My Projects</h4>
 
                     </div>
                     <div class="card-body">
                         <div class="table-responsive theme-scrollbar">
                             <table class="display" id="units_table">
                                 <thead>
-                                <tr>
-                                    <th>Sno</th>
-                                    <th>Project</th>
-                                    <th>Unit</th>
-                                    <th>Zone</th>
-                                    <th>Company</th>
-                                    <th>Action</th>
-                                </tr>
+                                    <tr>
+                                        <th>Sno</th>
+                                        <th>Project</th>
+                                        <th>Unit</th>
+                                        <th>Zone</th>
+                                        <th>Company</th>
+                                        <th>Action</th>
+                                    </tr>
                                 </thead>
                                 <tbody>
-                                @foreach($userProjects as $userProject)
-                                    <tr>
-                                        <td>{{$loop->iteration}}</td>
-                                        <td>{{$userProject->project_name}}</td>
-                                        <td>{{optional($userProject->getUnit)->unit_name}}</td>
-                                        <td>{{optional($userProject->getUnit->getZone)->zone_name}}</td>
-                                        <td>{{optional($userProject->getUnit->getZone->getCompany)->company_name}}</td>
-                                        <td>
-                                            <ul class="action">
-                                                {{--                                                <li class="view"> <a href="{{route('user.project.assigned_activities', ['project'=>$userProject->id])}}"><i class="icon-eye text-secondary fs-5"></i></a></li>--}}
-                                                <li class="view"> <a href="{{route('user.project_master.data', ['project'=>$userProject->id])}}"><i class="icon-eye text-secondary fs-5"></i></a></li>
-                                            </ul>
-                                        </td>
-                                    </tr>
-                                @endforeach
+                                    @foreach ($userProjects as $userProject)
+                                        <tr>
+                                            <td>{{ $loop->iteration }}</td>
+                                            <td>{{ $userProject->project_name }}</td>
+                                            <td>{{ optional($userProject->getUnit)->unit_name }}</td>
+                                            <td>{{ optional($userProject->getUnit->getZone)->zone_name }}</td>
+                                            <td>{{ optional($userProject->getUnit->getZone->getCompany)->company_name }}
+                                            </td>
+                                            <td>
+                                                <ul class="action">
+                                                    {{-- <li class="view"> <a
+                                                            href="{{route('user.project.assigned_activities', ['project'=>$userProject->id])}}"><i
+                                                                class="icon-eye text-secondary fs-5"></i></a></li> --}}
+                                                    <li class="view"> <a
+                                                            href="{{ route('user.project_master.data', ['project' => $userProject->id]) }}"><i
+                                                                class="icon-eye text-secondary fs-5"></i></a></li>
+                                                </ul>
+                                            </td>
+                                        </tr>
+                                    @endforeach
                                 </tbody>
                             </table>
                             <div>
-                                {{--                                {{$userProjects->links()}}--}}
+                                {{-- {{$userProjects->links()}} --}}
                             </div>
                         </div>
                     </div>
@@ -53,26 +56,58 @@
 
         </div>
     </div>
-
+    {{-- Bottom Navigation (mobile only, hidden on desktop via d-md-none) --}}
+    <nav class="mobile-bottom-nav d-md-none">
+        <a href="{{ route('user.projects') }}" class="{{ request()->routeIs('user.projects') ? 'active' : '' }}">
+            <i class="icon-folder"></i>
+            Projects
+        </a>
+        <a href="javascript:history.back()">
+            <i class="icon-arrow-left"></i>
+            Back
+        </a>
+    </nav>
 @endsection
 @section('scripts')
     <script>
-        $(document).ready(function (){
+        $(document).ready(function() 
+        {
+
+            setTimeout(function() {
+                $('input[type="search"], input[type="text"]').first().blur();
+                document.activeElement.blur();
+            }, 100); 
+
             const units_table = $("#units_table").DataTable({
-                paging: false
+                paging: true,
+                initComplete: function() {
+                    // Disable autocomplete on search
+                    $(this.api().table().container())
+                        .find('input[type="search"]')
+                        .attr('autocomplete', 'off')
+                        .attr('readonly', 'readonly') // ← KEY: readonly prevents keyboard
+                        .on('focus', function() {
+                            // Remove readonly only when user intentionally taps
+                            $(this).removeAttr('readonly');
+                        });
+                }
             });
-            @if(session()->has('message'))
-            Swal.fire({
-                position: "top-center",
-                icon: "success",
-                title: "{{ session('message') }}",
-                showConfirmButton: false,
-                timer: 1500
-            });
+
+            @if (session()->has('message'))
+                Swal.fire({
+                    position: "top-center",
+                    icon: "success",
+                    title: "{{ session('message') }}",
+                    showConfirmButton: false,
+                    timer: 1500
+                });
             @endif
+
+
+
             $("#units_table").on("click", ".delete", function(event) {
-                const unit_id=$(this).data('id');
-                const tar_row=$(this).closest('tr');
+                const unit_id = $(this).data('id');
+                const tar_row = $(this).closest('tr');
                 Swal.fire({
                     title: 'Are you sure?',
                     text: "You won't be able to revert this!",
@@ -84,26 +119,35 @@
                 }).then((result) => {
                     if (result.isConfirmed) {
                         $.ajax({
-                            url:'{{route('unit.destroy')}}',
-                            type:"POST",
+                            url: '{{ route('unit.destroy') }}',
+                            type: "POST",
                             data: {
-                                "_token": "{{ csrf_token() }}", // Add the CSRF token to the data
-                                "id":unit_id
+                                "_token": "{{ csrf_token() }}",
+                                "id": unit_id
                             },
-                            success:function (response){
-                                if(response=="Success"){
+                            success: function(response) {
+                                if (response == "Success") {
                                     units_table.row(tar_row).remove().draw();
-                                    Swal.fire(
-                                        'Deleted!',
-                                        'Record has been deleted.',
-                                        'success'
-                                    )
+                                    Swal.fire('Deleted!', 'Record has been deleted.',
+                                        'success');
                                 }
                             }
-                        })
+                        });
                     }
-                })
-            })
-        })
+                });
+            });
+
+            // ── Mobile fixed header ──
+            // ── Mobile: move controls into bar below card-header ──
+            if (window.innerWidth <= 767) {
+                const $wrapper = $("#units_table_wrapper");
+                const $filter = $wrapper.find(".dataTables_filter").detach();
+                const $length = $wrapper.find(".dataTables_length").detach();
+                const $bar = $('<div id="dt-sticky-controls"></div>').append($filter).append($length);
+                $(".card > .card-header").first().after($bar);
+            }
+
+
+        });
     </script>
 @endsection
