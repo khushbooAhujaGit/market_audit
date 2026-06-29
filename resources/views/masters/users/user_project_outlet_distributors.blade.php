@@ -146,7 +146,7 @@
 @section('scripts')
     <script>
     
-    // ── Universal mobile keyboard suppression ──
+    // &#9472;&#9472; Universal mobile keyboard suppression &#9472;&#9472;
 // Runs on every page, only on mobile browsers
 if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
     

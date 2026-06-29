@@ -114,6 +114,8 @@ Route::prefix('activities')->group(function () {
         Route::get('edit/{id}', 'edit')->name('activities.edit');
         Route::put('update/{id}', 'update')->name('activity.update');
         Route::get('/questions/{activity_id}', 'view_question')->name('activities.question');
+        Route::get('/questions/{activity_id}/bulk-add', 'bulkAddQuestions')->name('activities.questions.bulk_add');
+        Route::post('/questions/{activity_id}/bulk-store', 'bulkStoreQuestions')->name('activities.questions.bulk_store');
         Route::post('/info', 'get_activity_info')->name('activity.info');
         Route::get('questions/options/{id}', 'dropdown_options')->name('activity.question.dropdown');
         Route::post('question/option/destroy', 'destroy_question_option')->name('activity.question.option.destroy');
@@ -141,6 +143,7 @@ Route::prefix('activities')->group(function () {
         //khushboo 13-05-2025
         //khushboo 06-03-2026
         Route::post('get_parent_question_dropdown', 'getParentQuestionDropdown')->name('get_parent_question_dropdown');
+        // moved to QuestionController group below
         //khushboo 06-03-2026
 
         // sub-questions (new multi-child flow)
@@ -164,8 +167,11 @@ Route::controller(DropdownController::class)->group(function () {
 
 Route::prefix('questions')->group(function () {
     Route::controller(QuestionController::class)->group(function () {
+        Route::post('/store', 'store')->name('question.store');
         Route::put('/update', 'update')->name('question.update');
         Route::post('/destroy', 'destroy')->name('activity.question.destroy');
+        Route::get('question/{id}/parent-links', 'getParentLinks')->name('question.parent_links');
+        Route::get('question/{id}/sub-questions-json', 'getSubQuestionsJson')->name('question.sub_questions_json');
     });
 });
 
@@ -402,6 +408,7 @@ Route::prefix('Verifier')->group(function () {
         Route::get('report_page', 'reportPage')->name('report_page');
         Route::post('download_pdf', 'downloadPdfTemplate')->name('pdf_template');
         Route::post('/delete-temp-pdf', 'deleteTempPdf')->name('delete_temp_pdf');
+        Route::post('download_pdf_zip', 'downloadPdfZip')->name('pdf_template_zip');
         Route::post('export_answer_pdfs', 'exportAnswerPdfs')->name('export_answer_pdfs');
     });
 });

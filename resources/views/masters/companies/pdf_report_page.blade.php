@@ -290,7 +290,8 @@
             })
         }
 
-        function downloadPDF(rowId, distributorValue, activityID) {
+        function downloadPDF(rowId, distributorValue, activityID, activitySequence) {
+            activitySequence = activitySequence || 0;
             $.ajax({
                 url: "{{route('pdf_template')}}",
                 method: "POST",
@@ -299,6 +300,7 @@
                     'row_id': rowId,
                     'distributor_value': distributorValue,
                     'activity_id': activityID,
+                    'activity_sequence': activitySequence,
                 },
                 success: function (res) {
                     // console.log(res);
@@ -337,6 +339,52 @@
             });
         }
 
+        // Download all instance PDFs as a single ZIP
+        function downloadPDFZip(rowId, distributorValue, activityId) {
+            const btn = event.currentTarget;
+            const origHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Generating…';
+            btn.style.pointerEvents = 'none';
+
+            fetch("{{ route('pdf_template_zip') }}", {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': "{{ csrf_token() }}"
+                },
+                body: JSON.stringify({
+                    row_id: rowId,
+                    distributor_value: distributorValue,
+                    activity_id: activityId
+                })
+            })
+            .then(res => {
+                if (!res.ok) throw new Error('ZIP generation failed');
+                const disposition = res.headers.get('Content-Disposition') || '';
+                let fileName = 'instances.zip';
+                const match = disposition.match(/filename="?([^";\n]+)"?/);
+                if (match) fileName = match[1];
+                return res.blob().then(blob => ({ blob, fileName }));
+            })
+            .then(({ blob, fileName }) => {
+                const url = URL.createObjectURL(blob);
+                const a   = document.createElement('a');
+                a.href     = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                btn.innerHTML = origHtml;
+                btn.style.pointerEvents = '';
+            })
+            .catch(err => {
+                console.error(err);
+                alert('Failed to generate ZIP. Please try again.');
+                btn.innerHTML = origHtml;
+                btn.style.pointerEvents = '';
+            });
+        }
 
         //get distributor data
         function getDistributors() {
@@ -438,15 +486,23 @@
                     // if (currentUserRole == 'Verifier') {
 
                     let activityId = $('#activity_id').val();
-                    // console.log(isMaster);
-                    if (isMaster == 1) {
-                        html +=
-                            `<a class="badge badge-success" style="cursor:pointer;" onclick="downloadPDF('${main_header_info.id}', '${main_header_info.value}', '${activityId}')" ><i class="bi bi-download"></i>
-                            </a>`;
+                    const instances  = main_header_info.instances || [];
+                    const rowIdForPdf = isMaster == 1 ? main_header_info.id  : sub_header_info.id;
+                    const valForPdf   = isMaster == 1 ? main_header_info.value : sub_header_info.value;
+
+                    if (instances.length > 1) {
+                        // Multiple instances — single ZIP download button
+                        html += `<a class="badge badge-success" style="cursor:pointer;font-size:12px;" title="Download all ${instances.length} instances as ZIP"
+                                    onclick="downloadPDFZip('${rowIdForPdf}', '${valForPdf}', '${activityId}')">
+                                    <i class="bi bi-file-earmark-zip"></i> Download ZIP
+                                 </a>`;
                     } else {
-                        html +=
-                            `<a class="badge badge-success" style="cursor:pointer;" onclick="downloadPDF('${sub_header_info.id}', '${sub_header_info.value}', '${activityId}')" ><i class="bi bi-download"></i>
-                            </a>`;
+                        // Single instance — regular download button
+                        const seq = instances.length === 1 ? instances[0].sequence : 0;
+                        html += `<a class="badge badge-success" style="cursor:pointer;" title="Download PDF"
+                                    onclick="downloadPDF('${rowIdForPdf}', '${valForPdf}', '${activityId}', ${seq})">
+                                    <i class="bi bi-download"></i>
+                                 </a>`;
                     }
 
                     // }

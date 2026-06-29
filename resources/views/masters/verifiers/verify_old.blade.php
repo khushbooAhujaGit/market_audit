@@ -462,7 +462,7 @@
             if (!coordinate || typeof coordinate !== 'string') return null;
 
             // Split on degree symbol and any surrounding spaces
-            const parts = coordinate.trim().split(/[°\s]+/);
+            const parts = coordinate.trim().split(/[&#176;\s]+/);
             let value = parseFloat(parts[0]);
 
             if (isNaN(value)) return null;
@@ -515,7 +515,7 @@
             //     map = L.map('map').setView([distributorLat, distributorLng], 6);
             //
             //     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            //         attribution: '© OpenStreetMap contributors'
+            //         attribution: '&#169; OpenStreetMap contributors'
             //     }).addTo(map);
             //
             //     const distributorMarker = L.marker([distributorLat, distributorLng]).addTo(map).bindPopup(
@@ -566,7 +566,7 @@
                 });
 
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '© OpenStreetMap contributors'
+                    attribution: '&#169; OpenStreetMap contributors'
                 }).addTo(map);
 
                 const distributorMarker = L.marker([distributorLat, distributorLng], { icon: blueIcon })
@@ -589,7 +589,7 @@
                 const bounds = L.latLngBounds(latlngs);
                 map.fitBounds(bounds, { padding: [50, 50] });
 
-                // 🟢 Fetch travel/road distance using OSRM
+                // &#128994; Fetch travel/road distance using OSRM
                 fetch(`https://router.project-osrm.org/route/v1/driving/${distributorLng},${distributorLat};${userLng},${userLat}?overview=false`)
                     .then(response => response.json())
                     .then(data => {
@@ -597,7 +597,7 @@
                             const distanceInKm = (data.routes[0].distance / 1000).toFixed(2);
                             console.log(`Road Distance: ${distanceInKm} km`);
 
-                            // 🔄 Get the actual center of the visible map after fitBounds
+                            // &#128260; Get the actual center of the visible map after fitBounds
                             const center = map.getCenter();
 
                             L.popup({
@@ -624,7 +624,7 @@
                 map = L.map('map').setView([distributorLat, distributorLng], 13);
 
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '© OpenStreetMap contributors'
+                    attribution: '&#169; OpenStreetMap contributors'
                 }).addTo(map);
 
                 L.marker([distributorLat, distributorLng]).addTo(map)
@@ -638,7 +638,7 @@
                 map = L.map('map').setView([userLat, userLng], 13);
 
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '© OpenStreetMap contributors'
+                    attribution: '&#169; OpenStreetMap contributors'
                 }).addTo(map);
 
                 L.marker([userLat, userLng]).addTo(map)
@@ -646,7 +646,7 @@
                     .openPopup();
             }
 
-            // Case 4: Neither location exists – do nothing or show a message
+            // Case 4: Neither location exists &#8211; do nothing or show a message
             else {
                 console.warn("No location data available.");
             }

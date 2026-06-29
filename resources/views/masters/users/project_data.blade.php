@@ -745,7 +745,7 @@
         <script>
             document.addEventListener('DOMContentLoaded', function() {
 
-                // ── Template tab switching ──
+                // &#9472;&#9472; Template tab switching &#9472;&#9472;
                 var templateButtons = document.querySelectorAll('.template-btn');
                 var templateContents = document.querySelectorAll('.template-content');
 
@@ -775,7 +775,7 @@
                     showTemplate(templateContents[0].id);
                 }
 
-                // ── Add button ──
+                // &#9472;&#9472; Add button &#9472;&#9472;
                 var addBtn = document.getElementById('add_data_btn');
                 if (addBtn) {
                     addBtn.addEventListener('click', function(e) {
@@ -788,7 +788,7 @@
                     });
                 }
 
-                // ── Reset modal state on close ──
+                // &#9472;&#9472; Reset modal state on close &#9472;&#9472;
                 var addModalEl = document.getElementById('add_data');
                 if (addModalEl) {
                     addModalEl.addEventListener('hidden.bs.modal', function() {
@@ -925,7 +925,7 @@
                 });
             }
 
-            // ── Shared AJAX submit ──
+            // &#9472;&#9472; Shared AJAX submit &#9472;&#9472;
             function submitAddForm(formData) {
                 $.ajax({
                     url: "{{ route('projectData.add') }}",
@@ -965,7 +965,7 @@
 
             $(document).ready(function() {
 
-                // ── DataTable — delayed to run after layout auto-init ──
+                // &#9472;&#9472; DataTable &#8212; delayed to run after layout auto-init &#9472;&#9472;
                 setTimeout(function() {
 
                     // Destroy whatever the layout may have auto-inited
@@ -1032,7 +1032,7 @@
 
                 }, 300); // delay so layout auto-init fires first, then we take over
 
-                // ── Session flash ──
+                // &#9472;&#9472; Session flash &#9472;&#9472;
                 @if (session()->has('message'))
                     Swal.fire({
                         position: "top-center",
@@ -1043,10 +1043,10 @@
                     });
                 @endif
 
-                // ── Tooltips ──
+                // &#9472;&#9472; Tooltips &#9472;&#9472;
                 $('[data-bs-toggle="tooltip"]').tooltip();
 
-                // ── Show details modal ──
+                // &#9472;&#9472; Show details modal &#9472;&#9472;
                 $(document).on('click', '.show-details', function(e) {
                     e.stopPropagation();
                     var data_val = $(this).data('val');
@@ -1056,14 +1056,14 @@
                     $('#row_detail_modal').modal('show');
                 });
 
-                // ── Submit ADD form ──
+                // &#9472;&#9472; Submit ADD form &#9472;&#9472;
                 $('#submit_data_btn').click(function(e) {
                     e.preventDefault();
 
                     var isMaster = {{ $project_temp_info->is_master ?? 0 }};
 
                     if (isMaster == 1) {
-                        // ── MASTER: all fields always enabled, simple submit ──
+                        // &#9472;&#9472; MASTER: all fields always enabled, simple submit &#9472;&#9472;
                         var formData = new FormData($('#project_data_add_form')[0]);
                         formData.append('_token', "{{ csrf_token() }}");
 
@@ -1087,7 +1087,7 @@
                         submitAddForm(formData);
 
                     } else {
-                        // ── CHILD TEMPLATE (is_master=0): only submit active tab ──
+                        // &#9472;&#9472; CHILD TEMPLATE (is_master=0): only submit active tab &#9472;&#9472;
 
                         var $activeTemplate = $('.template-content:visible');
 
@@ -1157,7 +1157,7 @@
                     }
                 });
 
-                // ── Submit EDIT form ──
+                // &#9472;&#9472; Submit EDIT form &#9472;&#9472;
                 $('#submit_edit_data_btn').click(function(e) {
                     e.preventDefault();
                     var formData = new FormData($('#template_head_data_edit_form')[0]);

@@ -294,6 +294,7 @@
         $imagePages = []; // Store images to display on separate pages
 
         // Helper function to check if answer is not empty
+        if (!function_exists('isAnswerNotEmpty')) {
         function isAnswerNotEmpty($answer) {
             if (!$answer) {
                 return false;
@@ -314,8 +315,10 @@
             // For other types, check if string is not empty
             return trim($answerValue) !== '';
         }
+        } // end if (!function_exists('isAnswerNotEmpty'))
 
         // Helper function to get answer for a question
+        if (!function_exists('getAnswerForQuestion')) {
         function getAnswerForQuestion($questionId, $userResponses) {
             foreach ($userResponses as $userResponse) {
                 if ($userResponse->question_id == $questionId) {
@@ -324,14 +327,18 @@
             }
             return null;
         }
+        } // end if (!function_exists('getAnswerForQuestion'))
 
+        if (!function_exists('isImageFile')) {
         // Helper function to check if value is an image
         function isImageFile($path) {
             $extensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'];
             $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
             return in_array($extension, $extensions);
         }
+        } // end if (!function_exists('isImageFile'))
 
+        if (!function_exists('collectImage')) {
         // Helper function to collect images for separate pages
         function collectImage($value, $questionText, $parentQuestionText = null, &$imagePages) {
             $displayText = $questionText;
@@ -347,7 +354,9 @@
             ];
             return '<span class="image-placeholder">📷 See image on next page: ' . e($displayText) . '</span>';
         }
+        } // end if (!function_exists('collectImage'))
 
+        if (!function_exists('formatAnswer')) {
         // Helper function to format answer
         function formatAnswer($answer, $questionObj, $questionText, &$imagePages, $parentQuestionText = null) {
             if (!$answer) {
@@ -480,6 +489,7 @@
                     return !empty($textValue) ? '<div class="answer-text">' . nl2br(e($textValue)) . '</div>' : null;
             }
         }
+        } // end if (!function_exists('formatAnswer'))
     @endphp
 
     @foreach ($related_questions as $key => $related_question)

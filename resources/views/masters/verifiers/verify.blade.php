@@ -89,9 +89,13 @@
                                     $childQuestions = [];
 
                                     foreach ($related_questions as $question) {
-                                        // Skip Outlet sub-children — rendered recursively under their Outlet parent
-                                        if (in_array($question->id, $sub_question_child_ids)) continue;
-                                        if ($question->is_parent == 1 || $question->parent_question_id == 0) {
+                                        // Skip pure sub-question children (in question_sub_questions,
+                                        // no old-style conditional parent_question_id) &#8212; they are
+                                        // rendered under their Multi Response parent separately.
+                                        // Dual-purpose questions (sub-question AND conditional child)
+                                        // must still appear here for the conditional child answer.
+                                        if (in_array($question->id, $sub_question_child_ids) && empty($question->parent_question_id)) continue;
+                                        if ($question->is_parent == 1 || $question->parent_question_id == 0 || empty($question->parent_question_id)) {
                                             $parentQuestions[] = $question;
                                         } else {
                                             $childQuestions[$question->parent_question_id][] = $question;
@@ -173,11 +177,11 @@
                                                 @if (!empty($activity_sequence) && $activity_sequence > 0)
                                                     <div class="alert d-flex align-items-center gap-2 mx-2 mt-2"
                                                         style="background:#e7f1ff; border:1.5px solid #4a6cf7; border-radius:8px; padding:10px 14px; font-size:13px;">
-                                                        <span style="font-size:18px;">📝</span>
+                                                        <span style="font-size:18px;">&#128221;</span>
                                                         <div>
                                                             <strong>Additional Submission{{ !empty($instance_label) ? ': ' . $instance_label : '' }}</strong><br>
                                                             <span class="text-muted" style="font-size:12px;">
-                                                                You are verifying a repeat instance — not the original submission.
+                                                                You are verifying a repeat instance &#8212; not the original submission.
                                                             </span>
                                                         </div>
                                                     </div>
@@ -212,8 +216,16 @@
                                                                                     'answer' => $response->user_answer,
                                                                                 ];
                                                                             } else {
-                                                                                $parentAnswer = $response->user_answer;
-                                                                                break;
+                                                                                // For dual-purpose questions prefer the null-context
+                                                                                // answer (conditional/standalone) in the main loop
+                                                                                if ($response->parent_context_id === null) {
+                                                                                    $parentAnswer = $response->user_answer;
+                                                                                    break;
+                                                                                }
+                                                                                // Fallback to any answer if no null-context answer exists
+                                                                                if (!$parentAnswer) {
+                                                                                    $parentAnswer = $response->user_answer;
+                                                                                }
                                                                             }
                                                                         }
                                                                     }
@@ -239,7 +251,7 @@
                                                                         @if ($parentQuestion->answer_type == 1)
                                                                             <span class="text-danger">*</span>
                                                                         @endif
-                                                                    </td>
+                                                                    </td> 
                                                                     <td class="col-md-6">
                                                                         @switch($parentQuestion->question_type)
                                                                             @case('Multi Response')
@@ -276,7 +288,7 @@
                                                                                         <a href="{{ route('report.download.images.zip', ['answer_id' => $response->id]) }}"
                                                                                            class="btn btn-sm btn-success mt-1"
                                                                                            style="font-size:12px;" title="Download all images as ZIP">
-                                                                                            ⬇ Download ZIP ({{ count($imgPaths) }} images)
+                                                                                            &#11015; Download ZIP ({{ count($imgPaths) }} images)
                                                                                         </a>
                                                                                     @else
                                                                                         <div class="table-avtar-new mb-3">
@@ -718,7 +730,7 @@
                                                                                                     type="video/webm">
                                                                                             </video>
                                                                                             <a href="{{ $vUrl }}" download
-                                                                                                class="btn btn-sm btn-outline-secondary mt-1">⬇
+                                                                                                class="btn btn-sm btn-outline-secondary mt-1">&#11015;
                                                                                                 Download</a>
                                                                                         @elseif ($isAudioFile)
                                                                                             @php
@@ -757,7 +769,7 @@
                                                                                                     type="audio/webm">
                                                                                             </audio>
                                                                                             <a href="{{ $aUrl }}" download
-                                                                                                class="btn btn-sm btn-outline-secondary mt-1">⬇
+                                                                                                class="btn btn-sm btn-outline-secondary mt-1">&#11015;
                                                                                                 Download Audio</a>
                                                                                         @elseif ($isBase64Audio)
                                                                                             @php
@@ -807,10 +819,10 @@
                                                                                                 class="form-control" readonly>
                                                                                             <a href="https://www.google.com/maps?q={{ urlencode($depAns) }}"
                                                                                                 target="_blank"
-                                                                                                class="small text-primary mt-1 d-inline-block">📍
+                                                                                                class="small text-primary mt-1 d-inline-block">&#128205;
                                                                                                 View on Map</a>
                                                                                         @else
-                                                                                            {{-- Text / Date / DateTime / Yes-No / Dropdown —— plain readonly input --}}
+                                                                                            {{-- Text / Date / DateTime / Yes-No / Dropdown &#8212;&#8212; plain readonly input --}}
                                                                                             <input type="text"
                                                                                                 value="{{ $depAns }}"
                                                                                                 class="form-control" readonly>
@@ -836,23 +848,27 @@
                                                                 @if (isset($childQuestions[$parentQuestion->id]) && !empty($childQuestions[$parentQuestion->id]))
                                                                     @foreach ($childQuestions[$parentQuestion->id] as $childQuestion)
                                                                         @php
-                                                                            // Get child question answer
+                                                                            // Get child question answer &#8212; for dual-purpose questions
+                                                                            // Get conditional child answer.
+                                                                            // New format: stored with parent_context_id = parent_question_id.
+                                                                            // Backward compat: old answers stored with parent_context_id = NULL.
                                                                             $childAnswer = '';
                                                                             $childValues = [];
+                                                                            $cPctxId = $childQuestion->parent_question_id;
                                                                             foreach ($user_responses as $response) {
-                                                                                if (
-                                                                                    $response->question_id ==
-                                                                                    $childQuestion->id
-                                                                                ) {
-                                                                                    if (
-                                                                                        $childQuestion->question_type ==
-                                                                                        'Subjective'
-                                                                                    ) {
-                                                                                        $childValues[] =
-                                                                                            $response->user_answer;
+                                                                                if ($response->question_id == $childQuestion->id) {
+                                                                                    if ($childQuestion->question_type == 'Subjective') {
+                                                                                        $childValues[] = $response->user_answer;
                                                                                     } else {
-                                                                                        $childAnswer =
-                                                                                            $response->user_answer;
+                                                                                        // New format: pctx matches triggering parent
+                                                                                        if ($cPctxId && (int)$response->parent_context_id === (int)$cPctxId) {
+                                                                                            $childAnswer = $response->user_answer;
+                                                                                            break;
+                                                                                        }
+                                                                                        // Old format fallback: null pctx
+                                                                                        if ($response->parent_context_id === null && !$childAnswer) {
+                                                                                            $childAnswer = $response->user_answer;
+                                                                                        }
                                                                                     }
                                                                                 }
                                                                             }
@@ -900,7 +916,7 @@
                                                                                                         <a href="{{ route('report.download.images.zip', ['answer_id' => $response->id]) }}"
                                                                                                            class="btn btn-sm btn-success mt-1"
                                                                                                            style="font-size:12px;">
-                                                                                                            ⬇ Download ZIP ({{ count($cImgPaths) }} images)
+                                                                                                            &#11015; Download ZIP ({{ count($cImgPaths) }} images)
                                                                                                         </a>
                                                                                                     @else
                                                                                                         <div class="table-avtar-new mb-3">
@@ -980,12 +996,12 @@
                                                                                                         <a href="{{ $videoUrl }}"
                                                                                                             download
                                                                                                             class="btn btn-sm btn-outline-secondary">
-                                                                                                            ⬇ Download
+                                                                                                            &#11015; Download
                                                                                                         </a>
                                                                                                         <a class="btn btn-sm btn-outline-primary imagemodal"
                                                                                                             data-setval="{{ $jsVideoUrl }}"
                                                                                                             style="cursor:pointer;">
-                                                                                                            ⛶ Fullscreen
+                                                                                                            &#9974; Fullscreen
                                                                                                         </a>
                                                                                                     </div>
                                                                                                 @endif
@@ -1047,7 +1063,7 @@
                                                                                                     <a href="{{ $audioUrl }}"
                                                                                                         download
                                                                                                         class="btn btn-sm btn-outline-secondary mt-1">
-                                                                                                        ⬇ Download Audio
+                                                                                                        &#11015; Download Audio
                                                                                                     </a>
                                                                                                 @endif
                                                                                             @break
@@ -1307,19 +1323,20 @@
                                                                     @endforeach
                                                                 @endif
 
-                                                                {{-- ── Outlet sub-questions (new flow, recursive) ── --}}
+                                                                {{-- &#9472;&#9472; Outlet sub-questions (new flow, recursive) &#9472;&#9472; --}}
                                                                 @if ($parentQuestion->question_type === 'Multi Response' && $parentQuestion->subQuestions->count() > 0)
                                                                     @foreach ($parentQuestion->subQuestions as $subLink)
                                                                         @if ($subLink->childQuestion)
                                                                             @include('masters.verifiers.partials.render_sub_question_verify', [
-                                                                                'subQuestion'    => $subLink->childQuestion,
-                                                                                'depth'          => 1,
-                                                                                'user_responses' => $user_responses,
+                                                                                'subQuestion'     => $subLink->childQuestion,
+                                                                                'depth'           => 1,
+                                                                                'user_responses'  => $user_responses,
+                                                                                'mr_parent_id'    => $parentQuestion->id,
                                                                             ])
                                                                         @endif
                                                                     @endforeach
                                                                 @endif
-                                                                {{-- ── End Outlet sub-questions ── --}}
+                                                                {{-- &#9472;&#9472; End Outlet sub-questions &#9472;&#9472; --}}
 
                                                             @endforeach
 
@@ -1474,7 +1491,7 @@
             if (!coordinate || typeof coordinate !== 'string') return null;
 
             // Split on degree symbol and any surrounding spaces
-            const parts = coordinate.trim().split(/[Â°\s]+/);
+            const parts = coordinate.trim().split(/[&#194;&#176;\s]+/);
             let value = parseFloat(parts[0]);
 
             if (isNaN(value)) return null;
@@ -1533,7 +1550,7 @@
                 const map = L.map('map').setView([distributorLat, distributorLng], 6);
 
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: 'Â© OpenStreetMap contributors'
+                    attribution: '&#194;&#169; OpenStreetMap contributors'
                 }).addTo(map);
 
                 const distributorMarker = L.marker([distributorLat, distributorLng]).addTo(map).bindPopup(
@@ -1551,7 +1568,7 @@
 
                 map.fitBounds(polyline.getBounds());
 
-                // ðŸŸ¢ Fetch travel/road distance using OSRM
+                // &#240;&#376;&#376;&#162; Fetch travel/road distance using OSRM
                 fetch(
                         `https://router.project-osrm.org/route/v1/driving/${distributorLng},${distributorLat};${userLng},${userLat}?overview=false`
                     )
@@ -1564,7 +1581,7 @@
                             // const midLat = (distributorLat + userLat) / 2;
                             // const midLng = (distributorLng + userLng) / 2;
                             //
-                            // // âœ… Now safely call L.popup() after map is fully initialized
+                            // // &#226;&#339;&#8230; Now safely call L.popup() after map is fully initialized
                             // L.popup()
                             //     .setLatLng([midLat, midLng])
                             //     .setContent(`<strong>Road Distance: ${distanceInKm} km</strong>`)
@@ -1598,7 +1615,7 @@
                 map = L.map('map').setView([distributorLat, distributorLng], 13);
 
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: 'Â© OpenStreetMap contributors'
+                    attribution: '&#194;&#169; OpenStreetMap contributors'
                 }).addTo(map);
 
                 L.marker([distributorLat, distributorLng]).addTo(map)
@@ -1612,7 +1629,7 @@
                 map = L.map('map').setView([userLat, userLng], 13);
 
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: 'Â© OpenStreetMap contributors'
+                    attribution: '&#194;&#169; OpenStreetMap contributors'
                 }).addTo(map);
 
                 L.marker([userLat, userLng]).addTo(map)
@@ -1620,7 +1637,7 @@
                     .openPopup();
             }
 
-            // Case 4: Neither location exists â€“ do nothing or show a message
+            // Case 4: Neither location exists &#226;&#8364;&#8220; do nothing or show a message
             else {
                 console.warn("No location data available.");
             }

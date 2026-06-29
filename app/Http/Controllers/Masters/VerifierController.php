@@ -50,38 +50,66 @@ class VerifierController extends Controller
     {
         Session::put('group_verification_rerender', ['pt' => $pt, 'g' => $g, 's' => $s, 'a' => $a]);
         $projectTemplateInfo = ProjectTemplate::findOrFail($pt);
-        $activity_info = Activity::findOrFail($a);
+        $activity_info       = Activity::findOrFail($a);
         $activity_group_info = ActivityGroup::findOrFail($g);
+
         $uniqueRowIds = $projectTemplateInfo->projectTemplateValues()
-            ->select('id')
-            ->distinct()
-            ->get()
-            ->pluck('id');
-        $data_to_verify_Ids = TempUserActivityAnswersData::whereIn('row_id', $uniqueRowIds)
-            ->where('activity_id', $a)
-            // ->where('activity_group_name_id', $activity_group_info->id)
-            ->where('status', 0) // this is to only get pending answers
-            ->select('row_id')
-            ->distinct()
-            ->get()
-            ->pluck('row_id');
-        // dd($data_to_verify_Ids, $activity_group_info->id);
-        $verification_data = [];
-        foreach ($data_to_verify_Ids as $verify_id) {
-            //            $verify_data = ProjectTemplateNameValue::with('getDataOfRows')->where('row_id', $verify_id)->first();
-            $verify_data = ProjectTemplateNameValuesNew::find($verify_id);
-            $template_name_values = [];
-            $json_data = json_decode($verify_data->template_data_json);
-            foreach ($json_data as $key => $value) {
-                $templateHeadName = TemplateNameHead::find($key);
-                $template_name_values[] = [
-                    'name' => $templateHeadName->template_head_name,
-                    'value' => $value,
-                ];
+            ->select('id')->distinct()->get()->pluck('id');
+
+        // For activity_add_on: only show rows where auditor has fully closed all instances
+        $isActivityAddOn = $projectTemplateInfo->activity_add_on == 1;
+        if ($isActivityAddOn) {
+            $addOnActivityIds = json_decode($projectTemplateInfo->activity_add_on_activity_ids ?? '[]', true);
+            $activityInAddOn  = empty($addOnActivityIds) || in_array((int)$a, array_map('intval', $addOnActivityIds));
+            if ($activityInAddOn) {
+                $closedRowIds = ActivityInstanceClose::where('activity_id', $a)
+                    ->whereIn('row_id', $uniqueRowIds)
+                    ->pluck('row_id')->unique()->toArray();
+                $uniqueRowIds = collect($closedRowIds);
             }
-            $verify_data->templateNameValues = $template_name_values;
-            $verification_data[] = $verify_data;
-            //            $verification_data['templateNameValues'] = $template_name_values;
+        }
+
+        // Get one row per (row_id, activity_sequence) pair so every instance is listed
+        $rawPairs = TempUserActivityAnswersData::whereIn('row_id', $uniqueRowIds)
+            ->where('activity_id', $a)
+            ->where('status', 0)
+            ->select('row_id', 'activity_sequence')
+            ->distinct()
+            ->orderBy('row_id')
+            ->orderByRaw('COALESCE(activity_sequence, 0) ASC')
+            ->get();
+
+        $verification_data = [];
+        $rowCache = [];
+        foreach ($rawPairs as $pair) {
+            if (!isset($rowCache[$pair->row_id])) {
+                $rd = ProjectTemplateNameValuesNew::find($pair->row_id);
+                if (!$rd) continue;
+                $vals      = [];
+                $json_data = json_decode($rd->template_data_json);
+                foreach ($json_data as $key => $value) {
+                    $head   = TemplateNameHead::find($key);
+                    $vals[] = ['name' => $head->template_head_name, 'value' => $value];
+                }
+                $rd->templateNameValues = $vals;
+                $rowCache[$pair->row_id] = ['model' => $rd, 'vals' => $vals];
+            }
+
+            $seq = (int)($pair->activity_sequence ?? 0);
+            $instance_label = null;
+            if ($seq > 0) {
+                $inst = \App\Models\ActivityRepeatInstance::where('row_id', $pair->row_id)
+                    ->where('activity_id', $a)
+                    ->where('activity_sequence', $seq)
+                    ->first();
+                $instance_label = $inst ? $inst->instance_label : "Instance {$seq}";
+            }
+
+            $entry = clone $rowCache[$pair->row_id]['model'];
+            $entry->templateNameValues = $rowCache[$pair->row_id]['vals'];
+            $entry->activity_sequence  = $seq;
+            $entry->instance_label     = $instance_label;
+            $verification_data[]       = $entry;
         }
 
         return view('masters.verifiers.verifications', compact('verification_data', 'activity_info', 'activity_group_info', 'projectTemplateInfo'));
@@ -970,14 +998,10 @@ class VerifierController extends Controller
         }
 
         try {
-
-            $this->storeAnswerPdf($row_id, $projectTemplateValueData->value, $a_id, $auditDate);
+            $this->storeAnswerPdf($row_id, $projectTemplateValueData->value, $a_id, $auditDate, $activity_sequence);
         } catch (\Exception $e) {
             //            dd($e->getMessage());
         }
-
-
-        //        dd('gjnhg');
 
         if ($group_or_single == 1) {
             $params = Session::get('group_verification_rerender');
@@ -990,95 +1014,89 @@ class VerifierController extends Controller
     }
 
 
-    public function storeAnswerPdf($r, $v, $a, $auditDate)
+    public function storeAnswerPdf($r, $v, $a, $auditDate, int $activity_sequence = 0)
     {
-
-        //        $related_values = ProjectTemplateNameValue::where('row_id', $r)->where('value', $v)->get();
         $related_values = ProjectTemplateNameValuesNew::where('id', $r)
-            //            ->where('value', $v)
             ->where('template_data_json', 'like', '%"' . $v . '"%')
             ->get();
-        //        dd($related_values);
 
-        $projectTemplateData = ProjectTemplate::with(['getMainHeader', 'getSubHeader'])->where('id', $related_values[0]->project_template_id)->first();
+        $projectTemplateData = ProjectTemplate::with(['getMainHeader', 'getSubHeader'])
+            ->where('id', $related_values[0]->project_template_id)->first();
 
-        //        dd($projectTemplateData);
         $remarks = RemarkMaster::where('project_id', $projectTemplateData->project_id)->where('status', 1)->get();
 
         $activity_check = Activity::find($a);
-
         $related_questions = Question::where('activity_id', $activity_check->id)->orderBy('question_sequence', 'asc')->get();
 
+        // Filter answers to only the specific instance (activity_sequence)
         $user_responses = TempUserActivityAnswersData::with('getUser')
             ->where('row_id', $r)
             ->where('activity_id', $activity_check->id)
+            ->where(function ($q) use ($activity_sequence) {
+                if ($activity_sequence > 0) {
+                    $q->where('activity_sequence', $activity_sequence);
+                } else {
+                    $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0);
+                }
+            })
             ->get();
 
+        if ($user_responses->IsEmpty()) return;
 
-        if (!$user_responses->IsEmpty()) {
+        $auditorInfo = $user_responses[0];
+        $auditDate   = Carbon::parse($user_responses[0]->created_at)->format('d-m-Y');
+        $auditTime   = Carbon::parse($user_responses[0]->created_at)->format('H:i A');
 
-            $auditorInfo = $user_responses[0];
-            $auditDate = $user_responses[0]->created_at;
-            $auditDate = Carbon::parse($auditDate)->format('d-m-Y');
+        // Instance label for multi-instance activities
+        $instanceLabel = '';
+        if ($activity_sequence > 0) {
+            $inst = \App\Models\ActivityRepeatInstance::where('row_id', $r)
+                ->where('activity_id', $a)
+                ->where('activity_sequence', $activity_sequence)
+                ->first();
+            $instanceLabel = $inst ? $inst->instance_label : "Instance {$activity_sequence}";
+        }
 
-            $auditTime = $user_responses[0]->created_at;
-            $auditTime = Carbon::parse($auditTime)->format('H:i A');
+        $pdf = Pdf::loadView('masters.pdf_templates.verify_template', [
+            'projectTemplateData' => $projectTemplateData,
+            'related_questions'   => $related_questions,
+            'auditorInfo'         => $auditorInfo,
+            'auditDate'           => $auditDate,
+            'auditTime'           => $auditTime,
+            'user_responses'      => $user_responses,
+            'value'               => $v,
+            'instance_label'      => $instanceLabel,
+            'activity_sequence'   => $activity_sequence,
+        ]);
 
-            $pdf = Pdf::loadView('masters.pdf_templates.verify_template', [
-                'projectTemplateData' => $projectTemplateData,
-                'related_questions' => $related_questions,
-                'auditorInfo' => $auditorInfo,
-                'auditDate' => $auditDate,
-                'auditTime' => $auditTime,
-                'user_responses' => $user_responses,
-                'value' => $v
-            ]);
+        $projectTemp    = ProjectTemplateNameValuesNew::find($r);
+        $projectName    = $projectTemp->getProjectTemplateData->getProject->project_name;
+        $baseDirectory  = 'activityAnswerImages/';
+        $projectDir     = $baseDirectory . $projectName . '/';
+        $this->checkAndCreateDirectory($projectDir);
+        $this->ensureWritableDirectory($projectDir, 0777);
 
-            // Define base directory
-            $baseDirectory = 'activityAnswerImages/';
+        $monthYear    = Carbon::now()->format('FY');
+        $monthDir     = $projectDir . $monthYear . '/';
+        $this->checkAndCreateDirectory($monthDir);
 
-            // Get project name
-            $projectTemp = ProjectTemplateNameValuesNew::find($r);
-            $projectName = $projectTemp->getProjectTemplateData->getProject->project_name;
+        $pdfDir = $monthDir . 'answerPdfs/';
+        $this->checkAndCreateDirectory($pdfDir);
+        $this->ensureWritableDirectory($pdfDir, 0777);
 
-            // Build path: activityAnswerImages/{projectName}/
-            $projectDirectory = $baseDirectory . $projectName . '/';
-            $this->checkAndCreateDirectory($projectDirectory);
+        $sanitized = str_replace(' ', '-', $projectName);
+        // Include instance suffix when sequence > 0 so instances get separate files
+        $instSuffix = $activity_sequence > 0 ? '_' . $activity_sequence : '';
+        $fileName   = 'Audit-' . $sanitized . '_' . $r . $instSuffix . '_' . $auditDate . '.pdf';
 
-            // 1️⃣ Make sure the directory exists & is writable
-            $this->ensureWritableDirectory($projectDirectory, 0777);
-
-            // Build path: activityAnswerImages/{projectName}/{MonthYear}/
-            $currentMonthYear = Carbon::now()->format('FY');
-            $projectMonthYearDirectory = $projectDirectory . $currentMonthYear . '/';
-            $this->checkAndCreateDirectory($projectMonthYearDirectory);
-
-            // ✅ Create answerPdfs folder inside activityAnswerImages/{projectName}/{MonthYear}/
-            $answerPdfsDirectory = $projectMonthYearDirectory . 'answerPdfs/';
-            $this->checkAndCreateDirectory($answerPdfsDirectory);
-
-            // 1️⃣ Make sure the directory exists & is writable
-            $this->ensureWritableDirectory($answerPdfsDirectory, 0777);
-
-            $sanitizedProjectName = str_replace(' ', '-', $projectName);
-            $fileName = 'Audit-' . $sanitizedProjectName . '_' . $r . '_' . $auditDate . '.pdf';
-            // Define the PDF filename
-            //            $fileName = 'Audit-' . $projectName . '_' . $r . '_' . $auditDate . '.pdf';
-
-            // Full path to save
-            $fullFilePath = public_path($answerPdfsDirectory . $fileName);
-
-            // ✅ Check if file already exists
-            if (!File::exists($fullFilePath)) {
-                // Save the PDF if it doesn't already exist
-                $pdf->save($fullFilePath);
-
-                // 3️⃣ Give the newly‑created file full permissions too
-                $this->setFilePermissions($fullFilePath, 0777);
-            } else {
-                // Optionally log or return message
-                Log::info("PDF already exists: " . $fileName);
-            }
+        $fullPath = public_path($pdfDir . $fileName);
+        if (!File::exists($fullPath)) {
+            $pdf->save($fullPath);
+            $this->setFilePermissions($fullPath, 0777);
+        } else {
+            // Re-generate when verifier edits answers on a re-verification
+            $pdf->save($fullPath);
+            $this->setFilePermissions($fullPath, 0777);
         }
     }
 
@@ -1171,34 +1189,45 @@ class VerifierController extends Controller
 
     public function downloadPdfTemplate(Request $request)
     {
-        $r = $request->row_id;
-        $v = $request->distributor_value;
-        $a = $request->activity_id;
-
-        //        $related_values = ProjectTemplateNameValue::where('row_id', $r)->where('value', $v)->get();
+        $r                = $request->row_id;
+        $v                = $request->distributor_value;
+        $a                = $request->activity_id;
+        $activity_sequence = (int)($request->activity_sequence ?? 0);
 
         $related_values = ProjectTemplateNameValuesNew::where('id', $r)
-            //            ->where('value', $v)
-            // ->where('template_data_json', 'like', '%"'.$v.'"%')
-            //  ->whereJsonContains('template_data_json', $v)
             ->where('template_data_json', 'like', '%' . addslashes($v) . '%')
             ->get();
 
+        $projectTemplateData = ProjectTemplate::with(['getMainHeader', 'getSubHeader'])
+            ->where('id', $related_values[0]->project_template_id)->first();
 
-        // dd($related_values);
-
-        $projectTemplateData = ProjectTemplate::with(['getMainHeader', 'getSubHeader'])->where('id', $related_values[0]->project_template_id)->first();
-
-        //        dd($projectTemplateData);
         $remarks = RemarkMaster::where('project_id', $projectTemplateData->project_id)->where('status', 1)->get();
 
-        $activity_check = Activity::find($a);
-
+        $activity_check   = Activity::find($a);
         $related_questions = Question::where('activity_id', $activity_check->id)->orderBy('question_sequence', 'asc')->get();
 
+        // Filter by specific instance (activity_sequence)
         $user_responses = TempUserActivityAnswersData::with('getUser')
             ->where('row_id', $r)
-            ->where('activity_id', $activity_check->id)->get();
+            ->where('activity_id', $activity_check->id)
+            ->where(function ($q) use ($activity_sequence) {
+                if ($activity_sequence > 0) {
+                    $q->where('activity_sequence', $activity_sequence);
+                } else {
+                    $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0);
+                }
+            })
+            ->get();
+
+        // Instance label for title in PDF
+        $instanceLabel = '';
+        if ($activity_sequence > 0) {
+            $inst = \App\Models\ActivityRepeatInstance::where('row_id', $r)
+                ->where('activity_id', $a)
+                ->where('activity_sequence', $activity_sequence)
+                ->first();
+            $instanceLabel = $inst ? $inst->instance_label : "Instance {$activity_sequence}";
+        }
 
 
         if (!$user_responses->IsEmpty()) {
@@ -1218,14 +1247,16 @@ class VerifierController extends Controller
 
             $pdf = Pdf::loadView('masters.pdf_templates.verify_template', [
                 'projectTemplateData' => $projectTemplateData,
-                'related_questions' => $related_questions,
-                'auditorInfo' => $auditorInfo,
-                'auditDate' => $auditDate,
-                'auditTime' => $auditTime,
-                'user_responses' => $user_responses,
-                'value' => $v,
-                'main_header' => $mainHeaderValue,
-                'sub_header' => $subHeaderValue
+                'related_questions'   => $related_questions,
+                'auditorInfo'         => $auditorInfo,
+                'auditDate'           => $auditDate,
+                'auditTime'           => $auditTime,
+                'user_responses'      => $user_responses,
+                'value'               => $v,
+                'main_header'         => $mainHeaderValue,
+                'sub_header'          => $subHeaderValue,
+                'instance_label'      => $instanceLabel,
+                'activity_sequence'   => $activity_sequence,
             ]);
 
 
@@ -1250,6 +1281,119 @@ class VerifierController extends Controller
                 'file_name' => $fileName
             ]);
         }
+    }
+
+    /**
+     * Generate PDFs for ALL verified instances of a row+activity and stream as a ZIP.
+     */
+    public function downloadPdfZip(Request $request)
+    {
+        $r = $request->row_id;
+        $v = $request->distributor_value;
+        $a = $request->activity_id;
+
+        $related_values = ProjectTemplateNameValuesNew::where('id', $r)
+            ->where('template_data_json', 'like', '%' . addslashes($v) . '%')
+            ->get();
+
+        if ($related_values->isEmpty()) {
+            return response()->json(['error' => 'Row not found'], 404);
+        }
+
+        $projectTemplateData = ProjectTemplate::with(['getMainHeader', 'getSubHeader'])
+            ->where('id', $related_values[0]->project_template_id)->first();
+        $remarks             = RemarkMaster::where('project_id', $projectTemplateData->project_id)->where('status', 1)->get();
+        $activity_check      = Activity::find($a);
+        $related_questions   = Question::where('activity_id', $activity_check->id)->orderBy('question_sequence', 'asc')->get();
+
+        $templateJson    = json_decode($related_values[0]->template_data_json, true);
+        $mainHeaderValue = $templateJson[$projectTemplateData->main_header] ?? null;
+        $subHeaderValue  = $templateJson[$projectTemplateData->sub_header]  ?? null;
+
+        // Build list of instances to include: original (seq 0) + verified repeat instances
+        $instances = [['sequence' => 0, 'label' => 'Original']];
+        $repeatInstances = \App\Models\ActivityRepeatInstance::where('row_id', $r)
+            ->where('activity_id', $a)
+            ->orderBy('activity_sequence')
+            ->get();
+        foreach ($repeatInstances as $ri) {
+            $hasVerified = TempUserActivityAnswersData::where('row_id', $r)
+                ->where('activity_id', $a)
+                ->where('activity_sequence', $ri->activity_sequence)
+                ->whereNotNull('verified_by')->where('verified_by', '!=', 0)
+                ->exists();
+            if ($hasVerified) {
+                $instances[] = ['sequence' => $ri->activity_sequence, 'label' => $ri->instance_label ?: "Instance {$ri->activity_sequence}"];
+            }
+        }
+
+        // Temp directory for this zip
+        $tempDir = public_path('temp/zip_' . uniqid());
+        if (!File::exists($tempDir)) File::makeDirectory($tempDir, 0755, true);
+
+        $pdfPaths = [];
+        foreach ($instances as $inst) {
+            $seq = $inst['sequence'];
+
+            $responses = TempUserActivityAnswersData::with('getUser')
+                ->where('row_id', $r)
+                ->where('activity_id', $a)
+                ->where(function ($q) use ($seq) {
+                    if ($seq > 0) {
+                        $q->where('activity_sequence', $seq);
+                    } else {
+                        $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0);
+                    }
+                })->get();
+
+            if ($responses->isEmpty()) continue;
+
+            $auditorInfo = $responses[0];
+            $auditDate   = Carbon::parse($responses[0]->created_at)->format('d-m-Y');
+            $auditTime   = Carbon::parse($responses[0]->created_at)->format('H:i A');
+
+            $pdf = Pdf::loadView('masters.pdf_templates.verify_template', [
+                'projectTemplateData' => $projectTemplateData,
+                'related_questions'   => $related_questions,
+                'auditorInfo'         => $auditorInfo,
+                'auditDate'           => $auditDate,
+                'auditTime'           => $auditTime,
+                'user_responses'      => $responses,
+                'value'               => $v,
+                'main_header'         => $mainHeaderValue,
+                'sub_header'          => $subHeaderValue,
+                'instance_label'      => $inst['label'],
+                'activity_sequence'   => $seq,
+            ]);
+
+            $safeName     = str_replace([' ', '/'], '-', $inst['label']);
+            $pdfFileName  = $safeName . '_' . $auditDate . '.pdf';
+            $pdfFilePath  = $tempDir . '/' . $pdfFileName;
+            $pdf->save($pdfFilePath);
+            $pdfPaths[]   = ['path' => $pdfFilePath, 'name' => $pdfFileName];
+        }
+
+        if (empty($pdfPaths)) {
+            File::deleteDirectory($tempDir);
+            return response()->json(['error' => 'No verified instances found'], 404);
+        }
+
+        // Build ZIP
+        $zipName = 'Audit_' . str_replace(' ', '-', $activity_check->activity_name) . '_' . $r . '_' . now()->format('d-m-Y') . '.zip';
+        $zipPath = $tempDir . '/' . $zipName;
+        $zip     = new \ZipArchive();
+        $zip->open($zipPath, \ZipArchive::CREATE);
+        foreach ($pdfPaths as $p) {
+            $zip->addFile($p['path'], $p['name']);
+        }
+        $zip->close();
+
+        // Clean up the whole temp dir (PDFs + zip) after PHP shuts down
+        register_shutdown_function(function () use ($tempDir) {
+            if (File::isDirectory($tempDir)) File::deleteDirectory($tempDir);
+        });
+
+        return response()->download($zipPath, $zipName);
     }
 
     public function deleteTempPdf(Request $request)
@@ -1376,7 +1520,10 @@ class VerifierController extends Controller
 
 
                     //                    dd($sanitizedProjectName);
-                    $pattern = '/^Audit-' . preg_quote($sanitizedProjectName, '/') . '_(\d+)_([\d]{2}-[\d]{2}-[\d]{4})\.pdf$/';
+                    // Pattern supports both original (no instance suffix) and multi-instance files:
+                    // Audit-ProjectName_rowId_dd-mm-yyyy.pdf          (original / sequence 0)
+                    // Audit-ProjectName_rowId_1_dd-mm-yyyy.pdf        (instance 1, 2, …)
+                    $pattern = '/^Audit-' . preg_quote($sanitizedProjectName, '/') . '_(\d+)(?:_\d+)?_([\d]{2}-[\d]{2}-[\d]{4})\.pdf$/';
 
                     if (preg_match($pattern, $fileName, $matches)) {
                         $matchedRowId = $matches[1];

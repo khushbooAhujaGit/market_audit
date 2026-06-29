@@ -85,7 +85,7 @@
                     $(this.api().table().container())
                         .find('input[type="search"]')
                         .attr('autocomplete', 'off')
-                        .attr('readonly', 'readonly') // ← KEY: readonly prevents keyboard
+                        .attr('readonly', 'readonly') // &#8592; KEY: readonly prevents keyboard
                         .on('focus', function() {
                             // Remove readonly only when user intentionally taps
                             $(this).removeAttr('readonly');
@@ -137,8 +137,8 @@
                 });
             });
 
-            // ── Mobile fixed header ──
-            // ── Mobile: move controls into bar below card-header ──
+            // &#9472;&#9472; Mobile fixed header &#9472;&#9472;
+            // &#9472;&#9472; Mobile: move controls into bar below card-header &#9472;&#9472;
             if (window.innerWidth <= 767) {
                 const $wrapper = $("#units_table_wrapper");
                 const $filter = $wrapper.find(".dataTables_filter").detach();

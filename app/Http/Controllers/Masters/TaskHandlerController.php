@@ -897,6 +897,7 @@ class TaskHandlerController extends Controller
         }
         $user = Auth::user();
         $userAssignedActivities = [];
+        $with_data_check = 1; // default; updated for master templates below
         $projectTemplateNameValue = ProjectTemplateNameValuesNew::find($row_id);
         $projectTemplateData = ProjectTemplate::find($projectTemplateNameValue->project_template_id);
         $getHeadValues = DB::table('project_template_name_values_new')
@@ -920,12 +921,105 @@ class TaskHandlerController extends Controller
             ->get();
 
         //khushboo 05-07-25
+        // ── For OUTLET rows (is_master=0): build activities directly from UserActivityDataAssign ──
+        // The DataAssign records (data_assigns table) use the MASTER template's IDs and
+        // activity IDs, not the outlet template's. The correct outlet activity_id is stored
+        // ONLY in user_activity_data_assigns.activity_id. We bypass DataAssign entirely.
+        if ($projectTemplateData->is_master == 0) {
+            $outletAssigns = UserActivityDataAssign::where('user_id', $user->id)
+                ->where('project_template_id', $projectTemplateData->id)
+                ->get()
+                ->unique('activity_id');
+
+            foreach ($outletAssigns as $outletAssign) {
+                $activity = Activity::find($outletAssign->activity_id);
+                if (!$activity) continue;
+
+                $activityRequiredQuestions = Question::where('activity_id', $outletAssign->activity_id)
+                    ->pluck('id')->toArray();
+
+                $submittedcount = TempUserActivityAnswersData::where('row_id', $row_id)
+                    ->where('activity_id', $outletAssign->activity_id)
+                    ->whereIn('question_id', $activityRequiredQuestions)
+                    ->where('user_id', $user->id)
+                    ->where(function ($q) { $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0); })
+                    ->distinct('question_id')->count('question_id');
+
+                $requiredCount = DB::table('questions')
+                    ->where('activity_id', $outletAssign->activity_id)
+                    ->where('answer_type', 1)
+                    ->where('question_type', '!=', 'Multi Response')
+                    ->count();
+
+                $check_if_answered = $submittedcount > 0 && $submittedcount >= $requiredCount;
+
+                $isSentBack = false;
+                if ($check_if_answered) {
+                    $latest = TempUserActivityAnswersData::where('row_id', $row_id)
+                        ->where('activity_id', $outletAssign->activity_id)
+                        ->where('user_id', $user->id)
+                        ->where(function ($q) { $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0); })
+                        ->orderBy('id', 'desc')->first();
+                    if ($latest && $latest->status == 3) { $isSentBack = true; $check_if_answered = false; }
+                }
+
+                $allowRepeat = false;
+                if ($projectTemplateData->activity_add_on == 1) {
+                    $addOnIds = json_decode($projectTemplateData->activity_add_on_activity_ids ?? '[]', true);
+                    $allowRepeat = empty($addOnIds) || in_array((int)$outletAssign->activity_id, array_map('intval', $addOnIds));
+                }
+
+                $isFullyClosed = false;
+                if ($allowRepeat) {
+                    $closeRecord = ActivityInstanceClose::where('row_id', $row_id)
+                        ->where('activity_id', $outletAssign->activity_id)
+                        ->where('user_id', $user->id)->exists();
+                    if ($closeRecord) {
+                        $sentBackExists = TempUserActivityAnswersData::where('row_id', $row_id)
+                            ->where('activity_id', $outletAssign->activity_id)
+                            ->where('user_id', $user->id)->where('status', 3)->exists();
+                        $isFullyClosed = !$sentBackExists;
+                    }
+                }
+
+                $otpVerificationDone = false;
+                if ($project->is_otp_required == 1) {
+                    $lastAns = TempUserActivityAnswersData::where('row_id', $row_id)
+                        ->where('activity_id', $outletAssign->activity_id)
+                        ->where('user_id', $user->id)->orderBy('id', 'desc')->first();
+                    if ($lastAns && !empty($lastAns->mobile_otp) && $lastAns->otp_verified_status == 1) {
+                        $otpVerificationDone = true;
+                    }
+                }
+
+                $userAssignedActivities[] = [
+                    'template_name_id' => $projectTemplateData->template_name_id,
+                    'template_name'    => $projectTemplateData->getTemplate->template_name,
+                    'is_master'        => 0,
+                    'activity_id'      => $outletAssign->activity_id,
+                    'activity_name'    => $activity->activity_name,
+                    'group_id'         => null,
+                    'group_name'       => null,
+                    'sequence'         => null,
+                    'answer_submitted' => $check_if_answered,
+                    'otpVerificationDone' => $otpVerificationDone,
+                    'is_sent_back'     => $isSentBack,
+                    'allow_repeat'     => $allowRepeat,
+                    'is_fully_closed'  => $isFullyClosed,
+                    'repeat_instances' => ActivityRepeatInstance::where('row_id', $row_id)->where('activity_id', $outletAssign->activity_id)->orderBy('activity_sequence')->get(),
+                    'project_data'     => $project,
+                ];
+            }
+
+            $userAssignedActivities = collect($userAssignedActivities)->sortBy('activity_name')->values()->toArray();
+            return view('masters.users.project_activities', compact('userAssignedActivities', 'project', 'row_id', 'status', 'distributor_value', 'with_data_check'));
+        }
+
+        // ── MASTER template rows: original DataAssign-based lookup ───────────────────
         $distinct_data_assignIds = UserActivityDataAssign::where('user_id', $user->id)
             ->where('project_template_id', $projectTemplateData->id)
             ->distinct('data_assign_id')
             ->pluck('data_assign_id');
-
-        //        dd($distinct_data_assignIds);
 
         $data_assign_info = DataAssign::with('getProjectTemplate', 'templateName', 'activityName', 'getActivityGroup')
             ->whereIn("id", $distinct_data_assignIds)
@@ -934,35 +1028,50 @@ class TaskHandlerController extends Controller
             ->get();
 
         if ($data_assign_info->IsEmpty()) {
+            // Fallback: re-query with master template IDs (not outlet IDs)
             $masterProjectTemplate = ProjectTemplate::where('project_id', $projectTemplateData->project_id)
                 ->where('is_master', 1)->first();
+            $freshMasterIds = UserActivityDataAssign::where('user_id', $user->id)
+                ->where('project_template_id', $masterProjectTemplate->id ?? 0)
+                ->distinct('data_assign_id')
+                ->pluck('data_assign_id');
             $data_assign_info = DataAssign::with('getProjectTemplate', 'templateName', 'activityName', 'getActivityGroup')
-                ->whereIn("id", $distinct_data_assignIds)
-                ->where('project_template_id', $masterProjectTemplate->id)
+                ->whereIn("id", $freshMasterIds)
+                ->where('project_template_id', $masterProjectTemplate->id ?? 0)
                 ->where('project_id', $project->id)
                 ->get();
         }
         //khushboo 05-07-25
 
         //check if outlet assign also
-        $with_data_check = 1;
-        //        dd($projectTemplateData);
+        // Determine whether "View Outlets" button should appear:
+        // Show it whenever this is a master (distributor) template AND the project
+        // has at least one child (outlet) template that has rows in the name-values table
+        // linked to this distributor row.  We use $status == 1 OR $with_data_check == 0
+        // as the blade condition, so setting $status = 1 here is the cleanest trigger.
         if ($projectTemplateData->is_master == 1) {
-            $childTemplateDataIds = ProjectTemplate::where('project_id', $projectTemplateData->project_id)
-                ->where('is_master', 0)->pluck('id')->toArray();
+            $childTemplateIds = ProjectTemplate::where('project_id', $projectTemplateData->project_id)
+                ->where('is_master', 0)
+                ->pluck('id')
+                ->toArray();
+
+            if (!empty($childTemplateIds)) {
+                // Check if any outlet rows exist for this distributor row's project
+                $outletRowsExist = \App\Models\ProjectTemplateNameValuesNew::whereIn('project_template_id', $childTemplateIds)
+                    ->exists();
+
+                if ($outletRowsExist) {
+                    $status = 1; // force show "View Outlets" button
+                }
+            }
+
+            // Legacy: also check for outlet templates without their own data set
             $data_assign_info_ids = $data_assign_info->where('is_outlet_assigned', 1)->pluck('id')->toArray();
-            // dd($data_assign_info_ids);
-            $checkoutletAssign = UserActivityDataAssign::where('user_id', $user->id)
-                ->whereIn('project_template_id', $childTemplateDataIds)
-                ->whereIn('data_assign_id', $data_assign_info_ids)
-                ->exists();
-            // dd($checkoutletAssign, $data_assign_info_ids);
             if ($data_assign_info_ids) {
                 $emptyDataTemplateEixsts = ProjectTemplate::where('project_id', $projectTemplateData->project_id)
                     ->where('is_master', 0)
                     ->where('with_data', 0)
                     ->exists();
-                // dd($emptyDataTemplateEixsts);
                 if ($emptyDataTemplateEixsts) {
                     $with_data_check = 0;
                 }
@@ -1240,7 +1349,19 @@ class TaskHandlerController extends Controller
             ['row_id' => $row_id, 'activity_id' => $activity_id, 'user_id' => $user->id]
         );
 
-        return response()->json(['success' => true]);
+        // Build the redirect URL so the auditor leaves the activity_questions page
+        $redirectUrl = null;
+        if (Session::has('project_outlet_activity')) {
+            $params = Session::get('project_outlet_activity');
+            $redirectUrl = route('user.project.distributor.outlets', $params);
+        } elseif (Session::has('project_dist_activity')) {
+            $params = Session::get('project_dist_activity');
+            $redirectUrl = route('user.project_master.data', $params);
+        } else {
+            $redirectUrl = route('user.projects');
+        }
+
+        return response()->json(['success' => true, 'redirectUrl' => $redirectUrl]);
     }
 
     public function userProjectActivitiesOLDOct($row_id, $status)
@@ -1430,7 +1551,14 @@ class TaskHandlerController extends Controller
         // True only when verifier has sent this specific instance back for correction (status = 3)
         $is_sent_back = $answer_data->contains('status', 3);
 
-        $instance_common = compact('row_data', 'related_questions', 'sub_question_child_ids', 'group_info', 'template_name_values', 'project_id', 'activity_sequence', 'repeat_instance', 'allow_repeat', 'all_instances', 'original_submitted', 'is_closed', 'activity', 'is_sent_back');
+        // True when ANY instance (original or repeat) has been sent back for this activity row.
+        // Used to lock Add button and make non-sent-back instances read-only.
+        $has_any_sent_back = TempUserActivityAnswersData::where('row_id', $row_id)
+            ->where('activity_id', $activity->id)
+            ->where('status', 3)
+            ->exists();
+
+        $instance_common = compact('row_data', 'related_questions', 'sub_question_child_ids', 'group_info', 'template_name_values', 'project_id', 'activity_sequence', 'repeat_instance', 'allow_repeat', 'all_instances', 'original_submitted', 'is_closed', 'activity', 'is_sent_back', 'has_any_sent_back');
         if (!$answer_data->isEmpty()) {
             return view('masters.users.activity_questions', array_merge($instance_common, compact('answer_data')));
         } else {
@@ -1445,23 +1573,25 @@ class TaskHandlerController extends Controller
     public function add_activity_instance(Request $request)
     {
         $request->validate([
-            'row_id' => 'required|integer',
+            'row_id'      => 'required|integer',
             'activity_id' => 'required|integer',
-            'instance_label' => 'required|string|max:255',
-            'group_id' => 'nullable|integer',
+            'group_id'    => 'nullable|integer',
         ]);
 
         $nextSequence = (int) ActivityRepeatInstance::where('row_id', $request->row_id)
             ->where('activity_id', $request->activity_id)
             ->max('activity_sequence') + 1;
 
+        // Auto-generate label: "Instance {N}" (sequence is 1-based here since original = 0)
+        $autoLabel = 'Instance ' . $nextSequence;
+
         ActivityRepeatInstance::create([
-            'row_id' => $request->row_id,
-            'activity_id' => $request->activity_id,
+            'row_id'            => $request->row_id,
+            'activity_id'       => $request->activity_id,
             'activity_sequence' => $nextSequence,
-            'instance_label' => $request->instance_label,
-            'user_id' => Auth::id(),
-            'status' => 0,
+            'instance_label'    => $autoLabel,
+            'user_id'           => Auth::id(),
+            'status'            => 0,
         ]);
 
         return redirect()->route('user.project.row_id.activity', [
@@ -1612,8 +1742,8 @@ class TaskHandlerController extends Controller
                 $suffix = trim((string) ($parts[2] ?? ''));
                 $attribute = strtolower(preg_replace('/[^A-Za-z0-9]/', '', $suffix));
 
-                // Get question
-                $question = Question::find($questionId);
+                // Get question from pre-loaded map (no extra DB query)
+                $question = $activityQuestionMap->get($questionId);
                 if (!$question) {
                     continue;
                 }
@@ -2067,7 +2197,9 @@ class TaskHandlerController extends Controller
         try {
             // Check location
             if (empty($request->latitude) && empty($request->longitude)) {
-                // return redirect()->back()->withInput('error', "Location is required for answer submission.");
+                if ($request->ajax() || $request->wantsJson()) {
+                    return response()->json(['success' => false, 'message' => 'location_required'], 422);
+                }
                 return redirect()->back()->with('error', "Location is required for answer submission.")->withInput();
             }
 
@@ -2082,7 +2214,9 @@ class TaskHandlerController extends Controller
             // Get project details
             $projectTemp = ProjectTemplateNameValuesNew::find($request->row_id);
             if (!$projectTemp) {
-                // return redirect()->back()->withInput('error', "Project Template Data Not Found");
+                if ($request->ajax() || $request->wantsJson()) {
+                    return response()->json(['success' => false, 'message' => 'Project record not found.'], 404);
+                }
                 return redirect()->back()->with('error', "Project Template Data Not Found")->withInput();
             }
 
@@ -2102,6 +2236,13 @@ class TaskHandlerController extends Controller
             $latitude = $request->latitude ?? null;
             $longitude = $request->longitude ?? null;
             $userDetails = User::find($userId);
+
+            // Pre-load ALL questions for this activity in a single query.
+            // This eliminates the N+1 pattern (previously Question::find() was called
+            // once per submitted field — up to 60+ queries for large forms).
+            $activityQuestionMap = Question::where('activity_id', $request->activity_id)
+                ->get()
+                ->keyBy('id'); // map: id => Question model
 
             // Exclude non-question keys
             $excludedKeys = ['_token', 'user_id', 'row_id', 'activity_id', 'group_id', 'latitude', 'longitude', 'save', '_method', 'activity_sequence'];
@@ -2163,6 +2304,19 @@ class TaskHandlerController extends Controller
                 }
             }
 
+            // Pre-uploaded multi-image paths (multi_images_{qid}[]) and
+            // pctx variants (multi_images_{qid}_pctx_{parentId}[]) are sent as
+            // hidden text inputs, not files. Extract qid and mark as answered.
+            foreach (array_keys($request->all()) as $k) {
+                if (str_starts_with($k, 'multi_images_')) {
+                    $suffix = str_replace('multi_images_', '', $k);
+                    $qid    = (int) $suffix; // PHP stops at first non-digit
+                    if ($qid && !empty(array_filter((array)($request->input($k) ?? [])))) {
+                        $answeredQuestionIds[] = $qid;
+                    }
+                }
+            }
+
             $answeredQuestionIds = array_unique($answeredQuestionIds);
 
             // ── Validate required questions ────────────────────────────────────
@@ -2208,13 +2362,77 @@ class TaskHandlerController extends Controller
             $missingIds = array_diff($allRequiredIds, $answeredQuestionIds);
 
             if (!empty($missingIds)) {
-                // Look up the question texts for the missing IDs to give a clear message
                 $missingQuestions = Question::whereIn('id', $missingIds)->pluck('question')->toArray();
                 $missingList = implode(', ', $missingQuestions);
-                return redirect()->back()
-                    ->with('error', "Please fill all required (*) questions before submitting. Missing: {$missingList}")
-                    ->withInput();
+                $errMsg = "Please fill all required (*) questions. Missing: {$missingList}";
+                if ($request->ajax() || $request->wantsJson()) {
+                    return response()->json(['success' => false, 'message' => $errMsg], 422);
+                }
+                return redirect()->back()->with('error', $errMsg)->withInput();
             }
+
+            // ── Server-side validation_rule checks ───────────────────────────────
+            foreach ($questionAnswers as $rawKey => $rawValue) {
+                preg_match('/^(\d+)/', (string) $rawKey, $m);
+                if (empty($m[1])) continue;
+                $qid = (int) $m[1];
+                $q   = $activityQuestionMap->get($qid);
+                if (!$q || empty($rawValue)) continue;
+
+                $val  = is_array($rawValue) ? implode(',', $rawValue) : trim((string) $rawValue);
+                $rule = $q->validation_rule ?? 'none';
+                $qLabel = $q->question;
+
+                $validationError = null;
+                switch ($rule) {
+                    case 'numericrange':
+                        if (!is_numeric($val)) {
+                            $validationError = "\"{$qLabel}\" must be a number.";
+                        } elseif ($q->validation_min !== null && (float)$val < (float)$q->validation_min) {
+                            $validationError = "\"{$qLabel}\" must be ≥ {$q->validation_min}.";
+                        } elseif ($q->validation_max !== null && (float)$val > (float)$q->validation_max) {
+                            $validationError = "\"{$qLabel}\" must be ≤ {$q->validation_max}.";
+                        }
+                        break;
+                    case 'digitlength':
+                        $digits = preg_replace('/\D/', '', $val);
+                        $len    = strlen($digits);
+                        if ($q->validation_min !== null && $len < (int)$q->validation_min) {
+                            $validationError = "\"{$qLabel}\" must have at least {$q->validation_min} digits.";
+                        } elseif ($q->validation_max !== null && $len > (int)$q->validation_max) {
+                            $validationError = "\"{$qLabel}\" must have at most {$q->validation_max} digits.";
+                        }
+                        break;
+                    case 'textlength':
+                        $len = mb_strlen($val);
+                        if ($q->validation_min !== null && $len < (int)$q->validation_min) {
+                            $validationError = "\"{$qLabel}\" must be at least {$q->validation_min} characters.";
+                        } elseif ($q->validation_max !== null && $len > (int)$q->validation_max) {
+                            $validationError = "\"{$qLabel}\" must be at most {$q->validation_max} characters.";
+                        }
+                        break;
+                    case 'email':
+                        if (!filter_var($val, FILTER_VALIDATE_EMAIL)) {
+                            $validationError = "\"{$qLabel}\" must be a valid email address.";
+                        }
+                        break;
+                    case 'phone':
+                        if (!preg_match('/^[6-9]\d{9}$/', preg_replace('/\D/', '', $val))) {
+                            $validationError = "\"{$qLabel}\" must be a valid 10-digit mobile number.";
+                        }
+                        break;
+                    case 'regex':
+                        if ($q->validation_regex && !preg_match('/' . $q->validation_regex . '/', $val)) {
+                            $validationError = "\"{$qLabel}\" does not match the required format.";
+                        }
+                        break;
+                }
+
+                if ($validationError) {
+                    return redirect()->back()->with('error', $validationError)->withInput();
+                }
+            }
+            // ── End validation_rule checks ────────────────────────────────────────
 
             $imagesToProcess = [];
 
@@ -2327,7 +2545,6 @@ class TaskHandlerController extends Controller
 
             foreach ($questionAnswers as $rawKey => $rawValue) {
 
-
                 // Parse key to get question ID and attribute
                 preg_match('/^(\d+)(.*)$/', (string) $rawKey, $parts);
                 if (empty($parts[1])) {
@@ -2335,11 +2552,19 @@ class TaskHandlerController extends Controller
                 }
 
                 $questionId = (int) $parts[1];
-                $suffix = trim((string) ($parts[2] ?? ''));
+                $suffix     = trim((string) ($parts[2] ?? ''));
+
+                // Extract parent context from shared sub-question keys: "{qid}_pctx_{parentId}"
+                $parentContextId = null;
+                if (preg_match('/_pctx_(\d+)/', $suffix, $pctxMatch)) {
+                    $parentContextId = (int) $pctxMatch[1];
+                    $suffix = str_replace('_pctx_' . $parentContextId, '', $suffix);
+                }
+
                 $attribute = strtolower(preg_replace('/[^A-Za-z0-9]/', '', $suffix));
 
-                // Get question
-                $question = Question::find($questionId);
+                // Get question from pre-loaded map (no extra DB query)
+                $question = $activityQuestionMap->get($questionId);
                 if (!$question) {
                     continue;
                 }
@@ -2686,6 +2911,13 @@ class TaskHandlerController extends Controller
                         ->where('activity_id', $request->activity_id)
                         ->where($this->activitySequenceFilter($activitySequence))
                         ->where('question_id', $questionId)
+                        ->where(function ($q) use ($parentContextId) {
+                            if ($parentContextId !== null) {
+                                $q->where('parent_context_id', $parentContextId);
+                            } else {
+                                $q->whereNull('parent_context_id');
+                            }
+                        })
                         ->first();
 
                     // If parent question answer changed, delete old child answers
@@ -2731,27 +2963,28 @@ class TaskHandlerController extends Controller
                         }
 
                         $existing->update([
-                            'user_answer' => $user_answer,
-                            'same_answer_id' => $last_sequence,
-                            'latitude' => $latitude,
-                            'longitude' => $longitude,
-                            'updated_at' => now(),
-                            'status' => 0,
+                            'user_answer'      => $user_answer,
+                            'same_answer_id'   => $last_sequence,
+                            'latitude'         => $latitude,
+                            'longitude'        => $longitude,
+                            'updated_at'       => now(),
+                            'status'           => 0,
                         ]);
                         $answer = $existing;
                     } else {
                         $answer = TempUserActivityAnswersData::create([
-                            'user_id' => $userId,
-                            'row_id' => $request->row_id,
-                            'activity_id' => $request->activity_id,
-                            'activity_sequence' => $activitySequence,
+                            'user_id'                => $userId,
+                            'row_id'                 => $request->row_id,
+                            'activity_id'            => $request->activity_id,
+                            'activity_sequence'      => $activitySequence,
                             'activity_group_name_id' => $request->group_id ?? 0,
-                            'question_id' => $questionId,
-                            'user_answer' => $user_answer,
-                            'same_answer_id' => $last_sequence,
-                            'latitude' => $latitude,
-                            'longitude' => $longitude,
-                            'status' => 0,
+                            'question_id'            => $questionId,
+                            'parent_context_id'      => $parentContextId,
+                            'user_answer'            => $user_answer,
+                            'same_answer_id'         => $last_sequence,
+                            'latitude'               => $latitude,
+                            'longitude'              => $longitude,
+                            'status'                 => 0,
                         ]);
                     }
                 }
@@ -2772,12 +3005,20 @@ class TaskHandlerController extends Controller
             // ── Handle pre-uploaded multi-image paths (multi_images_{qid}[] hidden inputs) ──
             // These come from the AJAX pre-upload endpoint and are already geo-tagged on disk.
             // We just need to store the JSON array in the DB.
+            // multi_images_ keys now support pctx: multi_images_{qid}_pctx_{parentId}[]
             $multiImageKeys = array_filter(array_keys($request->all()), fn($k) => str_starts_with($k, 'multi_images_'));
             foreach ($multiImageKeys as $multiKey) {
-                $questionId = (int) str_replace('multi_images_', '', $multiKey);
+                $suffix     = str_replace('multi_images_', '', $multiKey);
+                $questionId = (int)$suffix; // PHP stops at first non-numeric char
                 if (!$questionId) continue;
-                $question = Question::find($questionId);
+                $question = $activityQuestionMap->get($questionId);
                 if (!$question || $question->question_type !== 'Image') continue;
+
+                // Extract parent context from key: multi_images_{qid}_pctx_{parentId}
+                $multiImgPctx = null;
+                if (preg_match('/_pctx_(\d+)/', $suffix, $pm)) {
+                    $multiImgPctx = (int)$pm[1];
+                }
 
                 $paths = array_filter((array)($request->input($multiKey) ?? []), fn($p) => !empty(trim($p)));
                 if (empty($paths)) continue;
@@ -2789,6 +3030,13 @@ class TaskHandlerController extends Controller
                     ->where('activity_id', $request->activity_id)
                     ->where($this->activitySequenceFilter($activitySequence))
                     ->where('question_id', $questionId)
+                    ->where(function($q) use ($multiImgPctx) {
+                        if ($multiImgPctx !== null) {
+                            $q->where('parent_context_id', $multiImgPctx);
+                        } else {
+                            $q->whereNull('parent_context_id');
+                        }
+                    })
                     ->first();
 
                 if ($existing) {
@@ -2808,6 +3056,7 @@ class TaskHandlerController extends Controller
                         'activity_sequence'       => $activitySequence,
                         'activity_group_name_id'  => $request->group_id ?? 0,
                         'question_id'             => $questionId,
+                        'parent_context_id'       => $multiImgPctx,
                         'user_answer'             => $jsonAnswer,
                         'same_answer_id'          => $last_sequence,
                         'latitude'                => $latitude,
@@ -2844,18 +3093,33 @@ class TaskHandlerController extends Controller
 
             $message = "Activity Answer submitted successfully";
 
+            // Compute redirect URL (same logic as non-AJAX path below)
+            $ajaxRedirectUrl = null;
+            if (Session::has('project_outlet_activity')) {
+                $ajaxRedirectUrl = route('user.project.distributor.outlets', Session::get('project_outlet_activity'));
+            } elseif (Session::has('project_dist_activity')) {
+                $ajaxRedirectUrl = route('user.project_master.data', Session::get('project_dist_activity'));
+            } else {
+                $ajaxRedirectUrl = route('user.projects');
+            }
+
             // AJAX path — return JSON so the activity_questions page can handle inline OTP modal
             if ($request->ajax() || $request->wantsJson()) {
                 if ($otp_required) {
                     return response()->json([
-                        'success' => true,
-                        'otp_required' => true,
-                        'message' => $message . '. Please verify OTP.',
-                        'row_id' => $request->row_id,
+                        'success'     => true,
+                        'otp_required'=> true,
+                        'message'     => $message . '. Please verify OTP.',
+                        'row_id'      => $request->row_id,
                         'activity_id' => $request->activity_id,
                     ]);
                 }
-                return response()->json(['success' => true, 'otp_required' => false, 'message' => $message]);
+                return response()->json([
+                    'success'      => true,
+                    'otp_required' => false,
+                    'message'      => $message,
+                    'redirectUrl'  => $ajaxRedirectUrl,
+                ]);
             }
 
             // Non-AJAX (legacy) path — keep existing redirect behaviour

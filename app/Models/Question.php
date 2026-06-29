@@ -21,6 +21,15 @@ class Question extends Model
         'parent_value',
         'parent_dropdown_id',
         'allow_multiple_images',
+        'help_text',
+        'validation_rule',
+        'validation_min',
+        'validation_max',
+        'validation_regex',
+        'file_types',
+        'max_file_size_mb',
+        'date_min',
+        'date_max',
     ];
 
 

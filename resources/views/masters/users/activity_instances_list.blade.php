@@ -7,7 +7,7 @@
                     <div class="card-header">
                         <h4 style="color:#fff !important; margin-top: 40px !important;">
                             {{ optional($project)->project_name }}
-                            &nbsp;— {{ $activity->activity_name }}
+                            &nbsp;&#8212; {{ $activity->activity_name }}
                             {{-- Close button: validates all instances submitted then marks activity closed --}}
                             <a href="javascript:void(0)" id="closeInstancesBtn"
                                 class="btn float-end ms-2"

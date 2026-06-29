@@ -184,6 +184,9 @@
                                                         @enderror
                                                     </div>
 
+                                                    {{-- Verification Status filter removed per admin request --}}
+                                                    <input type="hidden" name="verification_status_filter" value="all">
+
                                                     <div class="col-12 text-end">
                                                         <button name="get_report" id="get_report"
                                                             class="btn btn-primary">Get Report

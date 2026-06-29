@@ -10,7 +10,7 @@
                         <h4 style="color:#fff !important; margin-top: 40px !important;">
                             {{ optional($project)->project_name }}
                             @if (isset($projectTemplateInfo))
-                                &nbsp;— {{ $projectTemplateInfo->getTemplate->template_name }}
+                                &nbsp;&#8212; {{ $projectTemplateInfo->getTemplate->template_name }}
                             @endif
 
                             @if ($status == 1 || $with_data_check == 0)
@@ -72,19 +72,19 @@
                                                 @endphp
                                                 <ul class="action">
                                                     @if ($allowRpt)
-                                                        {{-- Activity-add-on flow — always go directly to questions page --}}
+                                                        {{-- Activity-add-on flow &#8212; always go directly to questions page --}}
                                                         @if ($isClosed && !$isSentBack)
-                                                            {{-- All instances submitted & closed — show checkmark --}}
+                                                            {{-- All instances submitted & closed &#8212; show checkmark --}}
                                                             <li><i class="icon-check text-white fs-5 bg-success p-2"></i></li>
                                                         @elseif ($isSentBack)
-                                                            {{-- Sent back — reload icon to questions page --}}
+                                                            {{-- Sent back &#8212; reload icon to questions page --}}
                                                             <li class="view">
                                                                 <a href="{{ $questionsUrl }}">
                                                                     <i class="icon-reload text-white fs-5 bg-danger p-2"></i>
                                                                 </a>
                                                             </li>
                                                         @else
-                                                            {{-- Open (pending or submitted but not yet closed) — eye to questions page --}}
+                                                            {{-- Open (pending or submitted but not yet closed) &#8212; eye to questions page --}}
                                                             <li class="view">
                                                                 <a href="{{ $questionsUrl }}">
                                                                     <i class="icon-eye text-white fs-5 bg-dark p-2"></i>
@@ -92,7 +92,7 @@
                                                             </li>
                                                         @endif
                                                     @else
-                                                        {{-- Standard (non-add-on) flow — original behaviour --}}
+                                                        {{-- Standard (non-add-on) flow &#8212; original behaviour --}}
                                                         @if ($isSentBack)
                                                             <li class="view">
                                                                 <a href="{{ $questionsUrl }}">
@@ -156,7 +156,7 @@
 @section('scripts')
     <script>
     
-    // ── Universal mobile keyboard suppression ──
+    // &#9472;&#9472; Universal mobile keyboard suppression &#9472;&#9472;
 // Runs on every page, only on mobile browsers
 if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
     
@@ -220,7 +220,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                 });
             @endif
             
-            // ── Universal: prevent keyboard popup on every page load (mobile only) ──
+            // &#9472;&#9472; Universal: prevent keyboard popup on every page load (mobile only) &#9472;&#9472;
 if (window.innerWidth <= 767) {
     // Mark ALL inputs as readonly before DOM is interactive
     document.addEventListener('DOMContentLoaded', function() {

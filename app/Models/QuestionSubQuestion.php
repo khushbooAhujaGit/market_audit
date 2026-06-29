@@ -10,6 +10,7 @@ class QuestionSubQuestion extends Model
         'parent_question_id',
         'child_question_id',
         'sequence',
+        'trigger_value',
     ];
 
     public function parentQuestion()

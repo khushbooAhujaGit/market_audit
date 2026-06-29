@@ -1,5 +1,5 @@
 @extends('template.layouts.simple.master')
-@section('style')
+@section('style') 
     <link href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css"
         rel="stylesheet">
     <style>
@@ -194,9 +194,9 @@
         <p id="locationMessage">Please allow location access to continue filling the form. This is required for all
             submissions.</p>
         <div id="permissionDeniedGuide" class="permission-guide d-none">
-            <h6>📱 How to enable location permission:</h6>
+            <h6>&#240;&#376;&#8220;&#177; How to enable location permission:</h6>
             <ol>
-                <li>Click the lock icon (🔒) in your browser's address bar</li>
+                <li>Click the lock icon (&#240;&#376;&#8221;&#8217;) in your browser's address bar</li>
                 <li>Find "Location" in the permissions list</li>
                 <li>Change from "Block" to "Allow"</li>
                 <li>Refresh this page or click "Retry Location Access"</li>
@@ -233,16 +233,33 @@
                                 @if (!empty($allow_repeat))
                                     <div class="d-flex align-items-center gap-2">
                                         @if (!$is_closed)
-                                            <button type="button" id="addInstanceBtn"
-                                                style="background:{{ $original_submitted ? 'rgba(40,167,69,0.9)' : 'rgba(108,117,125,0.5)' }};border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:5px;cursor:{{ $original_submitted ? 'pointer' : 'not-allowed' }};"
-                                                title="{{ $original_submitted ? 'Add new instance' : 'Save the original first before adding a new instance' }}"
-                                                {{ $original_submitted ? '' : 'disabled' }}>
-                                                <i class="fa fa-plus" style="font-size:11px;"></i> Add
-                                            </button>
-                                            <button type="button" id="submitActivityBtn"
-                                                style="background:rgba(220,53,69,0.9);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:5px;">
-                                                <i class="fa fa-check" style="font-size:11px;"></i> Submit
-                                            </button>
+                                            {{-- Add button: hidden when any instance is sent back for correction --}}
+                                            @if (empty($has_any_sent_back))
+                                                <button type="button" id="addInstanceBtn"
+                                                    style="background:{{ $original_submitted ? 'rgba(40,167,69,0.9)' : 'rgba(108,117,125,0.5)' }};border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:5px;cursor:{{ $original_submitted ? 'pointer' : 'not-allowed' }};"
+                                                    title="{{ $original_submitted ? 'Add new instance' : 'Save the original first before adding a new instance' }}"
+                                                    {{ $original_submitted ? '' : 'disabled' }}>
+                                                    <i class="fa fa-plus" style="font-size:11px;"></i> Add
+                                                </button>
+                                            @endif
+                                            {{-- Submit button: only show when no instances are sent back --}}
+                                            @if (empty($has_any_sent_back))
+                                                <button type="button" id="submitActivityBtn"
+                                                    style="background:rgba(220,53,69,0.9);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:5px;">
+                                                    <i class="fa fa-check" style="font-size:11px;"></i> Submit
+                                                </button>
+                                            @else
+                                                {{-- Some instances are sent back &#226;&#8364;&#8221; show re-submit prompt --}}
+                                                <div style="background:rgba(255,152,0,0.15);border:1px solid rgba(255,152,0,0.6);border-radius:8px;padding:5px 12px;display:flex;align-items:center;gap:6px;">
+                                                    <i class="fa fa-exclamation-triangle" style="color:#ff9800;font-size:12px;"></i>
+                                                    <span style="color:#e65100;font-size:11px;font-weight:600;">Fix sent-back instance(s), then Submit</span>
+                                                </div>
+                                                {{-- Show Submit only after all sent-back instances are corrected --}}
+                                                <button type="button" id="submitActivityBtn"
+                                                    style="background:rgba(220,53,69,0.9);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:5px;">
+                                                    <i class="fa fa-check" style="font-size:11px;"></i> Submit
+                                                </button>
+                                            @endif
                                         @else
                                             <div style="background:rgba(40,167,69,0.2);border:1px solid rgba(40,167,69,0.5);border-radius:20px;padding:5px 14px;display:flex;align-items:center;gap:6px;">
                                                 <i class="fa fa-check-circle" style="color:#28a745;font-size:13px;"></i>
@@ -341,11 +358,11 @@
                                                 style="color:#fff !important;  margin-top: 40px !important;">Activity
                                                 Questions</h5>
 
-                                            {{-- ── Sent Back Warning Banner ── --}}
+                                            {{-- &#226;&#8221;&#8364;&#226;&#8221;&#8364; Sent Back Warning Banner &#226;&#8221;&#8364;&#226;&#8221;&#8364; --}}
                                             @if (!empty($is_sent_back) && $is_sent_back)
                                                 <div class="alert d-flex align-items-center gap-2 mx-3 mt-2"
                                                     style="background:#fff3cd; border:1.5px solid #ffc107; border-radius:8px; padding:10px 14px; font-size:13px;">
-                                                    <span style="font-size:18px;">⚠️</span>
+                                                    <span style="font-size:18px;">&#226;&#353; &#239;&#184;&#143;</span>
                                                     <div>
                                                         <strong>This submission was sent back for correction.</strong><br>
                                                         <span class="text-muted" style="font-size:12px;">Please review your
@@ -354,11 +371,11 @@
                                                 </div>
                                             @endif
 
-                                            {{-- ── Repeat Instance Banner ── --}}
+                                            {{-- &#226;&#8221;&#8364;&#226;&#8221;&#8364; Repeat Instance Banner &#226;&#8221;&#8364;&#226;&#8221;&#8364; --}}
                                             @if (!empty($activity_sequence))
                                                 <div class="alert d-flex align-items-center gap-2 mx-3 mt-2"
                                                     style="background:#e7f1ff; border:1.5px solid #4a6cf7; border-radius:8px; padding:10px 14px; font-size:13px;">
-                                                    <span style="font-size:18px;">📝</span>
+                                                    <span style="font-size:18px;">&#240;&#376;&#8220;&#157;</span>
                                                     <div>
                                                         <strong>Additional Submission{{ isset($repeat_instance) && $repeat_instance ? ': ' . $repeat_instance->instance_label : '' }}</strong><br>
                                                         <span class="text-muted" style="font-size:12px;">You are filling a new set of
@@ -370,7 +387,7 @@
                                             @if (session()->has('error'))
                                                 <div class="alert d-flex align-items-center gap-2 mx-3 mt-2"
                                                     style="background:#f8d7da; border:1.5px solid #f5c6cb; border-radius:8px; padding:10px 14px; font-size:13px;">
-                                                    <span style="font-size:18px;">❌</span>
+                                                    <span style="font-size:18px;">&#226;&#157;&#338;</span>
                                                     <div>
                                                         <strong>Submission Failed</strong><br>
                                                         <span class="text-muted" style="font-size:12px;">{{ session('error') }}</span>
@@ -396,7 +413,7 @@
                                                         value="{{ $activity_group_info->id ?? old('activity_group_id') }}">
                                                 @endif
 
-                                                {{-- ── Build prefill lookup from sent-back answers ── --}}
+                                                {{-- &#226;&#8221;&#8364;&#226;&#8221;&#8364; Build prefill lookup from sent-back answers &#226;&#8221;&#8364;&#226;&#8221;&#8364; --}}
                                                 @php
                                                     $sub_question_child_ids = $sub_question_child_ids ?? [];
                                                     $prefilled = [];
@@ -410,8 +427,18 @@
 
                                                     if (!empty($answer_data) && $answer_data->count()) {
                                                         foreach ($answer_data as $ans) {
-                                                            $qid = $ans->question_id;
+                                                            $qid    = $ans->question_id;
+                                                            $pctx   = $ans->parent_context_id; // null for standalone, int for shared sub-questions
                                                             $question = $all_questions_flat->firstWhere('id', $qid);
+
+                                                            // Shared sub-question: store as 2D array [$qid][$parent_context_id]
+                                                            if ($pctx !== null) {
+                                                                if (!isset($prefilled[$qid]) || !is_array($prefilled[$qid])) {
+                                                                    $prefilled[$qid] = [];
+                                                                }
+                                                                $prefilled[$qid][$pctx] = $ans->user_answer;
+                                                                continue;
+                                                            }
 
                                                             // Check if this is a subjective question
                                                             if (
@@ -430,10 +457,8 @@
                                                                 }
 
                                                                 if ($isSubjectValue) {
-                                                                    // This is the main subject answer
                                                                     $prefilled[$qid] = $ans->user_answer;
                                                                 } else {
-                                                                    // This is a dependent answer
                                                                     if (!isset($prefilledSubDependent[$qid])) {
                                                                         $prefilledSubDependent[$qid] = [];
                                                                     }
@@ -443,19 +468,32 @@
                                                                 // For non-subjective questions
                                                                 if (isset($prefilledSub[$qid])) {
                                                                     $prefilledSub[$qid][] = $ans->user_answer;
-                                                                } elseif (isset($prefilled[$qid])) {
+                                                                } elseif (isset($prefilled[$qid]) && !is_array($prefilled[$qid])) {
                                                                     $prefilledSub[$qid] = [
                                                                         $prefilled[$qid],
                                                                         $ans->user_answer,
                                                                     ];
                                                                     unset($prefilled[$qid]);
-                                                                } else {
+                                                                } elseif (!isset($prefilled[$qid])) {
+                                                                    // Only set if not already populated (avoids overwriting
+                                                                    // array-based pctx prefill with a plain string)
                                                                     $prefilled[$qid] = $ans->user_answer;
                                                                 }
+                                                                // If $prefilled[$qid] is already an array (pctx-based),
+                                                                // leave it alone &#226;&#8364;&#8221; the render_question_row partial handles it
                                                             }
                                                         }
                                                     }
                                                     $selectArrIds = [];
+
+                                                    // IDs of questions that have __non_empty__ conditional children
+                                                    // These need data-question-id + non-empty-parent class on their input
+                                                    $nonEmptyParentIds = $related_questions
+                                                        ->where('parent_value', '__non_empty__')
+                                                        ->pluck('parent_question_id')
+                                                        ->filter()
+                                                        ->unique()
+                                                        ->toArray();
                                                 @endphp
 
                                                 <table class="table mb-0">
@@ -464,10 +502,75 @@
                                                         @foreach ($related_questions as $related_question)
                                                             @php
                                                                 $qid = $related_question->id;
-                                                                // Skip questions that appear as sub-children — rendered under their parent below
-                                                                if (in_array($qid, $sub_question_child_ids)) continue;
-                                                                $savedAnswer = $prefilled[$qid] ?? '';
+                                                                if (in_array($qid, $sub_question_child_ids) && empty($related_question->parent_question_id)) continue;
+
+                                                                // &#226;&#8221;&#8364;&#226;&#8221;&#8364; pctx input naming &#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;
+                                                                // Conditional children (is_parent=0, parent_question_id set)
+                                                                // use {qid}_pctx_{parent_question_id} so each parent-child
+                                                                // relationship gets its own separate answer record.
+                                                                // This allows the same child question to be triggered by
+                                                                // multiple different Yes/No or Dropdown parents and still
+                                                                // store distinct answers per triggering parent.
+                                                                $conditionalParentId = ($related_question->is_parent == 0 && $related_question->parent_question_id)
+                                                                    ? $related_question->parent_question_id
+                                                                    : null;
+                                                                $mainInputName = $conditionalParentId
+                                                                    ? $qid . '_pctx_' . $conditionalParentId
+                                                                    : (string)$qid;
+
+                                                                // Prefill: use pctx-based lookup for conditional children
+                                                                $rawPrefill = $prefilled[$qid] ?? '';
+                                                                if ($conditionalParentId && is_array($rawPrefill)) {
+                                                                    // New format: pctx stored per parent
+                                                                    $savedAnswer = $rawPrefill[$conditionalParentId] ?? $rawPrefill[null] ?? '';
+                                                                } elseif (is_array($rawPrefill)) {
+                                                                    // Sub-question only (no conditional parent in main loop)
+                                                                    $savedAnswer = $rawPrefill[null] ?? '';
+                                                                } else {
+                                                                    $savedAnswer = $rawPrefill;
+                                                                }
                                                                 $savedSub = $prefilledSub[$qid] ?? [];
+
+                                                                // &#226;&#8221;&#8364;&#226;&#8221;&#8364; Build validation HTML attributes from question config &#226;&#8221;&#8364;&#226;&#8221;&#8364;
+                                                                $vRule  = $related_question->validation_rule ?? 'none';
+                                                                $vMin   = $related_question->validation_min;
+                                                                $vMax   = $related_question->validation_max;
+                                                                $vRegex = $related_question->validation_regex;
+                                                                $vAttrs = '';
+                                                                $vMsg   = '';
+                                                                switch ($vRule) {
+                                                                    case 'numericrange':
+                                                                        $vAttrs = 'type="number"'
+                                                                            . ($vMin !== null ? " min=\"{$vMin}\"" : '')
+                                                                            . ($vMax !== null ? " max=\"{$vMax}\"" : '');
+                                                                        $vMsg = "Enter a number" . ($vMin !== null ? " &#226;&#8240;&#165; {$vMin}" : '') . ($vMax !== null ? " and &#226;&#8240;&#164; {$vMax}" : '');
+                                                                        break;
+                                                                    case 'digitlength':
+                                                                        $vAttrs = 'inputmode="numeric" pattern="\d{'
+                                                                            . ($vMin ?? '1') . ',' . ($vMax ?? '') . '}"';
+                                                                        $vMsg = "Enter " . ($vMin == $vMax ? "{$vMin}" : "{$vMin}&#226;&#8364;&#8220;{$vMax}") . " digits";
+                                                                        break;
+                                                                    case 'textlength':
+                                                                        $vAttrs = ($vMin !== null ? " minlength=\"{$vMin}\"" : '')
+                                                                            . ($vMax !== null ? " maxlength=\"{$vMax}\"" : '');
+                                                                        $vMsg = "Enter " . ($vMin !== null ? "at least {$vMin}" : '') . ($vMax !== null ? "&#226;&#8364;&#8220;{$vMax}" : '') . " characters";
+                                                                        break;
+                                                                    case 'email':
+                                                                        $vAttrs = 'type="email"';
+                                                                        $vMsg   = "Enter a valid email address";
+                                                                        break;
+                                                                    case 'phone':
+                                                                        $vAttrs = 'type="tel" pattern="[6-9]\d{9}" inputmode="numeric"';
+                                                                        $vMsg   = "Enter a valid 10-digit mobile number";
+                                                                        break;
+                                                                    case 'regex':
+                                                                        if ($vRegex) {
+                                                                            $vAttrs = 'pattern="' . e($vRegex) . '"';
+                                                                            $vMsg   = "Value does not match the required format";
+                                                                        }
+                                                                        break;
+                                                                }
+                                                                $vDataAttrs = $vMsg ? "data-validation-msg=\"" . e($vMsg) . "\"" : '';
                                                             @endphp
 
                                                             <tr class="mt-2 question-row {{ $related_question->is_parent == 0 ? 'child-question d-none' : '' }} {{ $related_question->question_type === 'Multi Response' ? 'outlet-section-header' : '' }}"
@@ -496,12 +599,14 @@
                                                                                             $savedPaths = is_array($decoded) ? $decoded : [$savedAnswer];
                                                                                         }
                                                                                     @endphp
+                                                                                    {{-- Use mainInputName (includes pctx) as unique key so the same Image
+                                                                                         question linked to multiple parents each gets its own independent wrapper --}}
                                                                                     <div class="multi-image-wrapper"
-                                                                                         data-qid="{{ $qid }}"
+                                                                                         data-qid="{{ $mainInputName }}"
                                                                                          data-upload-url="{{ route('upload.activity.image.temp') }}"
-                                                                                         data-row-id="{{ $row_data->id }}">
+                                                                                         data-row-id="{{ $row_data->id }}"
+                                                                                         style="overflow:visible;">
 
-                                                                                        {{-- Already-saved images (revisit) --}}
                                                                                         @foreach ($savedPaths as $sp)
                                                                                             <div class="multi-img-row d-flex align-items-center gap-2 mb-2 saved-img-row">
                                                                                                 <img src="{{ asset($sp) }}"
@@ -510,41 +615,32 @@
                                                                                                     {{ basename($sp) }}
                                                                                                 </span>
                                                                                                 <button type="button" class="btn btn-outline-danger btn-sm remove-saved-img-btn flex-shrink-0"
-                                                                                                        style="width:32px;height:32px;padding:0;font-size:16px;line-height:1;" title="Remove">×</button>
-                                                                                                <input type="hidden" name="multi_images_{{ $qid }}[]" value="{{ $sp }}">
+                                                                                                        style="width:32px;height:32px;padding:0;font-size:16px;line-height:1;" title="Remove">&#215;</button>
+                                                                                                <input type="hidden" name="multi_images_{{ $mainInputName }}[]" value="{{ $sp }}">
                                                                                             </div>
                                                                                         @endforeach
 
-                                                                                        {{-- New file input rows --}}
-                                                                                        <div class="multi-img-inputs" id="inputs_{{ $qid }}">
-                                                                                            <div class="multi-img-row d-flex align-items-center gap-2 mb-2">
-                                                                                                {{-- Preview thumbnail (hidden until file selected) --}}
-                                                                                                <div class="img-preview-box flex-shrink-0"
-                                                                                                     style="width:56px;height:56px;border-radius:6px;border:2px dashed #ccc;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f8f9fa;">
-                                                                                                    <span class="preview-placeholder text-muted" style="font-size:20px;">🖼</span>
-                                                                                                </div>
-                                                                                                <input type="file"
-                                                                                                       class="form-control form-control-sm multi-image-file-input"
-                                                                                                       accept="image/jpeg,image/png,image/jpg,image/gif,image/webp"
-                                                                                                       style="flex:1;">
-                                                                                                <button type="button"
-                                                                                                        class="btn btn-outline-secondary btn-sm add-image-row-btn flex-shrink-0"
-                                                                                                        data-qid="{{ $qid }}"
-                                                                                                        style="width:32px;height:32px;padding:0;font-size:20px;line-height:1;">+</button>
-                                                                                            </div>
+                                                                                        <div class="multi-img-inputs" id="inputs_{{ $mainInputName }}" style="overflow:visible;">
+                                                                                            @include('masters.users.partials.image_input_row', ['inputName' => $mainInputName, 'isFirst' => true])
                                                                                         </div>
 
-                                                                                        {{-- Upload progress bar (shown on save) --}}
-                                                                                        <div class="multi-upload-progress d-none mt-1" id="progress_{{ $qid }}">
+                                                                                        <div class="multi-upload-progress d-none mt-1" id="progress_{{ $mainInputName }}">
                                                                                             <div class="d-flex align-items-center gap-2">
                                                                                                 <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-                                                                                                <small class="text-muted">Uploading images, please wait…</small>
+                                                                                                <small class="text-muted">Uploading images...</small>
                                                                                             </div>
                                                                                         </div>
 
                                                                                         @if ($related_question->answer_type && empty($savedPaths))
-                                                                                            <input type="hidden" class="multi-image-required" data-qid="{{ $qid }}">
+                                                                                            <input type="hidden" class="multi-image-required" data-qid="{{ $mainInputName }}">
                                                                                         @endif
+                                                                                    </div>
+                                                                                    {{-- Button OUTSIDE the wrapper -- cannot be clipped by any overflow:hidden on the wrapper --}}
+                                                                                    <div class="add-image-row-btn-wrap" data-for-qid="{{ $mainInputName }}">
+                                                                                        <button type="button" class="add-image-row-btn" data-qid="{{ $mainInputName }}"
+                                                                                                onmousedown="this.blur()">
+                                                                                            + add more
+                                                                                        </button>
                                                                                     </div>
                                                                                 @else
                                                                                     @if ($savedAnswer)
@@ -552,27 +648,44 @@
                                                                                             <img src="{{ asset($savedAnswer) }}"
                                                                                                 alt="Existing image"
                                                                                                 style="max-width:100%; max-height:160px; border-radius:6px; border:1px solid #ddd;">
-                                                                                            <small class="text-muted d-block mt-1">Current image — upload a new one to replace it</small>
+                                                                                            <small class="text-muted d-block mt-1">Current image &#226;&#8364;&#8221; upload a new one to replace it</small>
                                                                                         </div>
-                                                                                        <input type="hidden" name="{{ $qid }}_existing" value="{{ $savedAnswer }}">
+                                                                                        <input type="hidden" name="{{ $mainInputName }}_existing" value="{{ $savedAnswer }}">
                                                                                     @endif
-                                                                                    <input name="{{ $qid }}" type="file"
-                                                                                        class="form-control"
-                                                                                        @if ($related_question->answer_type && !$savedAnswer) required @endif>
+                                                                                    @php $camUid = $mainInputName . '_single_' . uniqid(); @endphp
+                                                                                    <input type="file" id="cam_{{ $camUid }}" name="{{ $mainInputName }}" class="d-none" accept="image/*" capture="environment" @if($related_question->answer_type && !$savedAnswer) required @endif>
+                                                                                    <input type="file" id="gal_{{ $camUid }}" name="{{ $mainInputName }}" class="d-none" accept="image/*" @if($related_question->answer_type && !$savedAnswer) required @endif>
+                                                                                    <div class="d-flex gap-2 mt-1">
+                                                                                        <button type="button" onclick="document.getElementById('cam_{{ $camUid }}').click()" class="btn btn-sm" style="flex:1;border:1.5px solid #2563EB;background:#EFF6FF;color:#1D4ED8;font-weight:600;">&#128247; Camera</button>
+                                                                                        <button type="button" onclick="document.getElementById('gal_{{ $camUid }}').click()" class="btn btn-sm" style="flex:1;border:1.5px solid #059669;background:#F0FDF4;color:#065F46;font-weight:600;">&#128247; Gallery</button>
+                                                                                    </div>
+                                                                                    <div id="fn_{{ $camUid }}" style="font-size:11px;color:#6B7280;margin-top:4px;display:none;"></div>
+                                                                                    <script>
+                                                                                    (function(){['cam_','gal_'].forEach(function(p){var el=document.getElementById(p+'{{ $camUid }}');if(!el)return;el.addEventListener('change',function(){if(this.files&&this.files[0]){document.getElementById('fn_{{ $camUid }}').textContent=this.files[0].name;document.getElementById('fn_{{ $camUid }}').style.display='block';}});});})();
+                                                                                    </script>
                                                                                 @endif
                                                                             @break
 
                                                                             @case('Free Text')
-                                                                                <input type="text" value="{{ $savedAnswer }}"
-                                                                                    name="{{ $qid }}" class="form-control"
+                                                                                <input value="{{ $savedAnswer }}"
+                                                                                    name="{{ $mainInputName }}"
+                                                                                    class="form-control {{ in_array($qid,$nonEmptyParentIds)?'non-empty-parent':'' }}"
+                                                                                    @if(in_array($qid,$nonEmptyParentIds)) data-question-id="{{ $qid }}" @endif
+                                                                                    {!! $vAttrs !!} {!! $vDataAttrs !!}
                                                                                     @if ($related_question->answer_type) required data-required="true" @endif>
+                                                                                @if($related_question->help_text)
+                                                                                    <small class="text-muted">{{ $related_question->help_text }}</small>
+                                                                                @endif
+                                                                                @if($vMsg)
+                                                                                    <small class="text-muted d-block">{{ $vMsg }}</small>
+                                                                                @endif
                                                                             @break
 
                                                                             @case('Yes / No')
                                                                                 <select
                                                                                     class="form-select {{ $related_question->is_parent == 1 ? 'parent-question' : '' }}"
                                                                                     data-question-id="{{ $qid }}"
-                                                                                    name="{{ $qid }}"
+                                                                                    name="{{ $mainInputName }}"
                                                                                     @if ($related_question->answer_type) required data-required="true" @endif>
                                                                                     <option value="">Select ..</option>
                                                                                     <option value="Yes"
@@ -588,7 +701,7 @@
                                                                                 <select
                                                                                     class="form-select {{ $related_question->is_parent == 1 ? 'parent-question' : '' }}"
                                                                                     data-question-id="{{ $qid }}"
-                                                                                    name="{{ $qid }}"
+                                                                                    name="{{ $mainInputName }}"
                                                                                     @if ($related_question->answer_type) required data-required="true" @endif>
                                                                                     <option value="">Select Dropdown</option>
                                                                                     @foreach ($related_question->getOptions as $questionOption)
@@ -649,15 +762,29 @@
                                                                                     }
                                                                                 @endphp
                                                                                 <input type="date" value="{{ $savedDate }}"
-                                                                                    name="{{ $qid }}" class="form-control"
+                                                                                    name="{{ $mainInputName }}" class="form-control {{ in_array($qid,$nonEmptyParentIds)?'non-empty-parent':'' }}"
+                                                                                    @if(in_array($qid,$nonEmptyParentIds)) data-question-id="{{ $qid }}" @endif
+                                                                                    @if($related_question->date_min) min="{{ $related_question->date_min }}" @endif
+                                                                                    @if($related_question->date_max) max="{{ $related_question->date_max }}" @endif
                                                                                     @if ($related_question->answer_type) required data-required="true" @endif>
+                                                                                @if($related_question->date_min || $related_question->date_max)
+                                                                                    <small class="text-muted">
+                                                                                        @if($related_question->date_min && $related_question->date_max)
+                                                                                            Date must be between {{ $related_question->date_min }} and {{ $related_question->date_max }}
+                                                                                        @elseif($related_question->date_min)
+                                                                                            Date must be on or after {{ $related_question->date_min }}
+                                                                                        @else
+                                                                                            Date must be on or before {{ $related_question->date_max }}
+                                                                                        @endif
+                                                                                    </small>
+                                                                                @endif
                                                                             @break
 
                                                                             @case('Date & Time')
                                                                                 @php
                                                                                     $savedDT = '';
                                                                                     if ($savedAnswer) {
-                                                                                        // Stored as d/m/Y H:i — try explicit format first, then fallback to parse
+                                                                                        // Stored as d/m/Y H:i &#226;&#8364;&#8221; try explicit format first, then fallback to parse
                                                                                         try {
                                                                                             $savedDT = \Carbon\Carbon::createFromFormat('d/m/Y H:i', $savedAnswer)->format('Y-m-d\TH:i');
                                                                                         } catch (\Exception $e) {
@@ -671,14 +798,16 @@
                                                                                 @endphp
                                                                                 <input type="datetime-local"
                                                                                     value="{{ $savedDT }}"
-                                                                                    name="{{ $qid }}" class="form-control"
+                                                                                    name="{{ $mainInputName }}" class="form-control"
+                                                                                    @if($related_question->date_min) min="{{ $related_question->date_min }}T00:00" @endif
+                                                                                    @if($related_question->date_max) max="{{ $related_question->date_max }}T23:59" @endif
                                                                                     @if ($related_question->answer_type) required data-required="true" @endif>
                                                                             @break
 
                                                                             @case('Location')
                                                                                 <input type="text"
                                                                                     id="location_{{ $qid }}"
-                                                                                    name="{{ $qid }}"
+                                                                                    name="{{ $mainInputName }}"
                                                                                     class="form-control get_location"
                                                                                     value="{{ $savedAnswer }}"
                                                                                     @if ($related_question->answer_type) required data-required="true" @endif
@@ -697,17 +826,17 @@
                                                                                     <div class="mb-2">
                                                                                         <a href="{{ asset($savedAnswer) }}"
                                                                                             target="_blank"
-                                                                                            class="btn btn-sm btn-outline-secondary">📎
+                                                                                            class="btn btn-sm btn-outline-secondary">&#240;&#376;&#8220;&#381;
                                                                                             View existing file</a>
                                                                                         <small
                                                                                             class="text-muted d-block mt-1">Upload
                                                                                             a new file to replace it</small>
                                                                                     </div>
                                                                                     <input type="hidden"
-                                                                                        name="{{ $qid }}_existing"
+                                                                                        name="{{ $mainInputName }}_existing"
                                                                                         value="{{ $savedAnswer }}">
                                                                                 @endif
-                                                                                <input type="file" name="{{ $qid }}"
+                                                                                <input type="file" name="{{ $mainInputName }}"
                                                                                     class="form-control"
                                                                                     @if ($related_question->answer_type && !$savedAnswer) required @endif>
                                                                             @break
@@ -754,7 +883,7 @@
                                                                                     <audio id="audio-player-{{ $qid }}"
                                                                                         controls class="d-none mt-2 w-100"></audio>
                                                                                     <input type="hidden"
-                                                                                        name="{{ $qid }}"
+                                                                                        name="{{ $mainInputName }}"
                                                                                         class="audio-data"
                                                                                         data-id="{{ $qid }}"
                                                                                         value="{{ $savedAnswer ?? '' }}">
@@ -780,7 +909,7 @@
                                                                                         </div>
                                                                                         {{-- Keep existing path as fallback --}}
                                                                                         <input type="hidden"
-                                                                                            name="{{ $qid }}_existing_path"
+                                                                                            name="{{ $mainInputName }}_existing_path"
                                                                                             value="{{ $savedAnswer }}">
                                                                                     @endif
                                                                                     <div class="video-preview-container">
@@ -812,7 +941,7 @@
                                                                                     <div id="video-recording-status-{{ $qid }}"
                                                                                         class="recording-status"></div>
                                                                                     <input type="hidden"
-                                                                                        name="{{ $qid }}"
+                                                                                        name="{{ $mainInputName }}"
                                                                                         class="video-data"
                                                                                         data-id="{{ $qid }}"
                                                                                         value="{{ $savedAnswer ?? '' }}">
@@ -832,7 +961,7 @@
                                                                                     <select class="form-select subjective_ques"
                                                                                         @if ($related_question->answer_type) required data-required="true" @endif
                                                                                         data-q_id="{{ $qid }}"
-                                                                                        name="{{ $qid }}">
+                                                                                        name="{{ $mainInputName }}">
                                                                                         <option value="">Select Subject ..
                                                                                         </option>
                                                                                         @foreach ($related_question->getSubjects as $questionSubjects)
@@ -1004,7 +1133,7 @@
                                                                                                         <a href="{{ asset($depVal) }}"
                                                                                                             target="_blank"
                                                                                                             class="btn btn-sm btn-outline-secondary mb-1 {{ $subjectSaved === $subject->subject ? '' : 'd-none' }}">
-                                                                                                            📎 View existing file
+                                                                                                            &#240;&#376;&#8220;&#381; View existing file
                                                                                                         </a>
                                                                                                         <input type="hidden"
                                                                                                             name="{{ $qid }}FileUpload_existing"
@@ -1119,7 +1248,7 @@
                                                                                 <input type="text"
                                                                                     value="{{ $savedAnswer }}"
                                                                                     class="form-control"
-                                                                                    name="{{ $qid }}"
+                                                                                    name="{{ $mainInputName }}"
                                                                                     @if ($related_question->answer_type) required data-required="true" @endif>
                                                                         @endswitch
 
@@ -1127,7 +1256,7 @@
                                                                 </td>
                                                             </tr>
 
-                                                            {{-- ── Sub-Questions: grouped in a card ── --}}
+                                                            {{-- &#226;&#8221;&#8364;&#226;&#8221;&#8364; Sub-Questions: grouped in a card &#226;&#8221;&#8364;&#226;&#8221;&#8364; --}}
                                                             @if ($related_question->subQuestions->count() > 0)
                                                                 <tr class="sub-questions-card-row">
                                                                     <td style="padding: 4px 0 10px 0;">
@@ -1137,9 +1266,12 @@
                                                                                     @foreach ($related_question->subQuestions as $sub_link)
                                                                                         @if ($sub_link->childQuestion)
                                                                                             @include('masters.users.partials.render_question_row', [
-                                                                                                'subQuestion' => $sub_link->childQuestion,
-                                                                                                'depth'       => 1,
-                                                                                                'prefilled'   => $prefilled,
+                                                                                                'subQuestion'      => $sub_link->childQuestion,
+                                                                                                'depth'            => 1,
+                                                                                                'prefilled'        => $prefilled,
+                                                                                                'parentQuestionId' => $qid,
+                                                                                                'subLinkTrigger'   => $sub_link->trigger_value,
+                                                                                                'row_data'         => $row_data,
                                                                                             ])
                                                                                         @endif
                                                                                     @endforeach
@@ -1149,7 +1281,7 @@
                                                                     </td>
                                                                 </tr>
                                                             @endif
-                                                            {{-- ── End Sub-Questions ── --}}
+                                                            {{-- &#226;&#8221;&#8364;&#226;&#8221;&#8364; End Sub-Questions &#226;&#8221;&#8364;&#226;&#8221;&#8364; --}}
 
                                                         @endforeach
                                                     </tbody>
@@ -1159,8 +1291,20 @@
                                                     id="latitude" value="">
                                                 <input type="hidden" class="form-control" name="longitude"
                                                     id="longitude" value="">
-                                                <button type="submit" id="approve" name="save"
-                                                    class="btn btn-primary float-end">Save</button>
+                                                {{-- When another instance is sent back, lock this instance's Save button
+                                                     unless THIS instance is also the one sent back --}}
+                                                @php
+                                                    $thisInstanceLocked = !empty($has_any_sent_back) && empty($is_sent_back);
+                                                @endphp
+                                                @if ($thisInstanceLocked)
+                                                    <button type="button" class="btn btn-secondary float-end" disabled
+                                                        title="This instance is verified. Fix the sent-back instance(s) first.">
+                                                        <i class="fa fa-lock me-1"></i> Verified
+                                                    </button>
+                                                @else
+                                                    <button type="submit" id="approve" name="save"
+                                                        class="btn btn-primary float-end">Save</button>
+                                                @endif
                                                 <button type="button" id="reject" name="reject"
                                                     class="btn btn-danger float-end d-none">Reject</button>
                                             </form>
@@ -1190,7 +1334,7 @@
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
     <script>
     
-    // ── Universal mobile keyboard suppression ──
+    // &#226;&#8221;&#8364;&#226;&#8221;&#8364; Universal mobile keyboard suppression &#226;&#8221;&#8364;&#226;&#8221;&#8364;
 // Runs on every page, only on mobile browsers
 if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
     
@@ -1260,7 +1404,17 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                 $('tr.child-question[data-parent-id="' + parentId + '"]').each(function() {
                     let childParentValue = String($(this).data('parent-value')).trim();
 
-                    if (selectedValue && childParentValue === selectedValue) {
+                    // Match logic:
+                    // '__non_empty__' → show when parent has ANY non-empty answer
+                    // specific value   → show when parent answer === that value (original behaviour)
+                    var shouldShow = false;
+                    if (childParentValue === '__non_empty__') {
+                        shouldShow = selectedValue.length > 0;
+                    } else {
+                        shouldShow = selectedValue !== '' && childParentValue === selectedValue;
+                    }
+
+                    if (shouldShow) {
                         $(this).removeClass('d-none');
                         $(this).find('.recording-section').removeClass('d-none');
                         lastInserted.after($(this));
@@ -1369,7 +1523,12 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                 const $childRow = $(this);
                 const childParentValue = String($childRow.data('parent-value') || '').trim();
 
-                if (childParentValue === selectedValue) {
+                // Support __non_empty__: show when parent has any answer
+                const shouldShow = childParentValue === '__non_empty__'
+                    ? selectedValue.length > 0
+                    : childParentValue === selectedValue;
+
+                if (shouldShow) {
                     showQuestionRow($childRow);
 
                     $lastInserted.after($childRow);
@@ -1406,12 +1565,39 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
 
             $('.parent-question').each(function() {
                 const $parentSelect = $(this);
-
                 if (!$parentSelect.closest('tr').hasClass('d-none')) {
                     showMatchingChildren($parentSelect, true);
                 }
             });
+
+            // &#226;&#8221;&#8364;&#226;&#8221;&#8364; New-style sub-question trigger visibility &#226;&#8221;&#8364;&#226;&#8221;&#8364;
+            // For sub-question rows with data-trigger-value, show only when their parent matches
+            evaluateSubQuestionTriggers();
         }
+
+        function evaluateSubQuestionTriggers() {
+            $('tr.sub-question-new-row[data-trigger-value]').each(function () {
+                var $row       = $(this);
+                var triggerVal = ($row.data('trigger-value') || '').toString().trim();
+                var parentId   = ($row.data('pctx-parent-id') || '').toString().trim();
+                if (!triggerVal || !parentId) return; // no trigger &#226;&#8364;&#8221; always visible
+
+                // Find the parent question's current answer
+                var $parentInput = $('[name="' + parentId + '"], [data-question-id="' + parentId + '"]').first();
+                var currentVal   = ($parentInput.val() || '').toString().trim();
+
+                if (currentVal === triggerVal) {
+                    $row.removeClass('d-none');
+                } else {
+                    $row.addClass('d-none');
+                }
+            });
+        }
+
+        // Re-evaluate whenever any question answer changes
+        $(document).on('change input', 'select, input[type="text"], input[type="number"]', function () {
+            evaluateSubQuestionTriggers();
+        });
 
 
         function enableFormInputs(lat, lng) {
@@ -1425,6 +1611,12 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
             $('#activityForm').find('button:not([type="submit"])').prop('disabled', false);
             $('#activityForm').find('.start-audio-recording, .start-video-recording').prop('disabled', false);
             $('#activityForm').find('#approve, #reject').prop('disabled', false);
+
+            // After enabling all inputs, initialize __non_empty__ conditional children
+            // for any parent that already has a value (e.g., pre-filled on revisit)
+            $('.non-empty-parent').each(function() {
+                $(this).trigger('change');
+            });
             // Init select2 on ALL multi-selects in the form (covers main + sub-question multi-selects)
             $('#activityForm select[multiple]').each(function () {
                 $(this).select2({
@@ -1467,7 +1659,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
             
             
             @if (session()->has('error'))
-                // Error occurred — show error alert directly, skip location success alert
+                // Error occurred &#226;&#8364;&#8221; show error alert directly, skip location success alert
                 Swal.fire({
                     icon: 'error',
                     title: 'Submission Failed',
@@ -1556,7 +1748,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                 Swal.fire({
                     icon: 'warning',
                     title: 'Location Permission Denied',
-                    html: `<p>You have previously denied location access for this site.</p><p><strong>To enable location:</strong></p><ol style="text-align:left;margin-left:20px;"><li>Click the lock icon (🔒) in your browser's address bar</li><li>Find "Location" in the permissions list</li><li>Change from "Block" to "Allow"</li><li>Click "Retry Location Access" below</li></ol>`,
+                    html: `<p>You have previously denied location access for this site.</p><p><strong>To enable location:</strong></p><ol style="text-align:left;margin-left:20px;"><li>Click the lock icon (&#240;&#376;&#8221;&#8217;) in your browser's address bar</li><li>Find "Location" in the permissions list</li><li>Change from "Block" to "Allow"</li><li>Click "Retry Location Access" below</li></ol>`,
                     confirmButtonText: 'Got it',
                     showCancelButton: false,
                     allowOutsideClick: false
@@ -1608,7 +1800,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
         var _verifyOtpUrl = '{{ route('verify_otp') }}';
         var _addInstanceUrl = '{{ route('user.activity.add_instance') }}';
 
-        // ── Unified form submit: images upload first, then AJAX save, then OTP if needed ──
+        // &#226;&#8221;&#8364;&#226;&#8221;&#8364; Unified form submit: images upload first, then AJAX save, then OTP if needed &#226;&#8221;&#8364;&#226;&#8221;&#8364;
         $('#activityForm').on('submit', function(e) {
             e.preventDefault();
             var $form = $(this);
@@ -1650,50 +1842,134 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                 });
             });
 
-            // 4. Show saving indicator
+            // 4. Show SweetAlert loader + block navigation while submitting
+            var _totalUploads = uploads.length;
             Swal.fire({
-                title: uploads.length ? 'Uploading images…' : 'Saving…',
-                html: '<p style="font-size:14px;color:#555;">Please wait.</p>',
-                allowOutsideClick: false, allowEscapeKey: false,
-                showConfirmButton: false, didOpen: () => Swal.showLoading()
+                title: _totalUploads ? 'Uploading images...' : 'Saving...',
+                html: _totalUploads
+                    ? '<div id="swalProgressWrap" style="margin-top:8px;"><div style="height:6px;background:#E5E7EB;border-radius:4px;overflow:hidden;"><div id="swalProgressBar" style="height:6px;background:#111827;border-radius:4px;width:0%;transition:width .3s;"></div></div><small id="swalProgressTxt" style="color:#6B7280;font-size:12px;margin-top:6px;display:block;">0 of ' + _totalUploads + ' images</small></div><p style="font-size:12px;color:#9CA3AF;margin-top:10px;margin-bottom:0;"><b>Please do not go back or close this page.</b></p>'
+                    : '<p style="font-size:13px;color:#555;margin:0;">Please wait, do not go back.</p>',
+                allowOutsideClick: false,
+                allowEscapeKey: false,
+                showConfirmButton: false,
+                didOpen: function() { Swal.showLoading(); }
             });
-            $('#approve').prop('disabled', true).text('Saving…');
+            $('#approve').prop('disabled', true).text('Saving...');
 
-            // 5. Upload images sequentially, then AJAX-submit the form
-            var idx = 0;
-            function uploadNext() {
-                if (idx >= uploads.length) {
-                    doAjaxSubmit();
-                    return;
-                }
-                var u  = uploads[idx++];
-                var fd = new FormData();
-                fd.append('image',     u.input.files[0]);
-                fd.append('row_id',    u.rowId);
-                fd.append('latitude',  $('#latitude').val());
-                fd.append('longitude', $('#longitude').val());
-                fd.append('_token',    _csrfToken);
-                $.ajax({
-                    url: u.url, type: 'POST', data: fd,
-                    processData: false, contentType: false,
-                    success: function (res) {
-                        if (res.path) {
-                            $('<input type="hidden">').attr('name', 'multi_images_' + u.qid + '[]').val(res.path).appendTo($(u.wrapper));
-                        }
-                        uploadNext();
-                    },
-                    error: function (xhr) {
-                        Swal.close();
-                        $('#approve').prop('disabled', false).text('Save');
-                        var msg = (xhr.responseJSON && xhr.responseJSON.error) ? xhr.responseJSON.error : 'Image upload failed.';
-                        Swal.fire('Upload Error', msg, 'error');
-                    }
+            // Block back button and page close for the duration of submission
+            history.pushState(null, '', location.href);
+            _popHandler    = function() { history.pushState(null, '', location.href); };
+            _unloadHandler = function(e) { e.preventDefault(); e.returnValue = ''; };
+            window.addEventListener('popstate',    _popHandler);
+            window.addEventListener('beforeunload', _unloadHandler);
+            $(document).on('click.submitlock', 'a', function(e) { e.preventDefault(); });
+
+            // 5. Compress then upload ALL images in PARALLEL
+            //    Compression: 4MB camera photo -> ~120KB (JPEG 1024px, 70% quality)
+            //    Result: 30-40&#215; smaller files -> 30-40&#215; faster upload on slow networks
+            function compressImage(file) {
+                return new Promise(function(resolve) {
+                    // Skip compression for already-small files (< 200KB)
+                    if (file.size < 200 * 1024) { resolve(file); return; }
+                    var img = new Image();
+                    var url = URL.createObjectURL(file);
+                    img.onload = function() {
+                        URL.revokeObjectURL(url);
+                        var MAX = 1024; // max width/height px
+                        var w = img.width, h = img.height;
+                        if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+                        if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+                        var canvas = document.createElement('canvas');
+                        canvas.width = w; canvas.height = h;
+                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                        canvas.toBlob(function(blob) {
+                            resolve(blob || file); // fallback to original if toBlob fails
+                        }, 'image/jpeg', 0.72);
+                    };
+                    img.onerror = function() { URL.revokeObjectURL(url); resolve(file); };
+                    img.src = url;
                 });
             }
 
-            function doAjaxSubmit() {
-                Swal.update({ title: 'Saving…' });
+            if (uploads.length === 0) {
+                doAjaxSubmit();
+            } else {
+                var completedUploads = 0;
+                var lat = $('#latitude').val();
+                var lng = $('#longitude').val();
+
+                var uploadPromises = uploads.map(function(u) {
+                    return new Promise(function(resolve, reject) {
+                        compressImage(u.input.files[0]).then(function(blob) {
+                        var fd = new FormData();
+                        fd.append('image',     blob, 'photo.jpg');
+                        fd.append('row_id',    u.rowId);
+                        fd.append('latitude',  lat);
+                        fd.append('longitude', lng);
+                        fd.append('_token',    _csrfToken);
+
+                        fetch(u.url, { method: 'POST', body: fd })
+                            .then(function(resp) {
+                                return resp.ok ? resp.json() : Promise.reject(resp.statusText);
+                            })
+                            .then(function(res) {
+                                if (res.path) {
+                                    $('<input type="hidden">')
+                                        .attr('name', 'multi_images_' + u.qid + '[]')
+                                        .val(res.path)
+                                        .appendTo($(u.wrapper));
+                                }
+                                completedUploads++;
+                                var pct = Math.round((completedUploads / _totalUploads) * 100);
+                                $('#swalProgressBar').css('width', pct + '%');
+                                $('#swalProgressTxt').text(completedUploads + ' of ' + _totalUploads + ' images');
+                                resolve(res);
+                            })
+                            .catch(function(err) { reject(err); });
+                        }); // end compressImage().then
+                    });
+                });
+
+                Promise.all(uploadPromises)
+                    .then(function() { doAjaxSubmit(); })
+                    .catch(function(err) {
+                        // On slow network: some images failed -- save text answers anyway,
+                        // show a warning (not a hard block), let user retry image uploads
+                        console.warn('Some image uploads failed:', err);
+                        unlockNavigation();
+                        Swal.close();
+                        $('#approve').prop('disabled', false).text('Save');
+                        Swal.fire({
+                            icon: 'warning',
+                            title: 'Image Upload Issue',
+                            html: 'Some images could not be uploaded due to slow network.<br><br>'
+                                + '<b>Your text answers are safe.</b> Try saving again when your connection improves.',
+                            showCancelButton: true,
+                            confirmButtonText: 'Save Answers Without Images',
+                            cancelButtonText: 'Try Again'
+                        }).then(function(result) {
+                            if (result.isConfirmed) {
+                                // Save text-only answers -- images skipped
+                                doAjaxSubmit(true);
+                            } else {
+                                // Re-enable save button so user can retry
+                                $('#approve').prop('disabled', false).text('Save');
+                            }
+                        });
+                    });
+            }
+
+            function doAjaxSubmit(skipImages) {
+                Swal.update({ title: 'Saving\u2026' });
                 var formData = new FormData($form[0]);
+                // If skipImages=true, remove image paths from FormData (save text answers only)
+                if (skipImages) {
+                    var toDelete = [];
+                    for (var pair of formData.entries()) {
+                        if (pair[0].startsWith('multi_images_')) toDelete.push(pair[0]);
+                    }
+                    toDelete.forEach(function(k) { formData.delete(k); });
+                }
                 $.ajax({
                     url: $form.attr('action'),
                     method: 'POST',
@@ -1702,18 +1978,26 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                     contentType: false,
                     headers: { 'X-Requested-With': 'XMLHttpRequest' },
                     success: function (res) {
+                        unlockNavigation();
                         Swal.close();
                         $('#approve').prop('disabled', false).text('Save');
                         if (res.success && res.otp_required) {
                             showOtpOverlay(res.row_id, res.activity_id);
                         } else if (res.success) {
                             Swal.fire({ icon: 'success', title: 'Saved!', text: res.message, timer: 1500, showConfirmButton: false })
-                                .then(() => location.reload());
+                                .then(() => {
+                                    if (res.redirectUrl) {
+                                        window.location.href = res.redirectUrl;
+                                    } else {
+                                        location.reload();
+                                    }
+                                });
                         } else {
                             Swal.fire({ icon: 'error', title: 'Error', text: res.message || 'Submission failed.' });
                         }
                     },
                     error: function (xhr) {
+                        unlockNavigation();
                         Swal.close();
                         $('#approve').prop('disabled', false).text('Save');
                         var msg = 'Submission failed. Please try again.';
@@ -1723,10 +2007,18 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                 });
             }
 
-            uploadNext();
         });
 
-        // ── Inline OTP Overlay (full-page blocking, no way to escape) ──────────
+        // -- Navigation lock helpers -------------------------------------------
+        var _popHandler    = null;
+        var _unloadHandler = null;
+        function unlockNavigation() {
+            if (_popHandler)    window.removeEventListener('popstate',    _popHandler);
+            if (_unloadHandler) window.removeEventListener('beforeunload', _unloadHandler);
+            $(document).off('click.submitlock');
+        }
+
+        // -- Inline OTP Overlay (full-page blocking, no way to escape) ----------
         function showOtpOverlay(rowId, activityId) {
             // Block browser back button while OTP is pending
             history.pushState(null, '', location.href);
@@ -1745,7 +2037,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                     background:rgba(0,0,0,0.85);
                     display:flex;align-items:center;justify-content:center;">
                   <div style="background:#fff;border-radius:14px;padding:28px 24px;width:92%;max-width:360px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.4);">
-                    <div style="font-size:36px;margin-bottom:8px;">🔐</div>
+                    <div style="font-size:36px;margin-bottom:8px;">&#240;&#376;&#8221;&#144;</div>
                     <h5 style="margin-bottom:4px;font-weight:700;">OTP Verification</h5>
                     <p style="font-size:13px;color:#666;margin-bottom:16px;">
                         Your answers have been saved.<br>Please verify your identity to complete submission.
@@ -1773,9 +2065,9 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
 
                     {{-- Step 3: success --}}
                     <div id="otpStep3" style="display:none;">
-                        <div style="font-size:48px;margin-bottom:8px;">✅</div>
+                        <div style="font-size:48px;margin-bottom:8px;">&#226;&#339;...</div>
                         <h6 style="font-weight:700;color:#28a745;">Verified!</h6>
-                        <p style="font-size:13px;color:#555;">OTP verified successfully. Redirecting…</p>
+                        <p style="font-size:13px;color:#555;">OTP verified successfully. Redirecting&#226;&#8364;&#166;</p>
                     </div>
                   </div>
                 </div>`);
@@ -1795,7 +2087,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                     return;
                 }
                 $('#otpStep1Error').hide();
-                var $btn = $(this).prop('disabled', true).text('Sending…');
+                var $btn = $(this).prop('disabled', true).text('Sending&#226;&#8364;&#166;');
                 $.ajax({
                     url: _sendOtpUrl, method: 'POST',
                     data: { _token: _csrfToken, mobile_no: mobile, row_id: rowId, activity_id: activityId },
@@ -1828,7 +2120,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                     return;
                 }
                 $('#otpStep2Error').hide();
-                var $btn = $(this).prop('disabled', true).text('Verifying…');
+                var $btn = $(this).prop('disabled', true).text('Verifying&#226;&#8364;&#166;');
                 $.ajax({
                     url: _verifyOtpUrl, method: 'POST',
                     data: { _token: _csrfToken, mobile_otp: code, mobile_no: mobile, row_id: rowId, activity_id: activityId },
@@ -1866,37 +2158,21 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
             });
         }
 
-        // ── Add Instance Button ──
+        // &#226;&#8221;&#8364;&#226;&#8221;&#8364; Add Instance Button &#226;&#8221;&#8364;&#226;&#8221;&#8364;
         $(document).on('click', '#addInstanceBtn', function() {
             if (!_allowRepeat) return;
-            Swal.fire({
-                title: 'New Instance',
-                html: `<p style="font-size:13px;color:#555;">Enter a label for the new instance</p>
-                       <input id="instance-label" class="swal2-input" type="text" placeholder="e.g. Visit 2">`,
-                confirmButtonText: 'Add',
-                confirmButtonColor: '#111',
-                showCancelButton: true,
-                preConfirm: () => {
-                    var label = document.getElementById('instance-label').value.trim();
-                    if (!label) { Swal.showValidationMessage('Please enter a label'); return false; }
-                    return label;
-                }
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    var form = $('<form method="POST" action="' + _addInstanceUrl + '" style="display:none">' +
-                        '<input name="_token" value="' + _csrfToken + '">' +
-                        '<input name="row_id" value="' + _rowId + '">' +
-                        '<input name="activity_id" value="' + _activityId + '">' +
-                        '<input name="group_id" value="' + (_groupId || '') + '">' +
-                        '<input name="instance_label" value="' + $('<div>').text(result.value).html() + '">' +
-                        '</form>');
-                    $('body').append(form);
-                    form.submit();
-                }
-            });
+            // No label prompt &#226;&#8364;&#8221; backend auto-generates "Instance N"
+            var form = $('<form method="POST" action="' + _addInstanceUrl + '" style="display:none">' +
+                '<input name="_token" value="' + _csrfToken + '">' +
+                '<input name="row_id" value="' + _rowId + '">' +
+                '<input name="activity_id" value="' + _activityId + '">' +
+                '<input name="group_id" value="' + (_groupId || '') + '">' +
+                '</form>');
+            $('body').append(form);
+            form.submit();
         });
 
-        // ── Submit (Close) Activity Button ──
+        // &#226;&#8221;&#8364;&#226;&#8221;&#8364; Submit (Close) Activity Button &#226;&#8221;&#8364;&#226;&#8221;&#8364;
         $(document).on('click', '#submitActivityBtn', function() {
             Swal.fire({
                 title: 'Submit Activity',
@@ -1917,7 +2193,13 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                     success: function(res) {
                         if (res.success) {
                             Swal.fire({ icon: 'success', title: 'Activity Submitted!', text: 'The activity has been closed.', timer: 1500, showConfirmButton: false })
-                                .then(() => { history.back(); });
+                                .then(() => {
+                                    if (res.redirectUrl) {
+                                        window.location.href = res.redirectUrl;
+                                    } else {
+                                        window.location.href = '{{ route("user.projects") }}';
+                                    }
+                                });
                         } else {
                             Swal.fire({ icon: 'error', title: 'Cannot Submit', text: res.message || 'All instances must be submitted first.' });
                         }
@@ -2032,12 +2314,38 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
             $(document).on('change', '.parent-question', function() {
                 const $parentSelect = $(this);
                 const parentId = $parentSelect.data('question-id');
-
-                // Hide all children and grandchildren of this parent first.
                 hideChildBranch(parentId);
-
-                // Show only the child branch matching the newly selected value.
                 showMatchingChildren($(this));
+            });
+
+            // __non_empty__ parents: any input/select/date change triggers show/hide
+            // These are non-Dropdown/Yes-No questions that have __non_empty__ conditional children
+            $(document).on('change input', '.non-empty-parent', function() {
+                var parentId    = $(this).data('question-id');
+                var currentVal  = String($(this).val() || '').trim();
+                var parentRow   = $(this).closest('tr');
+                var lastInserted = parentRow;
+
+                $('tr.child-question[data-parent-id="' + parentId + '"]').each(function() {
+                    var childParentValue = String($(this).data('parent-value') || '').trim();
+                    if (childParentValue !== '__non_empty__') return; // handled by other listener
+
+                    if (currentVal.length > 0) {
+                        $(this).removeClass('d-none');
+                        $(this).find('.recording-section').removeClass('d-none');
+                        lastInserted.after($(this));
+                        lastInserted = $(this);
+                        $(this).find('input, select, textarea').each(function() {
+                            $(this).prop('disabled', false); // ensure enabled after disableFormInputs
+                            if ($(this).attr('data-required') === 'true') $(this).prop('required', true);
+                        });
+                        $(this).find('button').prop('disabled', false);
+                    } else {
+                        $(this).addClass('d-none');
+                        $(this).find('.recording-section').addClass('d-none');
+                        $(this).find('input, select, textarea').prop('required', false);
+                    }
+                });
             });
 
 
@@ -2104,7 +2412,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                 let audioInput = $(".audio-data[data-id='" + id + "']");
                 let stopBtn = $(".stop-audio-recording[data-id='" + id + "']");
                 let deleteBtn = $(".delete-audio-recording[data-id='" + id + "']");
-                statusDiv.text("🎤 Recording...").removeClass().addClass("recording-status recording");
+                statusDiv.text("&#240;&#376;&#381;&#164; Recording...").removeClass().addClass("recording-status recording");
                 $(this).prop("disabled", true);
                 stopBtn.prop("disabled", false);
                 navigator.mediaDevices.getUserMedia({
@@ -2133,14 +2441,14 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                         reader.onloadend = function() {
                             audioInput.val(reader.result);
                         };
-                        statusDiv.text("✅ Recording completed").removeClass("recording")
+                        statusDiv.text("&#226;&#339;... Recording completed").removeClass("recording")
                             .addClass("stopped");
                         deleteBtn.prop("disabled", false);
                         stream.getTracks().forEach(track => track.stop());
                     };
                     audioMediaRecorder.start();
                 }).catch(error => {
-                    statusDiv.text("❌ Microphone access denied or unavailable");
+                    statusDiv.text("&#226;&#157;&#338; Microphone access denied or unavailable");
                     $(this).prop("disabled", false);
                     stopBtn.prop("disabled", true);
                     if (error.name === 'NotAllowedError') Swal.fire({
@@ -2186,7 +2494,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                 let videoInput = $(".video-data[data-id='" + id + "']");
                 let stopBtn = $(".stop-video-recording[data-id='" + id + "']");
                 let deleteBtn = $(".delete-video-recording[data-id='" + id + "']");
-                statusDiv.text("🎥 Starting camera...").removeClass().addClass(
+                statusDiv.text("&#240;&#376;&#381;&#165; Starting camera...").removeClass().addClass(
                     "recording-status recording");
                 $(this).prop("disabled", true);
                 stopBtn.prop("disabled", false);
@@ -2219,7 +2527,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                         videoPreview[0].srcObject = stream;
                         videoPreview[0].play();
                         statusDiv.text(
-                            `🎥 Recording... (${fileExtension.toUpperCase()} format)`);
+                            `&#240;&#376;&#381;&#165; Recording... (${fileExtension.toUpperCase()} format)`);
                         videoMediaRecorder.ondataavailable = event => {
                             if (event.data.size > 0) videoChunks[id].push(event.data);
                         };
@@ -2236,7 +2544,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                                 const base64Marker = 'base64,';
                                 const markerIndex = fullDataUrl.indexOf(base64Marker);
                                 if (markerIndex === -1) {
-                                    statusDiv.text("❌ Error preparing video data")
+                                    statusDiv.text("&#226;&#157;&#338; Error preparing video data")
                                         .removeClass("recording").addClass("stopped");
                                     return;
                                 }
@@ -2246,7 +2554,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                                 videoInput.val(`data:${cleanMime};base64,${rawBase64}`);
                             };
                             statusDiv.text(
-                                `✅ Recording completed (${fileExtension.toUpperCase()})`
+                                `&#226;&#339;... Recording completed (${fileExtension.toUpperCase()})`
                             ).removeClass("recording").addClass("stopped");
                             deleteBtn.prop("disabled", false);
                             stream.getTracks().forEach(track => track.stop());
@@ -2256,7 +2564,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                                 "recording") {
                                 videoMediaRecorder.stop();
                                 statusDiv.text(
-                                        "⏱️ Recording stopped (time limit reached)")
+                                        "&#226;&#143;&#177;&#239;&#184;&#143; Recording stopped (time limit reached)")
                                     .removeClass("recording").addClass("stopped");
                             }
                         }, 300000);
@@ -2296,7 +2604,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                                 }
                             }, 3);
                         } else {
-                            statusDiv.text("❌ Camera access denied or unavailable");
+                            statusDiv.text("&#226;&#157;&#338; Camera access denied or unavailable");
                             $(this).prop("disabled", false);
                             stopBtn.prop("disabled", true);
                             if (error.name === 'NotAllowedError') Swal.fire({
@@ -2439,7 +2747,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
 
                 if (qid === "" || subjectInfo === "") return;
 
-                // Hide ALL dependent sections before AJAX — fixes previously-selected subject staying visible
+                // Hide ALL dependent sections before AJAX &#226;&#8364;&#8221; fixes previously-selected subject staying visible
                 subjectTd.find('.recording-section').addClass('d-none');
                 subjectTd.find('select:not(.subjective_ques)').addClass('d-none').val('').removeAttr(
                     'required').prop('disabled', true);
@@ -2538,7 +2846,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                 $('#outlet_form').removeClass('d-none');
             });
 
-            // ── Multi-image: preview on select, upload on Save ───────────────────
+            // &#226;&#8221;&#8364;&#226;&#8221;&#8364; Multi-image: preview on select, upload on Save &#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;
 
             // Show local preview thumbnail immediately when user picks a file
             $(document).on('change', '.multi-image-file-input', function () {
@@ -2554,22 +2862,84 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                 reader.readAsDataURL(file);
             });
 
-            // "+" button: add another file input row
-            $(document).on('click', '.add-image-row-btn', function () {
-                var qid = $(this).data('qid');
-                var row = '<div class="multi-img-row d-flex align-items-center gap-2 mb-2">'
-                    + '<div class="img-preview-box flex-shrink-0" style="width:56px;height:56px;border-radius:6px;border:2px dashed #ccc;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f8f9fa;">'
-                    +   '<span class="preview-placeholder text-muted" style="font-size:20px;">🖼</span>'
+            // "+" persistent button -- max 10 images total (1 initial + 9 added).
+            // Never hides; disables with label when limit reached.
+            // Re-enables when a row is removed.
+            var MAX_IMAGES = 10;
+
+            // Find the + button for a given qid (it lives outside the wrapper in .add-image-row-btn-wrap)
+            function getAddBtn(qid) {
+                return $('[data-qid="' + qid + '"].add-image-row-btn');
+            }
+
+            function refreshAddBtn($btn, qid) {
+                var $container = $('#inputs_' + qid);
+                var count = $container.find('.multi-img-row').length;
+                if (count >= MAX_IMAGES) {
+                    $btn.prop('disabled', true).text('Max ' + MAX_IMAGES + ' images reached').css('opacity', '0.6');
+                } else {
+                    $btn.prop('disabled', false).text('+ add more').css('opacity', '1');
+                }
+                // Show first row's X when there are 2+ rows, hide when back to 1
+                var $firstX = $container.find('.multi-img-row:first .remove-img-row-btn');
+                if (count > 1) {
+                    $firstX.css({'visibility':'visible','pointer-events':'auto'});
+                } else {
+                    $firstX.css({'visibility':'hidden','pointer-events':'none'});
+                }
+            }
+
+            $(document).on('click', '.add-image-row-btn', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var $btn = $(this);
+                var qid  = $btn.data('qid');
+                var $container = $('#inputs_' + qid);
+                if ($container.find('.multi-img-row').length >= MAX_IMAGES) return;
+
+                // Identical to Blade partial image_input_row -- small 40px thumbnail, one-line layout
+                var uid = qid + '_r' + Date.now();
+                var row = '<div class="multi-img-row mb-2" style="box-sizing:border-box;">'
+                    + '<input type="file" id="cam_' + uid + '" class="multi-image-file-input d-none" accept="image/*" capture="environment">'
+                    + '<input type="file" id="gal_' + uid + '" class="multi-image-file-input d-none" accept="image/*">'
+                    + '<div style="display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;">'
+                    +   '<div id="prev_' + uid + '" style="width:40px;height:40px;min-width:40px;border-radius:6px;border:2px dashed #ccc;background:#f8f9fa center/cover no-repeat;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden;">'
+                    +     '<span id="icon_' + uid + '" style="font-size:14px;color:#aaa;">&#128444;</span>'
+                    +   '</div>'
+                    +   '<div style="display:flex;gap:5px;flex:1;min-width:0;">'
+                    +     '<button type="button" onmousedown="this.blur()" onclick="document.getElementById(\'cam_' + uid + '\').click()" style="flex:1;padding:8px 4px;border:1.5px solid #2563EB;border-radius:6px;background:#EFF6FF;color:#1D4ED8;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;min-width:0;">&#128247; Camera</button>'
+                    +     '<button type="button" onmousedown="this.blur()" onclick="document.getElementById(\'gal_' + uid + '\').click()" style="flex:1;padding:8px 4px;border:1.5px solid #059669;border-radius:6px;background:#F0FDF4;color:#065F46;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;min-width:0;">&#128247; Gallery</button>'
+                    +   '</div>'
+                    +   '<button type="button" class="remove-img-row-btn" data-qid="' + qid + '" onmousedown="this.blur()" style="width:32px;min-width:32px;height:40px;flex-shrink:0;border:1.5px solid #DC2626;border-radius:6px;background:#FEF2F2;color:#DC2626;font-size:17px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;">&#215;</button>'
                     + '</div>'
-                    + '<input type="file" class="form-control form-control-sm multi-image-file-input" accept="image/jpeg,image/png,image/jpg,image/gif,image/webp" style="flex:1;">'
-                    + '<button type="button" class="btn btn-outline-danger btn-sm remove-img-row-btn flex-shrink-0" style="width:32px;height:32px;padding:0;font-size:20px;line-height:1;" title="Remove row">×</button>'
                     + '</div>';
-                $('#inputs_' + qid).append(row);
+                $container.append(row);
+                // Bind preview for the new row
+                ['cam_','gal_'].forEach(function(pfx) {
+                    var inp = document.getElementById(pfx + uid);
+                    if (!inp) return;
+                    inp.addEventListener('change', function() {
+                        if (!this.files || !this.files[0]) return;
+                        var r = new FileReader();
+                        r.onload = function(e) {
+                            var p = document.getElementById('prev_' + uid);
+                            p.style.backgroundImage = 'url(' + e.target.result + ')';
+                            var icon = document.getElementById('icon_' + uid);
+                            if (icon) icon.style.display = 'none';
+                        };
+                        r.readAsDataURL(this.files[0]);
+                    });
+                });
+                refreshAddBtn($btn, qid);
+                $btn[0].blur(); // drop focus so :active/:focus style doesn't persist
             });
 
-            // "×" on an added row: remove it
-            $(document).on('click', '.remove-img-row-btn', function () {
+            $(document).on('click', '.remove-img-row-btn', function (e) {
+                e.stopPropagation();
+                var qid  = $(this).data('qid');
                 $(this).closest('.multi-img-row').remove();
+                $(this)[0].blur();
+                refreshAddBtn(getAddBtn(qid), qid);
             });
 
             // Remove a previously-saved image row
@@ -2578,8 +2948,10 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
             });
 
             // Multi-image submit is now handled by the unified form submit handler above.
-            // ── End multi-image ──────────────────────────────────────────────────
+            // &#226;&#8221;&#8364;&#226;&#8221;&#8364; End multi-image &#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;
 
         });
     </script>
 @endsection
+
+

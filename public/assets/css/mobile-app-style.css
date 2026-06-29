@@ -1940,6 +1940,52 @@
     touch-action: manipulation !important;
   }
 
+  /* ── Multi-image add button ──────────────────────────────────────── */
+  /* Ensure the + Add Another Image button is never clipped or hidden  */
+  .add-image-row-btn-wrap {
+    display: block !important;
+    overflow: visible !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    height: auto !important;
+  }
+
+  .add-image-row-btn {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    clip: auto !important;
+    clip-path: none !important;
+    position: static !important;
+    background-color: #fff !important;
+    color: #495057 !important;
+    border: 1px solid #6c757d !important;
+    border-radius: 4px !important;
+    padding: 6px 0 !important;
+    font-size: 12px !important;
+    text-align: center !important;
+    cursor: pointer !important;
+  }
+
+  .add-image-row-btn:focus,
+  .add-image-row-btn:active,
+  .add-image-row-btn:focus-visible {
+    background-color: #fff !important;
+    color: #495057 !important;
+    border-color: #6c757d !important;
+    box-shadow: none !important;
+    outline: none !important;
+  }
+
+  .multi-img-inputs,
+  .multi-image-wrapper {
+    overflow: visible !important;
+    height: auto !important;
+  }
+
 }
 
 /* END @media max-width: 767px */

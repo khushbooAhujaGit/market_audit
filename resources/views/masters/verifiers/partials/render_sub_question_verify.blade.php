@@ -1,14 +1,28 @@
 {{--
-    Recursive partial — read-only sub-question display for the verifier view.
+    Recursive partial &#8212; read-only sub-question display for the verifier view.
 
     Required:
-      $subQuestion  — Question model
-      $depth        — nesting level (1, 2, 3 …)
-      $user_responses — collection of TempUserActivityAnswersData
+      $subQuestion  &#8212; Question model
+      $depth        &#8212; nesting level (1, 2, 3 &#8230;)
+      $user_responses &#8212; collection of TempUserActivityAnswersData
 --}}
 @php
-    $sqid    = $subQuestion->id;
-    $sqAns   = $user_responses->where('question_id', $sqid)->first();
+    $sqid       = $subQuestion->id;
+    $mrParentId = $mr_parent_id ?? null; // Multi Response parent ID passed from the caller
+
+    if ($mrParentId !== null) {
+        // Look up the answer stored with exactly this Multi Response parent as pctx.
+        // With the new pctx-for-all system, sub-question answers use parent_context_id = mr_parent_id.
+        // Fall back to any non-null pctx (older data) then to null-pctx as last resort.
+        $sqAns = $user_responses->first(function ($a) use ($sqid, $mrParentId) {
+                     return (int)$a->question_id === (int)$sqid
+                         && (int)$a->parent_context_id === (int)$mrParentId;
+                 })
+              ?? $user_responses->where('question_id', $sqid)->whereNotNull('parent_context_id')->first()
+              ?? $user_responses->where('question_id', $sqid)->whereNull('parent_context_id')->first();
+    } else {
+        $sqAns = $user_responses->where('question_id', $sqid)->first();
+    }
     $sqValue = $sqAns ? $sqAns->user_answer : '';
 
     $depthStyles = [
@@ -23,7 +37,7 @@
 <tr style="background:{{ $style['bg'] }}; border-left:4px solid {{ $style['border'] }};">
     <td class="col-md-6 fw-medium" style="padding-left:{{ $indent + 12 }}px;">
         <small style="color:{{ $style['border'] }}; font-size:11px; font-weight:600;">
-            ↳ {{ $style['label'] }}
+            &#8627; {{ $style['label'] }}
         </small><br>
         {{ $subQuestion->question }}
         @if($subQuestion->answer_type == 1)
@@ -34,24 +48,33 @@
         @if($subQuestion->question_type === 'Multi Response')
             {{-- Multi Response = section header, no answer stored --}}
         @elseif(!$sqValue)
-            <span class="text-muted fst-italic">— No answer —</span>
+            <span class="text-muted fst-italic">&#8212; No answer &#8212;</span>
         @else
             @php
-                $ext = strtolower(pathinfo($sqValue, PATHINFO_EXTENSION));
-                $isImage = in_array($ext, ['jpg','jpeg','png','gif','webp','svg']) && str_contains($sqValue, '/');
-                $isVideo = in_array($ext, ['mp4','webm','mov','avi','wmv','mkv']) && str_contains($sqValue, '/');
-                $isAudio = in_array($ext, ['mp3','wav','ogg','m4a','weba','webm']) && str_contains($sqValue, '/');
-                $isFile  = in_array($ext, ['pdf','xls','xlsx','doc','docx']) && str_contains($sqValue, '/');
-                $isLatLng = (bool) preg_match('/^-?\d+\.\d+,\s*-?\d+\.\d+$/', trim($sqValue));
+                // Check for JSON array (multi-image stored as JSON) FIRST,
+                // before extension detection &#8212; pathinfo() on a JSON string gives wrong results.
+                $sqImgPathsDec = json_decode($sqValue, true);
+                $isJsonImgArray = is_array($sqImgPathsDec) && !empty($sqImgPathsDec);
+
+                if (!$isJsonImgArray) {
+                    $ext      = strtolower(pathinfo($sqValue, PATHINFO_EXTENSION));
+                    $isImage  = in_array($ext, ['jpg','jpeg','png','gif','webp','svg']) && str_contains($sqValue, '/');
+                    $isVideo  = in_array($ext, ['mp4','webm','mov','avi','wmv','mkv']) && str_contains($sqValue, '/');
+                    $isAudio  = in_array($ext, ['mp3','wav','ogg','m4a','weba','webm']) && str_contains($sqValue, '/');
+                    $isFile   = in_array($ext, ['pdf','xls','xlsx','doc','docx']) && str_contains($sqValue, '/');
+                    $isLatLng = (bool) preg_match('/^-?\d+\.\d+,\s*-?\d+\.\d+$/', trim($sqValue));
+                } else {
+                    $isImage = $isVideo = $isAudio = $isFile = $isLatLng = false;
+                }
             @endphp
 
-            @if($isImage)
+            @if($isJsonImgArray)
                 @php
-                    $sqImgPaths = json_decode($sqValue, true);
-                    $sqIsMulti  = is_array($sqImgPaths) && count($sqImgPaths) > 1;
-                    if (!is_array($sqImgPaths)) $sqImgPaths = [$sqValue];
+                    $sqImgPaths = $sqImgPathsDec;
+                    $sqIsMulti  = count($sqImgPaths) > 1;
                 @endphp
                 @if ($sqIsMulti)
+                    {{-- Multiple images: thumbnails + ZIP download --}}
                     <div class="d-flex flex-wrap gap-2 mb-1">
                         @foreach ($sqImgPaths as $sqImg)
                             <img src="{{ asset($sqImg) }}" alt="answer"
@@ -63,30 +86,47 @@
                     @if ($sqAns)
                         <a href="{{ route('report.download.images.zip', ['answer_id' => $sqAns->id]) }}"
                            class="btn btn-sm btn-success mt-1" style="font-size:12px;">
-                            ⬇ Download ZIP ({{ count($sqImgPaths) }} images)
+                            &#8615; Download ZIP ({{ count($sqImgPaths) }} images)
                         </a>
                     @endif
                 @else
+                    {{-- Single image stored as JSON array --}}
                     <div style="max-width:200px;">
                         <img src="{{ asset($sqImgPaths[0]) }}" alt="answer"
-                            style="max-width:100%; max-height:150px; border-radius:4px; border:1px solid #ddd;">
+                             class="imagemodal"
+                             data-setval="{{ asset($sqImgPaths[0]) }}"
+                             style="max-width:100%;max-height:150px;border-radius:4px;border:1px solid #ddd;cursor:pointer;">
                     </div>
+                    @if ($sqAns)
+                        <a href="{{ asset($sqImgPaths[0]) }}" target="_blank"
+                           class="btn btn-sm btn-outline-secondary mt-1" style="font-size:12px;">
+                            &#8615; Download Image
+                        </a>
+                    @endif
                 @endif
+            @elseif($isImage)
+                {{-- Single image stored as plain path string --}}
+                <div style="max-width:200px;">
+                    <img src="{{ asset($sqValue) }}" alt="answer"
+                         class="imagemodal"
+                         data-setval="{{ asset($sqValue) }}"
+                         style="max-width:100%;max-height:150px;border-radius:4px;border:1px solid #ddd;cursor:pointer;">
+                </div>
             @elseif($isVideo)
                 <video controls preload="metadata" style="max-width:100%; max-height:180px; border-radius:4px;">
                     <source src="{{ asset($sqValue) }}">
                 </video>
-                <a href="{{ asset($sqValue) }}" download class="btn btn-sm btn-outline-secondary d-block mt-1">⬇ Download</a>
+                <a href="{{ asset($sqValue) }}" download class="btn btn-sm btn-outline-secondary d-block mt-1">&#11015; Download</a>
             @elseif($isAudio)
                 <audio controls style="width:100%; max-width:280px;">
                     <source src="{{ asset($sqValue) }}">
                 </audio>
             @elseif($isFile)
-                <a href="{{ asset($sqValue) }}" target="_blank" class="btn btn-sm btn-outline-secondary">📎 View File</a>
+                <a href="{{ asset($sqValue) }}" target="_blank" class="btn btn-sm btn-outline-secondary">&#128206; View File</a>
             @elseif($isLatLng)
                 <input type="text" value="{{ $sqValue }}" class="form-control" readonly>
                 <a href="https://www.google.com/maps?q={{ urlencode($sqValue) }}" target="_blank"
-                    class="small text-primary mt-1 d-inline-block">📍 View on Map</a>
+                    class="small text-primary mt-1 d-inline-block">&#128205; View on Map</a>
             @else
                 <input type="text" value="{{ $sqValue }}" class="form-control" readonly>
             @endif
@@ -102,6 +142,7 @@
                 'subQuestion'    => $nestedLink->childQuestion,
                 'depth'          => $depth + 1,
                 'user_responses' => $user_responses,
+                'mr_parent_id'   => $sqid, // nested sub-questions use this level as their pctx
             ])
         @endif
     @endforeach

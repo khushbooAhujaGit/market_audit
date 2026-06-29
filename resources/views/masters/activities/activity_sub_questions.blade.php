@@ -107,12 +107,11 @@
                                 <div class="row g-3 align-items-end">
                                     <div class="col-md-6">
                                         <label class="form-label">Select Question <span class="text-danger">*</span></label>
-                                        <select name="child_question_id" class="form-select" required>
+                                        <select name="child_question_id" id="sq_select" class="form-select" required>
                                             <option value="">-- Select a question --</option>
                                             @foreach ($available_questions as $aq)
                                                 <option value="{{ $aq->id }}">
-                                                    [{{ $aq->question_type }}]
-                                                    {{ $aq->question }}
+                                                    [{{ $aq->question_type }}] {{ $aq->question }}
                                                     ({{ $aq->answer_type ? 'Required' : 'Optional' }})
                                                 </option>
                                             @endforeach
@@ -140,9 +139,24 @@
         </div>
     </div>
 @endsection
+@push('css')
+<link rel="stylesheet" href="{{ asset('assets/css/vendors/select2.css') }}">
+@endpush
+
 @section('scripts')
+<script src="{{ asset('assets/js/select2/select2.full.min.js') }}"></script>
     <script>
+        // Select2 initialized below in document.ready
+
         $(document).ready(function () {
+
+            // ── Select2 for question search ────────────────────────────────
+            $('#sq_select').select2({
+                placeholder: '-- Search and select a question --',
+                allowClear: true,
+                width: '100%',
+                dropdownAutoWidth: false
+            });
 
             // ── Sequence inline edit ──────────────────────────────────────
             $(document).on('click', '.seq-edit-btn', function () {

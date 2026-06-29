@@ -589,19 +589,51 @@ class CompanyController extends Controller
             ->toArray();
 
 
-        //        // Add `exist` key to each item
-        $project_template_main_headers = $project_template_main_headers->map(function ($item) use ($existingRowIdsInAnswers, $rowIdDataMap) {
-            $item['answer_exist'] = in_array($item['id'], $existingRowIdsInAnswers);
-            $item['answer_row_id'] = in_array($item['id'], $existingRowIdsInAnswers) ? $item['id'] : '';
+        // Activity IDs for instance lookup
+        $activityIdsForInstances = $userAssignActivityIds;
+
+        // Add `exist` key to each item + instance list for multi-instance activities
+        $project_template_main_headers = $project_template_main_headers->map(function ($item) use ($existingRowIdsInAnswers, $rowIdDataMap, $activityIdsForInstances) {
+            $item['answer_exist']       = in_array($item['id'], $existingRowIdsInAnswers);
+            $item['answer_row_id']      = in_array($item['id'], $existingRowIdsInAnswers) ? $item['id'] : '';
             $item['verified_by_company'] = $item['verified_by_company'] ?? null;
-            $item['company_user_id'] = $item['company_user_id'] ?? null;
+            $item['company_user_id']    = $item['company_user_id'] ?? null;
 
             // Get auditor data if exists
             $auditorDataId = $rowIdDataMap[$item['id']] ?? null;
-            $auditorData = $auditorDataId ? User::find($auditorDataId['user_id']) : '';
-            $item['auditorData'] = !empty($auditorData) ? $auditorData->name : '';
-            $item['agencyName'] = !empty($auditorData) ? (User::find($auditorData->agency_user_id))->name : '';
+            $auditorData   = $auditorDataId ? User::find($auditorDataId['user_id']) : '';
+            $item['auditorData']       = !empty($auditorData) ? $auditorData->name : '';
+            $item['agencyName']        = !empty($auditorData) ? (User::find($auditorData->agency_user_id))->name : '';
             $item['answer_created_at'] = $auditorData ? $auditorDataId['created_at']->format('Y-m-d H:i:s') : '';
+
+            // Build per-instance info so the frontend can render one download button per instance
+            // Original instance (sequence 0/null) — included when answer_exist is true
+            $instances = [];
+            if ($item['answer_exist']) {
+                $instances[] = ['sequence' => 0, 'label' => 'Original'];
+            }
+            // Repeat instances
+            $repeatInstances = \App\Models\ActivityRepeatInstance::whereIn('activity_id', $activityIdsForInstances)
+                ->where('row_id', $item['id'])
+                ->orderBy('activity_sequence')
+                ->get();
+            foreach ($repeatInstances as $ri) {
+                // Only include instances that have at least one verified answer
+                $hasVerified = \App\Models\TempUserActivityAnswersData::where('row_id', $item['id'])
+                    ->where('activity_id', $ri->activity_id)
+                    ->where('activity_sequence', $ri->activity_sequence)
+                    ->whereNotNull('verified_by')
+                    ->where('verified_by', '!=', 0)
+                    ->exists();
+                if ($hasVerified) {
+                    $instances[] = [
+                        'sequence' => $ri->activity_sequence,
+                        'label'    => $ri->instance_label ?: "Instance {$ri->activity_sequence}",
+                    ];
+                }
+            }
+            $item['instances'] = $instances;
+
             return $item;
         });
 
