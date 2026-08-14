@@ -69,10 +69,13 @@ class VerifierController extends Controller
             }
         }
 
-        // Get one row per (row_id, activity_sequence) pair so every instance is listed
+        // Get one row per (row_id, activity_sequence) pair so every instance is listed.
+        // status 0 = never submitted; 1 = submitted by auditor, awaiting verification
+        // (set in TaskController::handleSubmitMode/finalizeAnswers). Neither has been
+        // acted on by a verifier yet, so both count as pending here.
         $rawPairs = TempUserActivityAnswersData::whereIn('row_id', $uniqueRowIds)
             ->where('activity_id', $a)
-            ->where('status', 0)
+            ->whereIn('status', [0, 1])
             ->select('row_id', 'activity_sequence')
             ->distinct()
             ->orderBy('row_id')
@@ -144,10 +147,17 @@ class VerifierController extends Controller
             }
         }
 
-        // Get unique (row_id, activity_sequence) pairs that are pending verification
+        // Get unique (row_id, activity_sequence) pairs that are pending verification.
+        // status 0 = never submitted; 1 = submitted by auditor, awaiting verification
+        // (set in TaskController::handleSubmitMode/finalizeAnswers). Neither has been
+        // acted on by a verifier yet, so both count as pending here.
+        // Exclude any pair that has already been touched by a verifier (verified_by IS NOT NULL),
+        // which handles sub-question answers stored with NULL activity_sequence not getting
+        // updated during instance-specific verification.
         $rawPairs = TempUserActivityAnswersData::whereIn('row_id', $uniqueRowIds)
             ->where('activity_id', $a)
-            ->where('status', 0)
+            ->whereIn('status', [0, 1])
+            ->where(fn($q) => $q->whereNull('verified_by')->orWhere('verified_by', 0))
             ->select('row_id', 'activity_sequence')
             ->distinct()
             ->orderBy('row_id')
@@ -290,10 +300,18 @@ class VerifierController extends Controller
         // dd($user_responses, $related_values);
 
         $auditorData = User::find($user_responses[0]->user_id);
-        $agencyData = !empty($auditorData) ? User::find($auditorData->agency_user_id)->first() : null;
+        $agencyData = (!empty($auditorData) && $auditorData->agency_user_id) ? User::find($auditorData->agency_user_id) : null;
         $auditDateTime = $user_responses[0]->created_at->format('Y-m-d H:i:s');
 
-        return view('masters.verifiers.verify', compact('auditDateTime', 'agencyData', 'auditorData', 'related_values', 'activity_check', 'related_questions', 'sub_question_child_ids', 'user_responses', 'activity_group_info', 'remarks', 'userLatLongData', 'activity_sequence', 'instance_label'));
+        // One signature per user per row+activity (not per repeat instance — see
+        // TaskController::uploadSignature), so the same image shows regardless of
+        // which instance is currently being verified.
+        $activitySignature = \App\Models\ActivitySignature::where('row_id', $r)
+            ->where('activity_id', $activity_check->id)
+            ->where('user_id', $user_responses[0]->user_id)
+            ->first();
+
+        return view('masters.verifiers.verify', compact('auditDateTime', 'agencyData', 'auditorData', 'related_values', 'activity_check', 'related_questions', 'sub_question_child_ids', 'user_responses', 'activity_group_info', 'remarks', 'userLatLongData', 'activity_sequence', 'instance_label', 'activitySignature'));
         // }
         // else{
         //     return redirect()->back()->with('message', 'OTP Verification is pending for this audit');
@@ -439,7 +457,8 @@ class VerifierController extends Controller
                 ->where('activity_id', $request->activity_id)
                 ->delete();
 
-            $params = Session::get('activity_verification_rerender');
+            $params = Session::get('activity_verification_rerender')
+                ?? ['pt' => $projectTemplate->id, 'a' => $a_id];
             return redirect(route('activity.verification.view', $params))->with('message', $message);
         }
 
@@ -680,6 +699,48 @@ class VerifierController extends Controller
             }
         }
 
+        // Bulk-update ALL remaining pending answers that the main foreach loop missed
+        // (primarily sub-question answers whose question_id is not in $related_questions).
+        // status 0 = never submitted, 1 = submitted awaiting verification — both count
+        // as pending here since neither has been verifier-actioned yet.
+        // Use whereRaw for reliable NULL-aware sequence matching.
+        if ($activity_sequence > 0) {
+            // Specific instance: match exact sequence
+            TempUserActivityAnswersData::where('row_id', $row_id)
+                ->where('activity_id', $a_id)
+                ->where('activity_sequence', $activity_sequence)
+                ->whereIn('status', [0, 1])
+                ->where(fn($q) => $q->whereNull('verified_by')->orWhere('verified_by', 0))
+                ->update([
+                    'status'      => $new_status,
+                    'verified_by' => $userId,
+                    'remark'      => $verifier_remark,
+                ]);
+            // Also catch sub-question answers stored without a sequence value
+            TempUserActivityAnswersData::where('row_id', $row_id)
+                ->where('activity_id', $a_id)
+                ->whereRaw('COALESCE(activity_sequence, 0) = 0')
+                ->whereIn('status', [0, 1])
+                ->where(fn($q) => $q->whereNull('verified_by')->orWhere('verified_by', 0))
+                ->update([
+                    'status'      => $new_status,
+                    'verified_by' => $userId,
+                    'remark'      => $verifier_remark,
+                ]);
+        } else {
+            // Original submission: match NULL and 0 sequences
+            TempUserActivityAnswersData::where('row_id', $row_id)
+                ->where('activity_id', $a_id)
+                ->whereRaw('COALESCE(activity_sequence, 0) = 0')
+                ->whereIn('status', [0, 1])
+                ->where(fn($q) => $q->whereNull('verified_by')->orWhere('verified_by', 0))
+                ->update([
+                    'status'      => $new_status,
+                    'verified_by' => $userId,
+                    'remark'      => $verifier_remark,
+                ]);
+        }
+
         try {
             //            dd('fghgf');
             $this->storeAnswerPdf($row_id, $projectTemplateValueData->value, $a_id, $auditDate);
@@ -693,10 +754,9 @@ class VerifierController extends Controller
             $params = Session::get('group_verification_rerender');
             return redirect(route('activityGroup.verification.view', $params))->with('message', $message);
         }
-        $params = Session::get('activity_verification_rerender');
+        $params = Session::get('activity_verification_rerender')
+            ?? ['pt' => $projectTemplate->id, 'a' => $a_id];
         return redirect(route('activity.verification.view', $params))->with('message', $message);
-
-        return back()->with(['message' => $message]);
     }
 
 
@@ -1007,10 +1067,9 @@ class VerifierController extends Controller
             $params = Session::get('group_verification_rerender');
             return redirect(route('activityGroup.verification.view', $params))->with('message', $message);
         }
-        $params = Session::get('activity_verification_rerender');
+        $params = Session::get('activity_verification_rerender')
+            ?? ['pt' => $projectTemplate->id, 'a' => $a_id];
         return redirect(route('activity.verification.view', $params))->with('message', $message);
-
-        return back()->with(['message' => $message]);
     }
 
 
@@ -1026,7 +1085,20 @@ class VerifierController extends Controller
         $remarks = RemarkMaster::where('project_id', $projectTemplateData->project_id)->where('status', 1)->get();
 
         $activity_check = Activity::find($a);
-        $related_questions = Question::where('activity_id', $activity_check->id)->orderBy('question_sequence', 'asc')->get();
+        $related_questions = Question::where('activity_id', $activity_check->id)
+            ->orderBy('question_sequence', 'asc')
+            ->with(['subQuestions.childQuestion.subQuestions.childQuestion', 'subQuestions.childQuestion.getOptions'])
+            ->get();
+
+        // BFS: collect all sub-question child IDs so the main loop can skip them
+        $sub_question_child_ids = [];
+        $toProcess = $related_questions->pluck('id')->toArray();
+        while (!empty($toProcess)) {
+            $childIds = QuestionSubQuestion::whereIn('parent_question_id', $toProcess)
+                ->pluck('child_question_id')->toArray();
+            $sub_question_child_ids = array_merge($sub_question_child_ids, $childIds);
+            $toProcess = $childIds;
+        }
 
         // Filter answers to only the specific instance (activity_sequence)
         $user_responses = TempUserActivityAnswersData::with('getUser')
@@ -1058,15 +1130,16 @@ class VerifierController extends Controller
         }
 
         $pdf = Pdf::loadView('masters.pdf_templates.verify_template', [
-            'projectTemplateData' => $projectTemplateData,
-            'related_questions'   => $related_questions,
-            'auditorInfo'         => $auditorInfo,
-            'auditDate'           => $auditDate,
-            'auditTime'           => $auditTime,
-            'user_responses'      => $user_responses,
-            'value'               => $v,
-            'instance_label'      => $instanceLabel,
-            'activity_sequence'   => $activity_sequence,
+            'projectTemplateData'    => $projectTemplateData,
+            'related_questions'      => $related_questions,
+            'sub_question_child_ids' => $sub_question_child_ids,
+            'auditorInfo'            => $auditorInfo,
+            'auditDate'              => $auditDate,
+            'auditTime'              => $auditTime,
+            'user_responses'         => $user_responses,
+            'value'                  => $v,
+            'instance_label'         => $instanceLabel,
+            'activity_sequence'      => $activity_sequence,
         ]);
 
         $projectTemp    = ProjectTemplateNameValuesNew::find($r);
@@ -1194,9 +1267,7 @@ class VerifierController extends Controller
         $a                = $request->activity_id;
         $activity_sequence = (int)($request->activity_sequence ?? 0);
 
-        $related_values = ProjectTemplateNameValuesNew::where('id', $r)
-            ->where('template_data_json', 'like', '%' . addslashes($v) . '%')
-            ->get();
+        $related_values = ProjectTemplateNameValuesNew::where('id', $r)->get();
 
         $projectTemplateData = ProjectTemplate::with(['getMainHeader', 'getSubHeader'])
             ->where('id', $related_values[0]->project_template_id)->first();
@@ -1204,7 +1275,20 @@ class VerifierController extends Controller
         $remarks = RemarkMaster::where('project_id', $projectTemplateData->project_id)->where('status', 1)->get();
 
         $activity_check   = Activity::find($a);
-        $related_questions = Question::where('activity_id', $activity_check->id)->orderBy('question_sequence', 'asc')->get();
+        $related_questions = Question::where('activity_id', $activity_check->id)
+            ->orderBy('question_sequence', 'asc')
+            ->with(['subQuestions.childQuestion.subQuestions.childQuestion', 'subQuestions.childQuestion.getOptions'])
+            ->get();
+
+        // BFS: collect all sub-question child IDs
+        $sub_question_child_ids = [];
+        $toProcess = $related_questions->pluck('id')->toArray();
+        while (!empty($toProcess)) {
+            $childIds = QuestionSubQuestion::whereIn('parent_question_id', $toProcess)
+                ->pluck('child_question_id')->toArray();
+            $sub_question_child_ids = array_merge($sub_question_child_ids, $childIds);
+            $toProcess = $childIds;
+        }
 
         // Filter by specific instance (activity_sequence)
         $user_responses = TempUserActivityAnswersData::with('getUser')
@@ -1246,17 +1330,18 @@ class VerifierController extends Controller
 
 
             $pdf = Pdf::loadView('masters.pdf_templates.verify_template', [
-                'projectTemplateData' => $projectTemplateData,
-                'related_questions'   => $related_questions,
-                'auditorInfo'         => $auditorInfo,
-                'auditDate'           => $auditDate,
-                'auditTime'           => $auditTime,
-                'user_responses'      => $user_responses,
-                'value'               => $v,
-                'main_header'         => $mainHeaderValue,
-                'sub_header'          => $subHeaderValue,
-                'instance_label'      => $instanceLabel,
-                'activity_sequence'   => $activity_sequence,
+                'projectTemplateData'    => $projectTemplateData,
+                'related_questions'      => $related_questions,
+                'sub_question_child_ids' => $sub_question_child_ids,
+                'auditorInfo'            => $auditorInfo,
+                'auditDate'              => $auditDate,
+                'auditTime'              => $auditTime,
+                'user_responses'         => $user_responses,
+                'value'                  => $v,
+                'main_header'            => $mainHeaderValue,
+                'sub_header'             => $subHeaderValue,
+                'instance_label'         => $instanceLabel,
+                'activity_sequence'      => $activity_sequence,
             ]);
 
 
@@ -1292,9 +1377,7 @@ class VerifierController extends Controller
         $v = $request->distributor_value;
         $a = $request->activity_id;
 
-        $related_values = ProjectTemplateNameValuesNew::where('id', $r)
-            ->where('template_data_json', 'like', '%' . addslashes($v) . '%')
-            ->get();
+        $related_values = ProjectTemplateNameValuesNew::where('id', $r)->get();
 
         if ($related_values->isEmpty()) {
             return response()->json(['error' => 'Row not found'], 404);
@@ -1304,7 +1387,20 @@ class VerifierController extends Controller
             ->where('id', $related_values[0]->project_template_id)->first();
         $remarks             = RemarkMaster::where('project_id', $projectTemplateData->project_id)->where('status', 1)->get();
         $activity_check      = Activity::find($a);
-        $related_questions   = Question::where('activity_id', $activity_check->id)->orderBy('question_sequence', 'asc')->get();
+        $related_questions   = Question::where('activity_id', $activity_check->id)
+            ->orderBy('question_sequence', 'asc')
+            ->with(['subQuestions.childQuestion.subQuestions.childQuestion', 'subQuestions.childQuestion.getOptions'])
+            ->get();
+
+        // BFS: collect all sub-question child IDs
+        $sub_question_child_ids = [];
+        $toProcess = $related_questions->pluck('id')->toArray();
+        while (!empty($toProcess)) {
+            $childIds = QuestionSubQuestion::whereIn('parent_question_id', $toProcess)
+                ->pluck('child_question_id')->toArray();
+            $sub_question_child_ids = array_merge($sub_question_child_ids, $childIds);
+            $toProcess = $childIds;
+        }
 
         $templateJson    = json_decode($related_values[0]->template_data_json, true);
         $mainHeaderValue = $templateJson[$projectTemplateData->main_header] ?? null;
@@ -1353,17 +1449,18 @@ class VerifierController extends Controller
             $auditTime   = Carbon::parse($responses[0]->created_at)->format('H:i A');
 
             $pdf = Pdf::loadView('masters.pdf_templates.verify_template', [
-                'projectTemplateData' => $projectTemplateData,
-                'related_questions'   => $related_questions,
-                'auditorInfo'         => $auditorInfo,
-                'auditDate'           => $auditDate,
-                'auditTime'           => $auditTime,
-                'user_responses'      => $responses,
-                'value'               => $v,
-                'main_header'         => $mainHeaderValue,
-                'sub_header'          => $subHeaderValue,
-                'instance_label'      => $inst['label'],
-                'activity_sequence'   => $seq,
+                'projectTemplateData'    => $projectTemplateData,
+                'related_questions'      => $related_questions,
+                'sub_question_child_ids' => $sub_question_child_ids,
+                'auditorInfo'            => $auditorInfo,
+                'auditDate'              => $auditDate,
+                'auditTime'              => $auditTime,
+                'user_responses'         => $responses,
+                'value'                  => $v,
+                'main_header'            => $mainHeaderValue,
+                'sub_header'             => $subHeaderValue,
+                'instance_label'         => $inst['label'],
+                'activity_sequence'      => $seq,
             ]);
 
             $safeName     = str_replace([' ', '/'], '-', $inst['label']);
@@ -1389,6 +1486,120 @@ class VerifierController extends Controller
         $zip->close();
 
         // Clean up the whole temp dir (PDFs + zip) after PHP shuts down
+        register_shutdown_function(function () use ($tempDir) {
+            if (File::isDirectory($tempDir)) File::deleteDirectory($tempDir);
+        });
+
+        return response()->download($zipPath, $zipName);
+    }
+
+    /**
+     * Generate PDFs for ALL activities in an activity group for a given row and stream as a ZIP.
+     */
+    public function downloadPdfZipGroup(Request $request)
+    {
+        $r        = $request->row_id;
+        $group_id = $request->group_id;
+
+        $related_row = ProjectTemplateNameValuesNew::findOrFail($r);
+        $projectTemplateData = ProjectTemplate::with(['getMainHeader', 'getSubHeader'])
+            ->findOrFail($related_row->project_template_id);
+
+        $templateJson    = json_decode($related_row->template_data_json, true);
+        $mainHeaderValue = $templateJson[$projectTemplateData->main_header] ?? null;
+        $subHeaderValue  = $templateJson[$projectTemplateData->sub_header]  ?? null;
+
+        $group = \App\Models\ActivityGroup::with('get_group_activities.getActivityInfo')->findOrFail($group_id);
+
+        $tempDir = public_path('temp/zip_grp_' . uniqid());
+        if (!File::exists($tempDir)) File::makeDirectory($tempDir, 0755, true);
+
+        $pdfPaths = [];
+
+        foreach ($group->get_group_activities as $pivot) {
+            $activity = $pivot->getActivityInfo;
+            if (!$activity) continue;
+
+            $relatedQuestions = Question::where('activity_id', $activity->id)
+                ->orderBy('question_sequence', 'asc')
+                ->with(['subQuestions.childQuestion.subQuestions.childQuestion', 'subQuestions.childQuestion.getOptions'])
+                ->get();
+
+            $subIds = [];
+            $toProcess = $relatedQuestions->pluck('id')->toArray();
+            while (!empty($toProcess)) {
+                $childIds = QuestionSubQuestion::whereIn('parent_question_id', $toProcess)
+                    ->pluck('child_question_id')->toArray();
+                $subIds = array_merge($subIds, $childIds);
+                $toProcess = $childIds;
+            }
+
+            // Collect all unique sequences (0 = original + repeats)
+            $sequences = [0];
+            $repeatInstances = \App\Models\ActivityRepeatInstance::where('row_id', $r)
+                ->where('activity_id', $activity->id)
+                ->orderBy('activity_sequence')
+                ->get();
+            foreach ($repeatInstances as $ri) {
+                $sequences[] = $ri->activity_sequence;
+            }
+
+            foreach ($sequences as $seq) {
+                $responses = TempUserActivityAnswersData::with('getUser')
+                    ->where('row_id', $r)
+                    ->where('activity_id', $activity->id)
+                    ->where(function ($q) use ($seq) {
+                        if ($seq > 0) {
+                            $q->where('activity_sequence', $seq);
+                        } else {
+                            $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0);
+                        }
+                    })->get();
+
+                if ($responses->isEmpty()) continue;
+
+                $auditorInfo = $responses[0];
+                $auditDate   = Carbon::parse($responses[0]->created_at)->format('d-m-Y');
+                $auditTime   = Carbon::parse($responses[0]->created_at)->format('H:i A');
+                $instLabel   = $seq === 0 ? 'Original' : ($repeatInstances->where('activity_sequence', $seq)->first()?->instance_label ?? "Instance {$seq}");
+
+                $pdf = Pdf::loadView('masters.pdf_templates.verify_template', [
+                    'projectTemplateData'    => $projectTemplateData,
+                    'related_questions'      => $relatedQuestions,
+                    'sub_question_child_ids' => $subIds,
+                    'auditorInfo'            => $auditorInfo,
+                    'auditDate'              => $auditDate,
+                    'auditTime'              => $auditTime,
+                    'user_responses'         => $responses,
+                    'value'                  => $mainHeaderValue,
+                    'main_header'            => $mainHeaderValue,
+                    'sub_header'             => $subHeaderValue,
+                    'instance_label'         => $instLabel,
+                    'activity_sequence'      => $seq,
+                ]);
+
+                $safeName    = str_replace([' ', '/'], '-', $activity->activity_name . '_' . $instLabel);
+                $pdfFileName = $safeName . '_' . $auditDate . '.pdf';
+                $pdfFilePath = $tempDir . '/' . $pdfFileName;
+                $pdf->save($pdfFilePath);
+                $pdfPaths[]  = ['path' => $pdfFilePath, 'name' => $pdfFileName];
+            }
+        }
+
+        if (empty($pdfPaths)) {
+            File::deleteDirectory($tempDir);
+            return back()->with('error', 'No answers found for this group.');
+        }
+
+        $zipName = 'Group_' . str_replace(' ', '-', $group->activity_group_name ?? $group_id) . '_' . $r . '_' . now()->format('d-m-Y') . '.zip';
+        $zipPath = $tempDir . '/' . $zipName;
+        $zip     = new \ZipArchive();
+        $zip->open($zipPath, \ZipArchive::CREATE);
+        foreach ($pdfPaths as $p) {
+            $zip->addFile($p['path'], $p['name']);
+        }
+        $zip->close();
+
         register_shutdown_function(function () use ($tempDir) {
             if (File::isDirectory($tempDir)) File::deleteDirectory($tempDir);
         });
@@ -1491,64 +1702,51 @@ class VerifierController extends Controller
             File::makeDirectory(public_path('zips'), 0755, true);
         }
 
+        // Parse date range — both are optional; if empty skip date filtering
+        $startDate = !empty($request->start_date) ? Carbon::parse($request->start_date)->startOfDay() : null;
+        $endDate   = !empty($request->end_date)   ? Carbon::parse($request->end_date)->endOfDay()   : null;
+
+        $projectName          = $projectData->project_name;
+        $sanitizedProjectName = str_replace(' ', '-', $projectName);
+        $baseFolder           = public_path("activityAnswerImages/{$projectName}/");
+
+        // Collect PDF files from ALL month subdirectories (not just current month)
+        $allPdfFiles = [];
+        if (File::exists($baseFolder)) {
+            foreach (File::directories($baseFolder) as $monthDir) {
+                $answerPdfsDir = $monthDir . '/answerPdfs/';
+                if (File::exists($answerPdfsDir)) {
+                    foreach (File::files($answerPdfsDir) as $f) {
+                        $allPdfFiles[] = $f;
+                    }
+                }
+            }
+        }
+
+        // Pattern: Audit-ProjectName_rowId[_seq]_dd-mm-yyyy.pdf
+        $pattern = '/^Audit-' . preg_quote($sanitizedProjectName, '/') . '_(\d+)(?:_\d+)?_([\d]{2}-[\d]{2}-[\d]{4})\.pdf$/';
+
         $filesAdded = false;
         if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true) {
 
             foreach ($rowIds as $rowId) {
-
-                $projectName = $projectData->project_name;
-                $sanitizedProjectName = str_replace(' ', '-', $projectName);
-                //                $sanitizedProjectName = Str::slug($projectName);
-                $folderPath = public_path("activityAnswerImages/{$projectName}/" . now()->format('FY') . "/answerPdfs/");
-
-                if (!File::exists($folderPath)) continue;
-
-                $pdfFiles = File::files($folderPath);
-                $startDate = Carbon::parse($request->start_date)->startOfDay();
-                $endDate = Carbon::parse($request->end_date)->endOfDay();
-
-                // dd($pdfFiles, $startDate, $endDate);
-
-                foreach ($pdfFiles as $file) {
-
-                    $addToZip = true;
+                foreach ($allPdfFiles as $file) {
                     $fileName = $file->getFilename();
 
-                    // Get file modified time
-                    $fileDate = Carbon::createFromTimestamp($file->getMTime());
-                    // dd($fileDate);
+                    if (!preg_match($pattern, $fileName, $matches)) continue;
 
+                    // Check row ID
+                    if ($matches[1] != $rowId) continue;
 
-                    //                    dd($sanitizedProjectName);
-                    // Pattern supports both original (no instance suffix) and multi-instance files:
-                    // Audit-ProjectName_rowId_dd-mm-yyyy.pdf          (original / sequence 0)
-                    // Audit-ProjectName_rowId_1_dd-mm-yyyy.pdf        (instance 1, 2, …)
-                    $pattern = '/^Audit-' . preg_quote($sanitizedProjectName, '/') . '_(\d+)(?:_\d+)?_([\d]{2}-[\d]{2}-[\d]{4})\.pdf$/';
-
-                    if (preg_match($pattern, $fileName, $matches)) {
-                        $matchedRowId = $matches[1];
-                        $rawDate = $matches[2]; // e.g. 11-06-2025
-
-                        // Check if row ID matches
-                        if ($matchedRowId != $rowId) {
-                            continue;
-                        }
-
-
-                        // Check date range
-                        // // if (!empty($startDate) && !empty($endDate)) {
-                        // if ($fileDate->between($startDate, $endDate)) {
-                        //     // if ($fileDate <= $startDate || $fileDate >= $endDate) {
-                        //         continue;
-                        //     // }
-                        // }
-                        // Skip file if it's outside the date range
-                        if (!$fileDate->between($startDate, $endDate)) continue;
-
-
-                        $zip->addFile($file->getRealPath(), $fileName);
-                        $filesAdded = true;
+                    // Check date range using file modification time (if range provided)
+                    if ($startDate !== null || $endDate !== null) {
+                        $fileDate = Carbon::createFromTimestamp($file->getMTime());
+                        if ($startDate && $fileDate->lt($startDate)) continue;
+                        if ($endDate   && $fileDate->gt($endDate))   continue;
                     }
+
+                    $zip->addFile($file->getRealPath(), $fileName);
+                    $filesAdded = true;
                 }
             }
 
@@ -1562,5 +1760,72 @@ class VerifierController extends Controller
         }
 
         return response()->json(['error' => 'Could not create zip file.'], 500);
+    }
+
+    public function downloadAllImages(Request $request)
+    {
+        $request->validate([
+            'row_id'      => 'required|integer',
+            'activity_id' => 'required|integer',
+        ]);
+
+        $activitySequence = (int) ($request->activity_sequence ?? 0);
+
+        $imageQuestionIds = Question::where('activity_id', $request->activity_id)
+            ->where('question_type', 'Image')
+            ->pluck('id');
+
+        $answers = TempUserActivityAnswersData::where('row_id', $request->row_id)
+            ->where('activity_id', $request->activity_id)
+            ->whereIn('question_id', $imageQuestionIds)
+            ->whereNotNull('user_answer')
+            ->where('user_answer', '!=', '')
+            ->when($activitySequence > 0,
+                fn($q) => $q->where('activity_sequence', $activitySequence),
+                fn($q) => $q->where(fn($q2) => $q2->whereNull('activity_sequence')->orWhere('activity_sequence', 0))
+            )
+            ->get();
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'all_imgs_') . '.zip';
+        $zip     = new ZipArchive();
+        if ($zip->open($tmpFile, ZipArchive::CREATE) !== true) {
+            abort(500, 'Could not create ZIP archive');
+        }
+
+        $added = 0;
+        foreach ($answers as $answer) {
+            $paths = json_decode($answer->user_answer, true);
+            if (!is_array($paths)) {
+                $paths = [$answer->user_answer];
+            }
+            foreach ($paths as $i => $path) {
+                $cleanPath = ltrim(trim($path), '/');
+                // Try public_path first, then base_path/public as fallback
+                $absPath = public_path($cleanPath);
+                if (!file_exists($absPath)) {
+                    $absPath = base_path('public/' . $cleanPath);
+                }
+                if (file_exists($absPath)) {
+                    $ext      = strtolower(pathinfo($absPath, PATHINFO_EXTENSION)) ?: 'jpg';
+                    $filename = 'q' . $answer->question_id . '_' . ($i + 1) . '.' . $ext;
+                    $zip->addFile($absPath, $filename);
+                    $added++;
+                } else {
+                    Log::warning('downloadAllImages: file not found', ['path' => $absPath]);
+                }
+            }
+        }
+        $zip->close();
+
+        if ($added === 0) {
+            @unlink($tmpFile);
+            return response()->json([
+                'error'   => 'No image files found on disk.',
+                'answers' => $answers->pluck('user_answer'),
+            ], 404);
+        }
+
+        $zipName = 'images_row' . $request->row_id . '_activity' . $request->activity_id . '.zip';
+        return response()->download($tmpFile, $zipName)->deleteFileAfterSend(true);
     }
 }

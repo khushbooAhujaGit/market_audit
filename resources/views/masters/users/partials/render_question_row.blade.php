@@ -56,6 +56,15 @@
             </small>
 
             <div class="fw-medium mt-1" style="font-size:14px;">
+                @php
+                    // Use per-parent code when available (handles shared sub-questions across MR parents)
+                    $sqDisplayCode = ($parentCtxId && isset($subCodeMap[$parentCtxId][$sqid]))
+                        ? $subCodeMap[$parentCtxId][$sqid]
+                        : ($questionCodeMap[$sqid] ?? null);
+                @endphp
+                @if($sqDisplayCode)
+                    <span style="font-size:10px;font-family:monospace;background:#F3F4F6;border:1px solid #E5E7EB;border-radius:4px;padding:1px 5px;color:#374151;font-weight:700;margin-right:5px;vertical-align:middle;white-space:nowrap;">{{ $sqDisplayCode }}</span>
+                @endif
                 {{ $subQuestion->question }}
                 @if($subQuestion->answer_type)
                     <span class="txt-danger">*</span>
@@ -68,16 +77,56 @@
             @else
                 {{-- Regular question &#8212; render input by type --}}
                 <div class="mt-2">
+                    @php
+                        // Build validation attributes for sub-question inputs (mirrors main question logic)
+                        $sqVRule  = $subQuestion->validation_rule ?? 'none';
+                        $sqVMin   = $subQuestion->validation_min;
+                        $sqVMax   = $subQuestion->validation_max;
+                        $sqVRegex = $subQuestion->validation_regex ?? null;
+                        $sqVType  = 'text';
+                        $sqVExtra = '';
+                        $sqVMsg   = '';
+                        switch ($sqVRule) {
+                            case 'numericrange':
+                                $sqVType  = 'number';
+                                $sqVExtra = 'step="any"'
+                                    . ($sqVMin !== null ? " min=\"{$sqVMin}\"" : '')
+                                    . ($sqVMax !== null ? " max=\"{$sqVMax}\"" : '');
+                                $sqVMsg = 'Enter a number'
+                                    . ($sqVMin !== null ? " ≥ {$sqVMin}" : '')
+                                    . ($sqVMax !== null ? " and ≤ {$sqVMax}" : '');
+                                break;
+                            case 'digitlength':
+                                $sqVExtra = 'inputmode="numeric"';
+                                $sqVMsg   = 'Enter ' . ($sqVMin == $sqVMax ? "{$sqVMin}" : "{$sqVMin}–{$sqVMax}") . ' digits';
+                                break;
+                            case 'email':
+                                $sqVType = 'email';
+                                $sqVMsg  = 'Enter a valid email address';
+                                break;
+                            case 'phone':
+                                $sqVType  = 'tel';
+                                $sqVExtra = 'inputmode="numeric"';
+                                $sqVMsg   = 'Enter a valid 10-digit mobile number';
+                                break;
+                        }
+                    @endphp
                     @switch($subQuestion->question_type)
 
                         @case('Free Text')
-                            <input type="text" value="{{ $sqSaved }}" name="{{ $inputName }}"
+                            <input type="{{ $sqVType }}" value="{{ $sqSaved }}" name="{{ $inputName }}"
                                 class="form-control"
+                                {!! $sqVExtra !!}
+                                @if($sqVMsg) data-validation-msg="{{ $sqVMsg }}" @endif
                                 @if($subQuestion->answer_type) required data-required="true" @endif>
+                            @if($sqVMsg)
+                                <div class="invalid-feedback" style="font-size:11px;">{{ $sqVMsg }}</div>
+                            @endif
                         @break
 
                         @case('Yes / No')
-                            <select class="form-select {{ $subQuestion->is_parent == 1 ? 'parent-question' : '' }}"
+                            {{-- Always add parent-question class: this sub-question may be a conditional trigger --}}
+                            <select class="form-select parent-question mr-subq-parent"
                                 data-question-id="{{ $sqid }}"
                                 name="{{ $inputName }}"
                                 @if($subQuestion->answer_type) required data-required="true" @endif>
@@ -88,7 +137,8 @@
                         @break
 
                         @case('Dropdown')
-                            <select class="form-select {{ $subQuestion->is_parent == 1 ? 'parent-question' : '' }}"
+                            {{-- Always add parent-question class: this sub-question may be a conditional trigger --}}
+                            <select class="form-select parent-question mr-subq-parent"
                                 data-question-id="{{ $sqid }}"
                                 name="{{ $inputName }}"
                                 @if($subQuestion->answer_type) required data-required="true" @endif>
@@ -180,14 +230,27 @@
                                     <input type="hidden" name="{{ $inputName }}_existing" value="{{ $sqSaved }}">
                                 @endif
                                 @php $cu = $inputName . '_s' . uniqid(); @endphp
-                                <input type="file" id="cam_{{ $cu }}" name="{{ $inputName }}" class="d-none" accept="image/*" capture="environment" @if($subQuestion->answer_type && !$sqSaved) required @endif>
-                                <input type="file" id="gal_{{ $cu }}" name="{{ $inputName }}" class="d-none" accept="image/*" @if($subQuestion->answer_type && !$sqSaved) required @endif>
+                                <input type="file" id="sel_{{ $cu }}" name="{{ $inputName }}"
+                                       class="d-none single-img-input" accept="image/*"
+                                       @if($subQuestion->answer_type && !$sqSaved) data-img-required="true" @endif>
                                 <div class="d-flex gap-2 mt-1">
-                                    <button type="button" onclick="document.getElementById('cam_{{ $cu }}').click()" class="btn btn-sm" style="flex:1;border:1.5px solid #2563EB;background:#EFF6FF;color:#1D4ED8;font-weight:600;">&#128247; Camera</button>
-                                    <button type="button" onclick="document.getElementById('gal_{{ $cu }}').click()" class="btn btn-sm" style="flex:1;border:1.5px solid #059669;background:#F0FDF4;color:#065F46;font-weight:600;">&#128247; Gallery</button>
+                                    <button type="button" id="camBtn_{{ $cu }}" class="btn btn-sm" style="flex:1;border:1.5px solid #2563EB;background:#EFF6FF;color:#1D4ED8;font-weight:600;">Camera</button>
+                                    <button type="button" id="galBtn_{{ $cu }}" class="btn btn-sm" style="flex:1;border:1.5px solid #059669;background:#F0FDF4;color:#065F46;font-weight:600;">Gallery</button>
                                 </div>
                                 <div id="fn_{{ $cu }}" style="font-size:11px;color:#6B7280;margin-top:4px;display:none;"></div>
-                                <script>(function(){['cam_','gal_'].forEach(function(p){var el=document.getElementById(p+'{{ $cu }}');if(!el)return;el.addEventListener('change',function(){if(this.files&&this.files[0]){document.getElementById('fn_{{ $cu }}').textContent=this.files[0].name;document.getElementById('fn_{{ $cu }}').style.display='block';}});});})();</script>
+                                <script>(function(){
+                                    var sel=document.getElementById('sel_{{ $cu }}');
+                                    var fn=document.getElementById('fn_{{ $cu }}');
+                                    document.getElementById('camBtn_{{ $cu }}').addEventListener('click',function(){
+                                        sel.setAttribute('capture','environment');sel.click();
+                                    });
+                                    document.getElementById('galBtn_{{ $cu }}').addEventListener('click',function(){
+                                        sel.removeAttribute('capture');sel.click();
+                                    });
+                                    sel.addEventListener('change',function(){
+                                        if(this.files&&this.files[0]){fn.textContent=this.files[0].name;fn.style.display='block';}
+                                    });
+                                })();</script>
                             @endif
                         @break
 
@@ -195,7 +258,7 @@
                             @if($sqSaved)
                                 <div class="mb-2">
                                     <a href="{{ asset($sqSaved) }}" target="_blank"
-                                        class="btn btn-sm btn-outline-secondary">&#128206; View existing file</a>
+                                        class="btn btn-sm btn-outline-secondary">View existing file</a>
                                     <small class="text-muted d-block mt-1">Upload new to replace</small>
                                 </div>
                                 <input type="hidden" name="{{ $inputName }}_existing" value="{{ $sqSaved }}">
@@ -223,8 +286,12 @@
                             @php
                                 $sqDT = '';
                                 if($sqSaved) {
-                                    try { $sqDT = \Carbon\Carbon::parse($sqSaved)->format('Y-m-d\TH:i'); }
-                                    catch(\Exception $e) { $sqDT = $sqSaved; }
+                                    try {
+                                        $sqDT = \Carbon\Carbon::createFromFormat('d/m/Y H:i', $sqSaved)->format('Y-m-d\TH:i');
+                                    } catch(\Exception $e) {
+                                        try { $sqDT = \Carbon\Carbon::parse($sqSaved)->format('Y-m-d\TH:i'); }
+                                        catch(\Exception $e2) { $sqDT = $sqSaved; }
+                                    }
                                 }
                             @endphp
                             <input type="datetime-local" value="{{ $sqDT }}" name="{{ $inputName }}" class="form-control"
@@ -323,6 +390,7 @@
                 'prefilled'        => $prefilled,
                 'parentQuestionId' => $sqid,
                 'row_data'         => $row_data ?? null,
+                'subCodeMap'       => $subCodeMap ?? [],
             ])
         @endif
     @endforeach

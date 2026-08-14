@@ -42,6 +42,13 @@ class TaskHandlerController extends Controller
 {
     use \App\Traits\InterventionImage;
     // this is to render the projects assigned to the user logged in
+
+    function __construct()
+    {
+        return $this->middleware("auth");
+    }
+
+    
     public function userProjects()
     {
         $user = Auth::user();
@@ -284,7 +291,7 @@ class TaskHandlerController extends Controller
 
                             // --- Repeat/Close check: if any activity allows repeat, require fully closed ---
                             $hasRepeatActivity = false;
-                            $isFullyClosed = true;
+                            $allRepeatsClosed = true;
                             foreach ($activities as $actId) {
                                 $addOnIds = json_decode($tempData->activity_add_on_activity_ids ?? '[]', true);
                                 $allowRepeat = $tempData->activity_add_on == 1 &&
@@ -296,18 +303,20 @@ class TaskHandlerController extends Controller
                                         ->where('user_id', Auth::user()->id)
                                         ->exists();
                                     if (!$closeRecord) {
-                                        $isFullyClosed = false;
+                                        $allRepeatsClosed = false;
                                     } else {
                                         $sentBackExists = TempUserActivityAnswersData::where('row_id', $projectData['row_id'])
                                             ->where('activity_id', $actId)
                                             ->where('user_id', Auth::user()->id)
                                             ->where('status', 3)->exists();
                                         if ($sentBackExists) {
-                                            $isFullyClosed = false;
+                                            $allRepeatsClosed = false;
                                         }
                                     }
                                 }
                             }
+                            // Only fully closed when there ARE repeat activities AND all of them have close records
+                            $isFullyClosed = $hasRepeatActivity && $allRepeatsClosed;
 
                             $rowStatus = $isSentBack ? 'pending'
                                 : ($check_if_answered && (!$hasRepeatActivity || $isFullyClosed) ? 'completed' : 'pending');
@@ -935,33 +944,56 @@ class TaskHandlerController extends Controller
                 $activity = Activity::find($outletAssign->activity_id);
                 if (!$activity) continue;
 
-                $activityRequiredQuestions = Question::where('activity_id', $outletAssign->activity_id)
-                    ->pluck('id')->toArray();
-
-                $submittedcount = TempUserActivityAnswersData::where('row_id', $row_id)
-                    ->where('activity_id', $outletAssign->activity_id)
-                    ->whereIn('question_id', $activityRequiredQuestions)
-                    ->where('user_id', $user->id)
-                    ->where(function ($q) { $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0); })
-                    ->distinct('question_id')->count('question_id');
-
-                $requiredCount = DB::table('questions')
-                    ->where('activity_id', $outletAssign->activity_id)
+                // Only count required (non-Multi Response) question IDs
+                $requiredQuestionIds = Question::where('activity_id', $outletAssign->activity_id)
                     ->where('answer_type', 1)
                     ->where('question_type', '!=', 'Multi Response')
-                    ->count();
+                    ->pluck('id')->toArray();
 
-                $check_if_answered = $submittedcount > 0 && $submittedcount >= $requiredCount;
+                $requiredCount = count($requiredQuestionIds);
 
-                $isSentBack = false;
-                if ($check_if_answered) {
-                    $latest = TempUserActivityAnswersData::where('row_id', $row_id)
+                if ($requiredCount === 0) {
+                    // No required questions — count any answered question
+                    $allQIds = Question::where('activity_id', $outletAssign->activity_id)->pluck('id')->toArray();
+                    if (empty($allQIds)) {
+                        // Activity has no questions at all — never mark as submitted
+                        $check_if_answered = false;
+                    } else {
+                        $submittedcount = TempUserActivityAnswersData::where('row_id', $row_id)
+                            ->where('activity_id', $outletAssign->activity_id)
+                            ->whereIn('question_id', $allQIds)
+                            ->where('user_id', $user->id)
+                            ->where(function ($q) { $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0); })
+                            ->distinct('question_id')->count('question_id');
+                        $check_if_answered = $submittedcount > 0;
+                    }
+                } else {
+                    // Count only required questions that have been answered
+                    $submittedcount = TempUserActivityAnswersData::where('row_id', $row_id)
                         ->where('activity_id', $outletAssign->activity_id)
+                        ->whereIn('question_id', $requiredQuestionIds)
                         ->where('user_id', $user->id)
                         ->where(function ($q) { $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0); })
-                        ->orderBy('id', 'desc')->first();
-                    if ($latest && $latest->status == 3) { $isSentBack = true; $check_if_answered = false; }
+                        ->distinct('question_id')->count('question_id');
+                    $check_if_answered = $submittedcount >= $requiredCount;
                 }
+
+                $sentBackExists = TempUserActivityAnswersData::where('row_id', $row_id)
+                    ->where('activity_id', $outletAssign->activity_id)
+                    ->where('user_id', $user->id)
+                    ->where('status', 3)
+                    ->where(function ($q) { $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0); })
+                    ->exists();
+                $isSentBack = $sentBackExists;
+                if ($isSentBack) { $check_if_answered = false; }
+
+                // True if any instance (any sequence) has been sent back
+                $hasAnySentBack = $isSentBack || TempUserActivityAnswersData::where('row_id', $row_id)
+                    ->where('activity_id', $outletAssign->activity_id)
+                    ->where('user_id', $user->id)
+                    ->where('status', 3)
+                    ->where('activity_sequence', '>', 0)
+                    ->exists();
 
                 $allowRepeat = false;
                 if ($projectTemplateData->activity_add_on == 1) {
@@ -975,10 +1007,15 @@ class TaskHandlerController extends Controller
                         ->where('activity_id', $outletAssign->activity_id)
                         ->where('user_id', $user->id)->exists();
                     if ($closeRecord) {
-                        $sentBackExists = TempUserActivityAnswersData::where('row_id', $row_id)
+                        $hasAnyAnswer = TempUserActivityAnswersData::where('row_id', $row_id)
                             ->where('activity_id', $outletAssign->activity_id)
-                            ->where('user_id', $user->id)->where('status', 3)->exists();
-                        $isFullyClosed = !$sentBackExists;
+                            ->where('user_id', $user->id)->exists();
+                        if ($hasAnyAnswer) {
+                            $sentBackExists = TempUserActivityAnswersData::where('row_id', $row_id)
+                                ->where('activity_id', $outletAssign->activity_id)
+                                ->where('user_id', $user->id)->where('status', 3)->exists();
+                            $isFullyClosed = !$sentBackExists;
+                        }
                     }
                 }
 
@@ -1001,13 +1038,14 @@ class TaskHandlerController extends Controller
                     'group_id'         => null,
                     'group_name'       => null,
                     'sequence'         => null,
-                    'answer_submitted' => $check_if_answered,
+                    'answer_submitted'   => $check_if_answered,
                     'otpVerificationDone' => $otpVerificationDone,
-                    'is_sent_back'     => $isSentBack,
-                    'allow_repeat'     => $allowRepeat,
-                    'is_fully_closed'  => $isFullyClosed,
-                    'repeat_instances' => ActivityRepeatInstance::where('row_id', $row_id)->where('activity_id', $outletAssign->activity_id)->orderBy('activity_sequence')->get(),
-                    'project_data'     => $project,
+                    'is_sent_back'      => $isSentBack,
+                    'has_any_sent_back' => $hasAnySentBack,
+                    'allow_repeat'      => $allowRepeat,
+                    'is_fully_closed'   => $isFullyClosed,
+                    'repeat_instances'  => ActivityRepeatInstance::where('row_id', $row_id)->where('activity_id', $outletAssign->activity_id)->orderBy('activity_sequence')->get(),
+                    'project_data'      => $project,
                 ];
             }
 
@@ -1100,67 +1138,105 @@ class TaskHandlerController extends Controller
                 }
             }
 
-            $activityRequiredQuestions = Question::where('activity_id', $assigned_data->activity_id)
-                // ->where('answer_type', 1)
-                ->pluck('id')
-                ->toArray();
+            // Load all required (non-Multi Response) questions with their conditional metadata.
+            $allRequiredQuestions = Question::where('activity_id', $assigned_data->activity_id)
+                ->where('answer_type', 1)
+                ->where('question_type', '!=', 'Multi Response')
+                ->get(['id', 'parent_question_id', 'parent_value']);
 
-            // Count how many questions were submitted for the original (sequence 0/null) submission
-            $submittedcount = TempUserActivityAnswersData::where('row_id', $row_id)
+            // Split into standalone (always required) and conditional children (required only
+            // when their parent answer matches the trigger value).
+            $standaloneRequired    = $allRequiredQuestions->whereNull('parent_question_id');
+            $conditionalRequired   = $allRequiredQuestions->whereNotNull('parent_question_id');
+
+            // For conditional children, fetch the actual parent answers from DB once.
+            $activeConditionalIds = collect();
+            if ($conditionalRequired->isNotEmpty()) {
+                $parentIds    = $conditionalRequired->pluck('parent_question_id')->unique()->values()->toArray();
+                $parentAnswers = TempUserActivityAnswersData::where('row_id', $row_id)
+                    ->where('activity_id', $assigned_data->activity_id)
+                    ->where('user_id', Auth::user()->id)
+                    ->whereIn('question_id', $parentIds)
+                    ->where(function ($q) { $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0); })
+                    ->pluck('user_answer', 'question_id');
+
+                // A child is "active" (required) only when its parent condition is satisfied.
+                // parent_value = '__non_empty__' → any non-empty parent answer activates it.
+                // parent_value = specific string  → parent answer must match exactly (case-insensitive).
+                $activeConditionalIds = $conditionalRequired->filter(function ($q) use ($parentAnswers) {
+                    $parentAnswer = trim((string) ($parentAnswers->get($q->parent_question_id) ?? ''));
+                    if ($parentAnswer === '') return false;
+                    if ($q->parent_value === '__non_empty__') return true;
+                    return strcasecmp($parentAnswer, (string) $q->parent_value) === 0;
+                })->pluck('id');
+            }
+
+            $requiredQuestionIds = $standaloneRequired->pluck('id')
+                ->merge($activeConditionalIds)
+                ->unique()->values()->toArray();
+
+            $requiredCount = count($requiredQuestionIds);
+
+            if ($requiredCount === 0) {
+                // No required questions — any submitted answer counts as completed
+                $allQIds = Question::where('activity_id', $assigned_data->activity_id)->pluck('id')->toArray();
+                if (empty($allQIds)) {
+                    // Activity has no questions at all — never mark as submitted
+                    $check_if_answered = false;
+                } else {
+                    $submittedcount = TempUserActivityAnswersData::where('row_id', $row_id)
+                        ->where('activity_id', $assigned_data->activity_id)
+                        ->whereIn('question_id', $allQIds)
+                        ->where('user_id', Auth::user()->id)
+                        ->where(function ($q) { $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0); })
+                        ->distinct('question_id')->count('question_id');
+                    $check_if_answered = $submittedcount > 0;
+                }
+            } else {
+                // Count only the effective required questions that have been answered
+                $submittedcount = TempUserActivityAnswersData::where('row_id', $row_id)
+                    ->where('activity_id', $assigned_data->activity_id)
+                    ->whereIn('question_id', $requiredQuestionIds)
+                    ->where('user_id', Auth::user()->id)
+                    ->where(function ($q) { $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0); })
+                    ->distinct('question_id')->count('question_id');
+                $check_if_answered = $submittedcount >= $requiredCount;
+            }
+            // DEBUG — remove after confirming fix:
+            \Log::debug('[activity_check] activity_id=' . $assigned_data->activity_id
+                . ' activity_name=' . ($assigned_data->activityName->activity_name ?? '?')
+                . ' requiredCount=' . $requiredCount
+                . ' submittedcount=' . ($submittedcount ?? '?')
+                . ' check_if_answered=' . ($check_if_answered ? 'true' : 'false'));
+
+            // Keep $activityRequiredQuestions for OTP lookup below (needs all question IDs)
+            $activityRequiredQuestions = $requiredCount > 0
+                ? $requiredQuestionIds
+                : Question::where('activity_id', $assigned_data->activity_id)->pluck('id')->toArray();
+
+            // --- Sendback check (original submission only, sequence 0/null) ---
+            // Check independently of check_if_answered so partially-answered sent-back
+            // activities are also detected and shown as accessible (reload icon).
+            $sentBackExists = TempUserActivityAnswersData::where('row_id', $row_id)
                 ->where('activity_id', $assigned_data->activity_id)
-                ->whereIn('question_id', $activityRequiredQuestions)
                 ->where('user_id', Auth::user()->id)
+                ->where('status', 3)
                 ->where(function ($q) {
                     $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0);
                 })
-                ->distinct('question_id')
-                ->count('question_id');
-
-            // Check if any answer exists at all
-            $is_answered = $submittedcount > 0;
-
-            // Check if subjective question exists
-            $subjectiveExists = Question::where('activity_id', $assigned_data->activity_id)
-                ->where('answer_type', 1)
-                ->where('question_type', 'Subjective')
                 ->exists();
-
-            // Total required questions count (exclude Multi Response — they have no input field)
-            $requiredCount = DB::table('questions')->where('activity_id', $assigned_data->activity_id)
-                ->where('answer_type', 1)
-                ->where('question_type', '!=', 'Multi Response')
-                ->pluck('id')
-                ->count();
-
-            // Final check
-            $check_if_answered = false;
-            if ($is_answered) {
-                // Special rule: If subjective exists → allow >= OR == (business logic?)
-                if ($subjectiveExists) {
-                    // If subjective exists, allow ANY submitted as long as count meets requirement
-                    $check_if_answered = ($submittedcount >= $requiredCount);
-                } else {
-                    // Normal: submitted must be equal or greater
-                    $check_if_answered = ($submittedcount >= $requiredCount);
-                }
+            $isSentBack = $sentBackExists;
+            if ($isSentBack) {
+                $check_if_answered = false; // treat as not completed so user can re-submit
             }
 
-            // --- Sendback check (original submission only, sequence 0/null) ---
-            $isSentBack = false;
-            if ($check_if_answered) {
-                $latestAnswer = TempUserActivityAnswersData::where('row_id', $row_id)
-                    ->where('activity_id', $assigned_data->activity_id)
-                    ->where('user_id', Auth::user()->id)
-                    ->where(function ($q) {
-                        $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0);
-                    })
-                    ->orderBy('id', 'desc')
-                    ->first();
-                if ($latestAnswer && $latestAnswer->status == 3) {
-                    $isSentBack = true;
-                    $check_if_answered = false; // treat as not completed so user can re-submit
-                }
-            }
+            // True if any instance (any sequence) has been sent back
+            $hasAnySentBack = $isSentBack || TempUserActivityAnswersData::where('row_id', $row_id)
+                ->where('activity_id', $assigned_data->activity_id)
+                ->where('user_id', Auth::user()->id)
+                ->where('status', 3)
+                ->where('activity_sequence', '>', 0)
+                ->exists();
 
             $otpVerificationDone = false;
             // dd($project);
@@ -1194,14 +1270,27 @@ class TaskHandlerController extends Controller
                         ->where('activity_id', $assigned_data->activity_id)
                         ->where('user_id', $user->id)->exists();
                     if ($closeRecord) {
-                        // Check if verifier has sent back any answer since closing
-                        $sentBackExists = TempUserActivityAnswersData::where('row_id', $row_id)
+                        // Guard: only fully-closed if at least one answer actually exists
+                        $hasAnyAnswer = TempUserActivityAnswersData::where('row_id', $row_id)
                             ->where('activity_id', $assigned_data->activity_id)
-                            ->where('user_id', $user->id)
-                            ->where('status', 3)->exists();
-                        $isFullyClosed = !$sentBackExists;
+                            ->where('user_id', Auth::user()->id)->exists();
+                        if ($hasAnyAnswer) {
+                            $sentBackExists = TempUserActivityAnswersData::where('row_id', $row_id)
+                                ->where('activity_id', $assigned_data->activity_id)
+                                ->where('user_id', Auth::user()->id)
+                                ->where('status', 3)->exists();
+                            $isFullyClosed = !$sentBackExists;
+                        }
                     }
                 }
+
+                \Log::debug('[activity_render] activity_id=' . $assigned_data->activity_id
+                    . ' activity_name=' . ($assigned_data->activityName->activity_name ?? '?')
+                    . ' answer_submitted=' . ($check_if_answered ? 'true' : 'false')
+                    . ' allowRepeat=' . ($allowRepeat ? 'true' : 'false')
+                    . ' isFullyClosed=' . ($isFullyClosed ? 'true' : 'false')
+                    . ' isSentBack=' . ($isSentBack ? 'true' : 'false')
+                    . ' row_id=' . $row_id);
 
                 $repeatInstances = ActivityRepeatInstance::where('row_id', $row_id)
                     ->where('activity_id', $assigned_data->activity_id)
@@ -1217,13 +1306,14 @@ class TaskHandlerController extends Controller
                     'group_id' => $assigned_data->activity_group_id,
                     'group_name' => $group_name,
                     'sequence' => $sequence,
-                    'answer_submitted' => $check_if_answered,
+                    'answer_submitted'   => $check_if_answered,
                     'otpVerificationDone' => $otpVerificationDone,
-                    'is_sent_back' => $isSentBack,
-                    'allow_repeat' => $allowRepeat,
-                    'is_fully_closed' => $isFullyClosed,
-                    'repeat_instances' => $repeatInstances,
-                    'project_data' => $project,
+                    'is_sent_back'      => $isSentBack,
+                    'has_any_sent_back' => $hasAnySentBack,
+                    'allow_repeat'      => $allowRepeat,
+                    'is_fully_closed'   => $isFullyClosed,
+                    'repeat_instances'  => $repeatInstances,
+                    'project_data'      => $project,
                 ];
             }
         }
@@ -1324,25 +1414,43 @@ class TaskHandlerController extends Controller
         $activity_id = $request->activity_id;
         $user        = Auth::user();
 
-        // Verify all instances are submitted before closing
-        $repeatInstances = ActivityRepeatInstance::where('row_id', $row_id)
-            ->where('activity_id', $activity_id)->get();
-        $pendingInstances = $repeatInstances->where('status', 0);
-        if ($pendingInstances->count() > 0) {
-            return response()->json(['success' => false, 'message' => 'All instances must be submitted before closing.']);
+        // Must have at least one answer saved for this row+activity
+        $hasAnyAnswers = TempUserActivityAnswersData::where('row_id', $row_id)
+            ->where('activity_id', $activity_id)
+            ->exists();
+
+        if (!$hasAnyAnswers) {
+            return response()->json(['success' => false, 'message' => 'No answers submitted yet. Please submit at least one instance before closing.']);
         }
 
-        // Check original submission
-        $activity = Activity::find($activity_id);
-        $requiredCount = DB::table('questions')->where('activity_id', $activity_id)
-            ->where('answer_type', 1)->where('question_type', '!=', 'Multi Response')->count();
-        $submittedCount = TempUserActivityAnswersData::where('row_id', $row_id)
-            ->where('activity_id', $activity_id)->where('user_id', $user->id)
-            ->where(function ($q) { $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0); })
-            ->distinct('question_id')->count('question_id');
+        // All repeat instances must have at least one answer saved (check by actual answer records,
+        // not activity_repeat_instances.status which is not updated on answer save)
+        $repeatInstances = ActivityRepeatInstance::where('row_id', $row_id)
+            ->where('activity_id', $activity_id)
+            ->get(['activity_sequence', 'instance_label']);
 
-        if ($submittedCount < $requiredCount) {
-            return response()->json(['success' => false, 'message' => 'The original activity answers are not yet submitted.']);
+        if ($repeatInstances->isNotEmpty()) {
+            $savedSeqs = TempUserActivityAnswersData::where('row_id', $row_id)
+                ->where('activity_id', $activity_id)
+                ->where('activity_sequence', '>', 0)
+                ->distinct('activity_sequence')
+                ->pluck('activity_sequence')
+                ->toArray();
+
+            $unsavedInstances = $repeatInstances->filter(
+                fn($inst) => !in_array((int) $inst->activity_sequence, $savedSeqs)
+            );
+
+            if ($unsavedInstances->isNotEmpty()) {
+                return response()->json([
+                    'success'          => false,
+                    'message'          => 'All instances must be submitted before closing.',
+                    'pending_instances' => $unsavedInstances->map(fn($i) => [
+                        'activity_sequence' => $i->activity_sequence,
+                        'label'             => $i->instance_label,
+                    ])->values(),
+                ]);
+            }
         }
 
         ActivityInstanceClose::updateOrCreate(
@@ -1488,6 +1596,17 @@ class TaskHandlerController extends Controller
             ->where(function ($q) { $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0); })
             ->exists();
 
+        // Check if the current instance has at least one saved answer
+        // Used to gate the Add button — user must save the current instance before creating a new one
+        if ($activity_sequence > 0) {
+            $current_instance_saved = TempUserActivityAnswersData::where('row_id', $row_id)
+                ->where('activity_id', $activity->id)
+                ->where('activity_sequence', $activity_sequence)
+                ->exists();
+        } else {
+            $current_instance_saved = $original_submitted;
+        }
+
         // Check if this activity is fully closed
         $is_closed = ActivityInstanceClose::where('row_id', $row_id)
             ->where('activity_id', $activity->id)
@@ -1558,7 +1677,21 @@ class TaskHandlerController extends Controller
             ->where('status', 3)
             ->exists();
 
-        $instance_common = compact('row_data', 'related_questions', 'sub_question_child_ids', 'group_info', 'template_name_values', 'project_id', 'activity_sequence', 'repeat_instance', 'allow_repeat', 'all_instances', 'original_submitted', 'is_closed', 'activity', 'is_sent_back', 'has_any_sent_back');
+        // Build $parentQuestions as a LengthAwarePaginator from already-loaded questions.
+        // The users' view uses $related_questions directly, but older deployed views may reference
+        // $parentQuestions — pass it to prevent an undefined-variable crash on production.
+        $parentQCollection = $related_questions
+            ->filter(fn($q) => $q->is_parent == 1 && empty($q->parent_question_id))
+            ->values();
+        $parentQuestions = new \Illuminate\Pagination\LengthAwarePaginator(
+            $parentQCollection,
+            $parentQCollection->count(),
+            $parentQCollection->count() ?: 1,
+            1,
+            ['path' => request()->url(), 'query' => request()->query()]
+        );
+
+        $instance_common = compact('row_data', 'related_questions', 'sub_question_child_ids', 'group_info', 'template_name_values', 'project_id', 'activity_sequence', 'repeat_instance', 'allow_repeat', 'all_instances', 'original_submitted', 'current_instance_saved', 'is_closed', 'activity', 'is_sent_back', 'has_any_sent_back', 'parentQuestions');
         if (!$answer_data->isEmpty()) {
             return view('masters.users.activity_questions', array_merge($instance_common, compact('answer_data')));
         } else {
@@ -1629,7 +1762,18 @@ class TaskHandlerController extends Controller
 
         $instance->delete();
 
-        return redirect()->back()->with('message', 'Instance removed successfully.');
+        // Redirect to the original instance (sequence 0) so the user doesn't
+        // land back on the now-deleted instance URL.
+        $rowId      = $request->row_id      ?? $instance->row_id;
+        $activityId = $request->activity_id ?? $instance->activity_id;
+        $groupId    = $request->group_id    ?? null;
+
+        return redirect()->route('user.project.row_id.activity', [
+            'row_id'     => $rowId,
+            'activity'   => $activityId,
+            'group_info' => $groupId,
+            // No activity_sequence param = loads the original (sequence 0)
+        ])->with('message', 'Instance removed successfully.');
     }
 
     // this is to create the directory in the assets
@@ -1745,6 +1889,14 @@ class TaskHandlerController extends Controller
                 // Get question from pre-loaded map (no extra DB query)
                 $question = $activityQuestionMap->get($questionId);
                 if (!$question) {
+                    continue;
+                }
+
+                // Skip "_existing" hidden fields — they are UI hints only (preserve old path
+                // when no new file is uploaded). We handle them at the end via the multi_images
+                // and standalone file logic; processing them here would overwrite a freshly
+                // uploaded image with the previous path (or blank it on first upload).
+                if ($attribute === 'existing') {
                     continue;
                 }
 
@@ -2057,7 +2209,17 @@ class TaskHandlerController extends Controller
                     // Handle non-subjective questions
                     $existing = $query->first();
 
-                    if (!$existing) {
+                    // For file-type questions (Image, File Upload, Audio, Video), if no new file
+                    // was uploaded and there is already a saved answer, keep the existing record
+                    // as-is (only update same_answer_id). Do NOT overwrite with an empty string.
+                    $isFileType = in_array($question->question_type, ['Image', 'File Upload', 'Audio', 'Video']);
+                    if ($isFileType && !$isFile && empty($user_answer)) {
+                        if ($existing) {
+                            $existing->update(['same_answer_id' => $last_sequence]);
+                            $answer = $existing;
+                        }
+                        // No existing record and no new file → nothing to save
+                    } elseif (!$existing) {
                         $answer = TempUserActivityAnswersData::create([
                             'user_id' => $userId,
                             'row_id' => $request->row_id,
@@ -2112,17 +2274,25 @@ class TaskHandlerController extends Controller
                 ])->with('message', $message);
             }
 
-            // Redirect based on session
-            if (Session::has('project_outlet_activity')) {
-                $params = Session::get('project_outlet_activity');
-                return redirect(route('user.project.distributor.outlets', $params))
-                    ->with('message', $message);
-            }
+            // Don't redirect to distributor for multi-instance activities — user stays
+            // on the activity page until they close/finalize via the Close button.
+            $projectTemplate2  = $projectTemp->getProjectTemplateData;
+            $addOnIds2         = json_decode($projectTemplate2->activity_add_on_activity_ids ?? '[]', true);
+            $allowRepeat2 = $projectTemplate2->activity_add_on == 1 &&
+                (empty($addOnIds2) || in_array((int)$request->activity_id, array_map('intval', $addOnIds2)));
 
-            if (Session::has('project_dist_activity')) {
-                $params = Session::get('project_dist_activity');
-                return redirect(route('user.project_master.data', $params))
-                    ->with('message', $message);
+            if (!$allowRepeat2) {
+                if (Session::has('project_outlet_activity')) {
+                    $params = Session::get('project_outlet_activity');
+                    return redirect(route('user.project.distributor.outlets', $params))
+                        ->with('message', $message);
+                }
+
+                if (Session::has('project_dist_activity')) {
+                    $params = Session::get('project_dist_activity');
+                    return redirect(route('user.project_master.data', $params))
+                        ->with('message', $message);
+                }
             }
 
             return redirect()->back()->with('message', $message);
@@ -2187,6 +2357,93 @@ class TaskHandlerController extends Controller
             \Illuminate\Support\Facades\Log::error('upload_activity_image_temp error: ' . $e->getMessage());
             return response()->json(['error' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Auto-save a single question's answer on blur/change without requiring all fields.
+     * Skips required-field validation — that runs only on full Save.
+     */
+    public function autoSaveAnswer(Request $request)
+    {
+        $request->validate([
+            'row_id'      => 'required|integer',
+            'activity_id' => 'required|integer',
+            'question_id' => 'required|integer',
+            'value'       => 'nullable',
+        ]);
+
+        $userId      = Auth::id();
+        $rowId       = (int) $request->row_id;
+        $activityId  = (int) $request->activity_id;
+        $questionId  = (int) $request->question_id;
+        $activitySeq = (int) ($request->activity_sequence ?? 0);
+        $pctxId      = $request->pctx_parent_id ? (int) $request->pctx_parent_id : null;
+        $value       = $request->value;
+        $latitude    = $request->latitude ?? null;
+        $longitude   = $request->longitude ?? null;
+
+        // Skip empty values — nothing to save
+        if ($value === null || trim((string) $value) === '') {
+            return response()->json(['saved' => false, 'reason' => 'empty']);
+        }
+
+        $question = Question::find($questionId);
+        if (!$question) {
+            return response()->json(['saved' => false, 'reason' => 'question_not_found'], 404);
+        }
+
+        // Normalise date/datetime format to match full-save logic
+        if ($question->question_type === 'Date') {
+            try { $value = \Carbon\Carbon::parse($value)->format('d/m/Y'); } catch (\Exception $e) {}
+        } elseif ($question->question_type === 'Date & Time') {
+            try { $value = \Carbon\Carbon::parse($value)->format('d/m/Y H:i'); } catch (\Exception $e) {}
+        } elseif ($question->question_type === 'Yes / No') {
+            $norm = strtolower(trim((string)$value));
+            $value = $norm === 'yes' ? 'Yes' : ($norm === 'no' ? 'No' : $value);
+        } elseif ($question->question_type === 'Multi select' && is_array($value)) {
+            $value = implode(',', array_filter($value));
+        }
+
+        // Match the same unique lookup used by full-save:
+        // row_id + question_id + activity_sequence + parent_context_id
+        $existing = TempUserActivityAnswersData::where('row_id', $rowId)
+            ->where('question_id', $questionId)
+            ->where('activity_id', $activityId)
+            ->where(function ($q) use ($activitySeq) {
+                if ($activitySeq > 0) {
+                    $q->where('activity_sequence', $activitySeq);
+                } else {
+                    $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0);
+                }
+            })
+            ->where('parent_context_id', $pctxId)
+            ->first();
+
+        if ($existing) {
+            $existing->update([
+                'user_answer' => $value,
+                'latitude'    => $latitude,
+                'longitude'   => $longitude,
+                'updated_at'  => now(),
+            ]);
+        } else {
+            $lastSeq = (int) TempUserActivityAnswersData::max('same_answer_id') + 1;
+            TempUserActivityAnswersData::create([
+                'user_id'                  => $userId,
+                'row_id'                   => $rowId,
+                'activity_id'              => $activityId,
+                'activity_group_name_id'   => $request->group_id ?? 0,
+                'question_id'              => $questionId,
+                'user_answer'              => $value,
+                'same_answer_id'           => $lastSeq,
+                'activity_sequence'        => $activitySeq ?? 0,
+                'parent_context_id'        => $pctxId,
+                'latitude'                 => $latitude,
+                'longitude'                => $longitude,
+            ]);
+        }
+
+        return response()->json(['saved' => true]);
     }
 
     public function row_activity_answers(Request $request)
@@ -2319,6 +2576,25 @@ class TaskHandlerController extends Controller
 
             $answeredQuestionIds = array_unique($answeredQuestionIds);
 
+            // Also count answers already auto-saved to DB (blur/change auto-save).
+            // This lets the Save button send only images without re-sending text answers.
+            $dbAnsweredIds = TempUserActivityAnswersData::where('row_id', $request->row_id)
+                ->where('activity_id', $request->activity_id)
+                ->where('user_id', $userId)
+                ->where(function ($q) use ($activitySequence) {
+                    if ($activitySequence > 0) {
+                        $q->where('activity_sequence', $activitySequence);
+                    } else {
+                        $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0);
+                    }
+                })
+                ->whereNotNull('user_answer')
+                ->where('user_answer', '!=', '')
+                ->pluck('question_id')
+                ->toArray();
+
+            $answeredQuestionIds = array_unique(array_merge($answeredQuestionIds, $dbAnsweredIds));
+
             // ── Validate required questions ────────────────────────────────────
             // Rules:
             //  1. Parent/standalone questions (is_parent=1): validate by answer_type
@@ -2429,6 +2705,9 @@ class TaskHandlerController extends Controller
                 }
 
                 if ($validationError) {
+                    if ($request->ajax() || $request->wantsJson()) {
+                        return response()->json(['success' => false, 'message' => $validationError], 422);
+                    }
                     return redirect()->back()->with('error', $validationError)->withInput();
                 }
             }
@@ -2601,11 +2880,11 @@ class TaskHandlerController extends Controller
                     $validator = Validator::make(['file_input' => $file], $rules, $customMessages);
                     if ($validator->fails()) {
                         DB::rollBack();
-                        return redirect()->back()->with(
-                            'error',
-                            "Invalid file for question: {$question->question}. " .
-                            implode(' ', $validator->errors()->all())
-                        );
+                        $fileErrMsg = "Invalid file for question: {$question->question}. " . implode(' ', $validator->errors()->all());
+                        if ($request->ajax() || $request->wantsJson()) {
+                            return response()->json(['success' => false, 'message' => $fileErrMsg], 422);
+                        }
+                        return redirect()->back()->with('error', $fileErrMsg);
                     }
 
                     // Generate unique filename
@@ -3093,14 +3372,25 @@ class TaskHandlerController extends Controller
 
             $message = "Activity Answer submitted successfully";
 
-            // Compute redirect URL (same logic as non-AJAX path below)
+            // Determine whether this activity supports repeat instances.
+            // If so, keep the user on the activity page after each instance save
+            // so they can add/submit more instances. Only the final "Close" action
+            // (close_instances endpoint) redirects back to the distributor page.
+            $projectTemplate   = $projectTemp->getProjectTemplateData;
+            $addOnActivityIds  = json_decode($projectTemplate->activity_add_on_activity_ids ?? '[]', true);
+            $allowRepeat = $projectTemplate->activity_add_on == 1 &&
+                (empty($addOnActivityIds) || in_array((int)$request->activity_id, array_map('intval', $addOnActivityIds)));
+
+            // Compute redirect URL — null when allow_repeat so JS reloads the page instead
             $ajaxRedirectUrl = null;
-            if (Session::has('project_outlet_activity')) {
-                $ajaxRedirectUrl = route('user.project.distributor.outlets', Session::get('project_outlet_activity'));
-            } elseif (Session::has('project_dist_activity')) {
-                $ajaxRedirectUrl = route('user.project_master.data', Session::get('project_dist_activity'));
-            } else {
-                $ajaxRedirectUrl = route('user.projects');
+            if (!$allowRepeat) {
+                if (Session::has('project_outlet_activity')) {
+                    $ajaxRedirectUrl = route('user.project.distributor.outlets', Session::get('project_outlet_activity'));
+                } elseif (Session::has('project_dist_activity')) {
+                    $ajaxRedirectUrl = route('user.project_master.data', Session::get('project_dist_activity'));
+                } else {
+                    $ajaxRedirectUrl = route('user.projects');
+                }
             }
 
             // AJAX path — return JSON so the activity_questions page can handle inline OTP modal
@@ -3133,17 +3423,19 @@ class TaskHandlerController extends Controller
                 ])->with('message', $message);
             }
 
-            // Redirect based on session
-            if (Session::has('project_outlet_activity')) {
-                $params = Session::get('project_outlet_activity');
-                return redirect(route('user.project.distributor.outlets', $params))
-                    ->with('message', $message);
-            }
+            // Redirect based on session — skip distributor redirect for multi-instance activities
+            if (!$allowRepeat) {
+                if (Session::has('project_outlet_activity')) {
+                    $params = Session::get('project_outlet_activity');
+                    return redirect(route('user.project.distributor.outlets', $params))
+                        ->with('message', $message);
+                }
 
-            if (Session::has('project_dist_activity')) {
-                $params = Session::get('project_dist_activity');
-                return redirect(route('user.project_master.data', $params))
-                    ->with('message', $message);
+                if (Session::has('project_dist_activity')) {
+                    $params = Session::get('project_dist_activity');
+                    return redirect(route('user.project_master.data', $params))
+                        ->with('message', $message);
+                }
             }
 
             return redirect()->back()->with('message', $message);
@@ -3781,6 +4073,7 @@ class TaskHandlerController extends Controller
         }
     }
 
+
     public function verify_otp(Request $request)
     {
         $request->validate(
@@ -3858,4 +4151,6 @@ class TaskHandlerController extends Controller
             ], 200);
         }
     }
+
+    
 }

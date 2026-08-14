@@ -13,6 +13,15 @@ class ActivityRepeatInstance extends Model
 
     protected $fillable = ['row_id', 'activity_id', 'activity_sequence', 'instance_label', 'user_id', 'status'];
 
+    protected $casts = [
+        'id'                => 'integer',
+        'row_id'            => 'integer',
+        'activity_id'       => 'integer',
+        'activity_sequence' => 'integer',
+        'user_id'           => 'integer',
+        'status'            => 'integer',
+    ];
+
     public function getUser()
     {
         return $this->belongsTo(User::class, 'user_id');

@@ -32,11 +32,35 @@ class Question extends Model
         'date_max',
     ];
 
+    protected $casts = [
+        'id'                  => 'integer',
+        'activity_id'         => 'integer',
+        'answer_type'         => 'integer',
+        'question_sequence'   => 'integer',
+        'is_parent'           => 'integer',
+        'parent_question_id'  => 'integer',
+        'parent_dropdown_id'  => 'integer',
+        'allow_multiple_images' => 'integer',
+        'validation_min'      => 'integer',
+        'validation_max'      => 'integer',
+        'max_file_size_mb'    => 'integer',
+    ];
+
 
     public function scopeActive($query)
     {
 
         return $query->where('deleted_at', null);
+    }
+
+    // Normalizes any spacing/casing variant of "yes/no" (Yes/No, yes /NO, YES / no, ...) to "Yes / No"
+    public function getQuestionTypeAttribute($value)
+    {
+        if ($value !== null && preg_match('/^\s*yes\s*\/\s*no\s*$/i', $value)) {
+            return 'Yes / No';
+        }
+
+        return $value;
     }
 
     public function activity()

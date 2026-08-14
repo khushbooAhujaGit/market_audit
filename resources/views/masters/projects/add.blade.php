@@ -139,6 +139,16 @@
                                                                 Project or Not</label>
                                                         </div>
                                                     </div>
+                                                    <div class="col-xl-3 col-sm-3">
+                                                        <div class="form-check checkbox checkbox-primary mb-0">
+                                                            <input class="form-check-input"
+                                                                name="is_infiltration_report_applicable"
+                                                                id="is_infiltration_report_applicable" type="checkbox">
+                                                            <label class="form-check-label"
+                                                                for="is_infiltration_report_applicable">Infiltration
+                                                                Report Applicable</label>
+                                                        </div>
+                                                    </div>
                                                     {{-- khushboo 01-04-2025 --}}
 
                                                     <div class="col-xl-3 col-sm-3">

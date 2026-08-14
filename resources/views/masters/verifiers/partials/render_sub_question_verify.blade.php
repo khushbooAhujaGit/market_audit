@@ -13,10 +13,16 @@
     if ($mrParentId !== null) {
         // Look up the answer stored with exactly this Multi Response parent as pctx.
         // With the new pctx-for-all system, sub-question answers use parent_context_id = mr_parent_id.
-        // Fall back to any non-null pctx (older data) then to null-pctx as last resort.
+        // A save-path bug (fixed separately, but plenty of already-saved data still has it) stored
+        // these reversed for MR sub-questions: question_id = the MR parent, parent_context_id = the
+        // sub-question. So also match that swapped form before falling back further.
         $sqAns = $user_responses->first(function ($a) use ($sqid, $mrParentId) {
                      return (int)$a->question_id === (int)$sqid
                          && (int)$a->parent_context_id === (int)$mrParentId;
+                 })
+              ?? $user_responses->first(function ($a) use ($sqid, $mrParentId) {
+                     return (int)$a->question_id === (int)$mrParentId
+                         && (int)$a->parent_context_id === (int)$sqid;
                  })
               ?? $user_responses->where('question_id', $sqid)->whereNotNull('parent_context_id')->first()
               ?? $user_responses->where('question_id', $sqid)->whereNull('parent_context_id')->first();
@@ -80,6 +86,7 @@
                             <img src="{{ asset($sqImg) }}" alt="answer"
                                  class="imagemodal"
                                  data-setval="{{ asset($sqImg) }}"
+                                 data-verifier-img="{{ asset($sqImg) }}"
                                  style="width:72px;height:72px;object-fit:cover;border-radius:4px;border:1px solid #ddd;cursor:pointer;">
                         @endforeach
                     </div>
@@ -98,9 +105,9 @@
                              style="max-width:100%;max-height:150px;border-radius:4px;border:1px solid #ddd;cursor:pointer;">
                     </div>
                     @if ($sqAns)
-                        <a href="{{ asset($sqImgPaths[0]) }}" target="_blank"
+                        <a href="{{ asset($sqImgPaths[0]) }}" download
                            class="btn btn-sm btn-outline-secondary mt-1" style="font-size:12px;">
-                            &#8615; Download Image
+                            &#11015; Download Image
                         </a>
                     @endif
                 @endif
@@ -110,8 +117,13 @@
                     <img src="{{ asset($sqValue) }}" alt="answer"
                          class="imagemodal"
                          data-setval="{{ asset($sqValue) }}"
+                         data-verifier-img="{{ asset($sqValue) }}"
                          style="max-width:100%;max-height:150px;border-radius:4px;border:1px solid #ddd;cursor:pointer;">
                 </div>
+                <a href="{{ asset($sqValue) }}" download
+                   class="btn btn-sm btn-outline-secondary mt-1" style="font-size:12px;">
+                    &#11015; Download Image
+                </a>
             @elseif($isVideo)
                 <video controls preload="metadata" style="max-width:100%; max-height:180px; border-radius:4px;">
                     <source src="{{ asset($sqValue) }}">
@@ -134,7 +146,7 @@
     </td>
 </tr>
 
-{{-- RECURSION: if this sub-question is Outlet, render its own sub-questions --}}
+{{-- RECURSION: if this sub-question is Multi Response, render its own sub-questions --}}
 @if($subQuestion->question_type === 'Multi Response' && $subQuestion->subQuestions->count() > 0)
     @foreach($subQuestion->subQuestions as $nestedLink)
         @if($nestedLink->childQuestion)
@@ -142,8 +154,64 @@
                 'subQuestion'    => $nestedLink->childQuestion,
                 'depth'          => $depth + 1,
                 'user_responses' => $user_responses,
-                'mr_parent_id'   => $sqid, // nested sub-questions use this level as their pctx
+                'mr_parent_id'   => $sqid,
             ])
         @endif
     @endforeach
 @endif
+
+{{-- Conditional children of this sub-question (e.g. File Upload shown when Yes/No = Yes) --}}
+{{-- Their answers are stored with parent_context_id = null (not as MR pctx sub-questions) --}}
+@php
+    $condChildren = \App\Models\Question::where('parent_question_id', $sqid)
+        ->with('getOptions')
+        ->orderBy('question_sequence')
+        ->get();
+@endphp
+@foreach($condChildren as $condChild)
+    @php
+        $ccid        = $condChild->id;
+        $triggerVal  = $condChild->parent_value;
+        // Answer stored with null pctx (submitted as standalone conditional child)
+        $ccAns   = $user_responses->where('question_id', $ccid)->whereNull('parent_context_id')->first()
+                ?? $user_responses->where('question_id', $ccid)->first();
+        $ccValue = $ccAns ? $ccAns->user_answer : '';
+        // Show when trigger matches (or __non_empty__ means any non-empty parent answer)
+        $triggerMet = ($triggerVal === '__non_empty__' && $sqValue !== '')
+                   || ($triggerVal !== null && $triggerVal !== '' && $sqValue === $triggerVal);
+    @endphp
+    @if($triggerMet)
+        @php
+            $ccStyle  = $depthStyles[min($depth + 1, 3)];
+            $ccIndent = ($depth + 1) * 18;
+        @endphp
+        <tr style="background:{{ $ccStyle['bg'] }}; border-left:4px solid {{ $ccStyle['border'] }};">
+            <td class="col-md-6 fw-medium" style="padding-left:{{ $ccIndent + 12 }}px;">
+                <small style="color:{{ $ccStyle['border'] }}; font-size:11px; font-weight:600;">
+                    &#8627; Conditional (when {{ $triggerVal }})
+                </small><br>
+                {{ $condChild->question }}
+                @if($condChild->answer_type == 1)<span class="text-danger">*</span>@endif
+            </td>
+            <td class="col-md-6">
+                @if(!$ccValue)
+                    <span class="text-muted fst-italic">&#8212; No answer &#8212;</span>
+                @else
+                    @php
+                        $ccExt    = strtolower(pathinfo($ccValue, PATHINFO_EXTENSION));
+                        $ccIsImg  = in_array($ccExt, ['jpg','jpeg','png','gif','webp']) && str_contains($ccValue, '/');
+                        $ccIsFile = in_array($ccExt, ['pdf','xls','xlsx','doc','docx']) && str_contains($ccValue, '/');
+                    @endphp
+                    @if($ccIsImg)
+                        <img src="{{ asset($ccValue) }}" class="imagemodal" data-setval="{{ asset($ccValue) }}"
+                             style="max-width:100%;max-height:150px;border-radius:4px;border:1px solid #ddd;cursor:pointer;">
+                    @elseif($ccIsFile)
+                        <a href="{{ asset($ccValue) }}" target="_blank" class="btn btn-sm btn-outline-secondary">View File</a>
+                    @else
+                        <input type="text" value="{{ $ccValue }}" class="form-control" readonly>
+                    @endif
+                @endif
+            </td>
+        </tr>
+    @endif
+@endforeach

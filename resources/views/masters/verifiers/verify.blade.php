@@ -158,9 +158,16 @@
                                 <div class="col-xl-6 col-md-6">
                                     <div class="card">
                                         <div class="table-card">
-                                            <h5 class="mt-2 p-2">Activity Questions
-                                                <span class="fs-5 float-end badge bg-secondary"
-                                                    id="edit_answers">Edit</span>
+                                            <h5 class="mt-2 p-2 d-flex align-items-center justify-content-between flex-wrap gap-2">
+                                                <span>Activity Questions</span>
+                                                <span class="d-flex align-items-center gap-2">
+                                                    <button type="button" onclick="downloadAllImagesAsZip(this)"
+                                                       class="btn btn-sm btn-success"
+                                                       title="Download all image answers as ZIP">
+                                                        &#11015; Download All Images
+                                                    </button>
+                                                    <span class="badge bg-secondary fs-6" style="cursor:pointer;" id="edit_answers">Edit</span>
+                                                </span>
                                             </h5>
                                             <form method="post" action="{{ route('verifier.activityQuestionAnswers') }}"
                                                 enctype="multipart/form-data">
@@ -272,30 +279,49 @@
                                                                             @case('Image')
                                                                                 @if ($parentAnswer)
                                                                                     @php
-                                                                                        $imgPaths   = json_decode($parentAnswer, true);
-                                                                                        $isMultiImg = is_array($imgPaths) && count($imgPaths) > 1;
+                                                                                        $imgPaths     = json_decode($parentAnswer, true);
+                                                                                        $isMultiImg   = is_array($imgPaths) && count($imgPaths) > 1;
                                                                                         if (!is_array($imgPaths)) $imgPaths = [$parentAnswer];
+                                                                                        // Find the correct answer record ID for this question
+                                                                                        $imgAnswerId  = null;
+                                                                                        foreach ($user_responses as $_r) {
+                                                                                            if ($_r->question_id == $parentQuestion->id) {
+                                                                                                $imgAnswerId = $_r->id; break;
+                                                                                            }
+                                                                                        }
                                                                                     @endphp
                                                                                     @if ($isMultiImg)
                                                                                         <div class="d-flex flex-wrap gap-2 mb-2">
                                                                                             @foreach ($imgPaths as $imgP)
-                                                                                                <img class="imagemodal" alt="Image"
-                                                                                                     src="{{ asset($imgP) }}"
-                                                                                                     data-setval="{{ asset($imgP) }}"
-                                                                                                     style="width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid #ccc;cursor:pointer;">
+                                                                                                <div class="d-flex flex-column align-items-center" style="gap:4px;">
+                                                                                                    <img class="imagemodal" alt="Image"
+                                                                                                         src="{{ asset($imgP) }}"
+                                                                                                         data-setval="{{ asset($imgP) }}"
+                                                                                                         data-verifier-img="{{ asset($imgP) }}"
+                                                                                                         style="width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid #ccc;cursor:pointer;">
+                                                                                                    <a href="{{ asset($imgP) }}" download
+                                                                                                       class="btn btn-xs btn-outline-secondary"
+                                                                                                       style="font-size:10px;padding:1px 5px;">&#11015;</a>
+                                                                                                </div>
                                                                                             @endforeach
                                                                                         </div>
-                                                                                        <a href="{{ route('report.download.images.zip', ['answer_id' => $response->id]) }}"
-                                                                                           class="btn btn-sm btn-success mt-1"
-                                                                                           style="font-size:12px;" title="Download all images as ZIP">
-                                                                                            &#11015; Download ZIP ({{ count($imgPaths) }} images)
-                                                                                        </a>
+                                                                                        @if ($imgAnswerId)
+                                                                                            <a href="{{ route('report.download.images.zip', ['answer_id' => $imgAnswerId]) }}"
+                                                                                               class="btn btn-sm btn-success mt-1"
+                                                                                               style="font-size:12px;" title="Download all images as ZIP">
+                                                                                                &#11015; Download ZIP ({{ count($imgPaths) }} images)
+                                                                                            </a>
+                                                                                        @endif
                                                                                     @else
                                                                                         <div class="table-avtar-new mb-3">
                                                                                             <img class="imagemodal" alt="Image"
                                                                                                 src="{{ asset($imgPaths[0]) }}"
-                                                                                                data-setval="{{ asset($imgPaths[0]) }}">
+                                                                                                data-setval="{{ asset($imgPaths[0]) }}"
+                                                                                                data-verifier-img="{{ asset($imgPaths[0]) }}">
                                                                                         </div>
+                                                                                        <a href="{{ asset($imgPaths[0]) }}" download
+                                                                                           class="btn btn-sm btn-outline-secondary mt-1"
+                                                                                           style="font-size:12px;">&#11015; Download Image</a>
                                                                                     @endif
                                                                                 @endif
                                                                                 <input name="{{ $parentQuestion->id }}"
@@ -900,30 +926,48 @@
                                                                                             @case('Image')
                                                                                                 @if ($childAnswer)
                                                                                                     @php
-                                                                                                        $cImgPaths = json_decode($childAnswer, true);
-                                                                                                        $cIsMulti  = is_array($cImgPaths) && count($cImgPaths) > 1;
+                                                                                                        $cImgPaths   = json_decode($childAnswer, true);
+                                                                                                        $cIsMulti    = is_array($cImgPaths) && count($cImgPaths) > 1;
                                                                                                         if (!is_array($cImgPaths)) $cImgPaths = [$childAnswer];
+                                                                                                        $cImgAnswerId = null;
+                                                                                                        foreach ($user_responses as $_r) {
+                                                                                                            if ($_r->question_id == $childQuestion->id) {
+                                                                                                                $cImgAnswerId = $_r->id; break;
+                                                                                                            }
+                                                                                                        }
                                                                                                     @endphp
                                                                                                     @if ($cIsMulti)
                                                                                                         <div class="d-flex flex-wrap gap-2 mb-2">
                                                                                                             @foreach ($cImgPaths as $cImg)
-                                                                                                                <img class="imagemodal" alt="Image"
-                                                                                                                     src="{{ asset($cImg) }}"
-                                                                                                                     data-setval="{{ asset($cImg) }}"
-                                                                                                                     style="width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid #ccc;cursor:pointer;">
+                                                                                                                <div class="d-flex flex-column align-items-center" style="gap:4px;">
+                                                                                                                    <img class="imagemodal" alt="Image"
+                                                                                                                         src="{{ asset($cImg) }}"
+                                                                                                                         data-setval="{{ asset($cImg) }}"
+                                                                                                                         data-verifier-img="{{ asset($cImg) }}"
+                                                                                                                         style="width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid #ccc;cursor:pointer;">
+                                                                                                                    <a href="{{ asset($cImg) }}" download
+                                                                                                                       class="btn btn-xs btn-outline-secondary"
+                                                                                                                       style="font-size:10px;padding:1px 5px;">&#11015;</a>
+                                                                                                                </div>
                                                                                                             @endforeach
                                                                                                         </div>
-                                                                                                        <a href="{{ route('report.download.images.zip', ['answer_id' => $response->id]) }}"
-                                                                                                           class="btn btn-sm btn-success mt-1"
-                                                                                                           style="font-size:12px;">
-                                                                                                            &#11015; Download ZIP ({{ count($cImgPaths) }} images)
-                                                                                                        </a>
+                                                                                                        @if ($cImgAnswerId)
+                                                                                                            <a href="{{ route('report.download.images.zip', ['answer_id' => $cImgAnswerId]) }}"
+                                                                                                               class="btn btn-sm btn-success mt-1"
+                                                                                                               style="font-size:12px;">
+                                                                                                                &#11015; Download ZIP ({{ count($cImgPaths) }} images)
+                                                                                                            </a>
+                                                                                                        @endif
                                                                                                     @else
                                                                                                         <div class="table-avtar-new mb-3">
                                                                                                             <img class="imagemodal" alt="Image"
                                                                                                                 src="{{ asset($cImgPaths[0]) }}"
-                                                                                                                data-setval="{{ asset($cImgPaths[0]) }}">
+                                                                                                                data-setval="{{ asset($cImgPaths[0]) }}"
+                                                                                                                data-verifier-img="{{ asset($cImgPaths[0]) }}">
                                                                                                         </div>
+                                                                                                        <a href="{{ asset($cImgPaths[0]) }}" download
+                                                                                                           class="btn btn-sm btn-outline-secondary mt-1"
+                                                                                                           style="font-size:12px;">&#11015; Download Image</a>
                                                                                                     @endif
                                                                                                 @endif
                                                                                                 <input
@@ -1340,6 +1384,19 @@
 
                                                             @endforeach
 
+                                                            @if (!empty($activitySignature))
+                                                                <tr>
+                                                                    <td class="col-md-6 fw-medium">Signature</td>
+                                                                    <td class="col-md-6">
+                                                                        <a href="{{ asset($activitySignature->signature_path) }}" target="_blank">
+                                                                            <img src="{{ asset($activitySignature->signature_path) }}"
+                                                                                alt="Signature"
+                                                                                style="max-width:220px; max-height:120px; border:1px solid #dee2e6; border-radius:6px; background:#fff; padding:4px;">
+                                                                        </a>
+                                                                    </td>
+                                                                </tr>
+                                                            @endif
+
                                                             <!-- Verifier Remark Row -->
                                                             <tr>
                                                                 <td class="col-md-6 fw-medium">Verifier Remark</td>
@@ -1372,6 +1429,7 @@
                                                     Sendback
                                                 </button>
                                             </form>
+
                                         </div>
                                     </div>
                                 </div>
@@ -1412,6 +1470,60 @@
 @section('scripts')
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script>
+        async function downloadAllImagesAsZip(btn) {
+            // Collect all img elements marked as verifier images
+            const imgs = document.querySelectorAll('img[data-verifier-img]');
+            if (imgs.length === 0) {
+                alert('No images found on this page.');
+                return;
+            }
+
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '&#8987; Preparing ZIP...';
+
+            const zip = new JSZip();
+            const folder = zip.folder('images');
+            let count = 0;
+
+            const fetchPromises = Array.from(imgs).map(async (img, i) => {
+                const url = img.getAttribute('data-verifier-img');
+                try {
+                    const response = await fetch(url, { mode: 'cors' });
+                    if (!response.ok) throw new Error('Failed');
+                    const blob = await response.blob();
+                    const ext  = url.split('.').pop().split('?')[0].toLowerCase() || 'jpg';
+                    folder.file('image_' + (i + 1) + '.' + ext, blob);
+                    count++;
+                } catch (e) {
+                    console.warn('Could not fetch image:', url, e);
+                }
+            });
+
+            await Promise.all(fetchPromises);
+
+            if (count === 0) {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+                alert('Could not download any images. Check browser console for details.');
+                return;
+            }
+
+            const content = await zip.generateAsync({ type: 'blob' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(content);
+            a.download = 'images_{{ $related_values->id }}.zip';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href);
+
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+    </script>
 
 
     <script>

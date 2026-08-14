@@ -10,6 +10,10 @@ class Activity extends Model
 {
     use HasFactory, HasEncryptedId;
     protected $fillable = ['activity_name'];
+
+    protected $casts = [
+        'id' => 'integer',
+    ];
     public function questions()
     {
         return $this->hasMany(Question::class, 'activity_id')->orderBy('question_sequence');

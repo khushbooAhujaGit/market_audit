@@ -1336,7 +1336,14 @@
     background: var(--m-dark) !important;
     border-top: none !important;
     box-shadow: 0 -2px 20px rgba(0, 0, 0, 0.3) !important;
-    padding: 8px 0 max(10px, env(safe-area-inset-bottom)) !important;
+    /* Plain value first (Android WebView fallback), then env() override for iOS notch */
+    padding: 8px 0 12px !important;
+    padding-bottom: env(safe-area-inset-bottom, 12px) !important;
+    /* Force GPU compositing layer — fixes position:fixed flicker in Android WebView */
+    -webkit-transform: translateZ(0) !important;
+    transform: translateZ(0) !important;
+    -webkit-backface-visibility: hidden !important;
+    backface-visibility: hidden !important;
   }
 
   .mobile-bottom-nav a {

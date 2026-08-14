@@ -18,7 +18,7 @@
                         </div>
                         <div class="modal fade" id="user_assigned_model" tabindex="-1" role="dialog"
                             aria-labelledby="exampleModal" aria-hidden="true">
-                            <div class="modal-dialog" role="document">
+                            <div class="modal-dialog modal-xl" role="document">
                                 <div class="modal-content">
                                     <div class="modal-body">
                                         <div class="modal-toggle-wrapper">
@@ -29,6 +29,7 @@
                                                         <tr>
                                                             <th>Sn</th>
                                                             <th id="user_type"></th>
+                                                            <th>Verifier Name</th>
                                                             <th>Assigned Value</th>
                                                             <th>Action</th>
                                                         </tr>
@@ -108,7 +109,10 @@
                                                 <td>{{ isset($data_assigned_value->TemplateHeadName) ? $data_assigned_value->TemplateHeadName->template_head_name : '' }}
                                                 </td>
                                                 <td class="view_auditors text-decoration-underline"
-                                                    data-id="{{ $data_assigned_value->id }}" style="cursor:pointer;">
+                                                    data-id="{{ $data_assigned_value->id }}"
+                                                    data-activity-id="{{ $data_assigned_value->activity_id }}"
+                                                    data-project-template-id="{{ $data_assigned_value->project_template_id }}"
+                                                    style="cursor:pointer;">
                                                     {{ $data_assigned_value->getAutiors() }}
                                                 </td>
                                                 <td></td>
@@ -118,8 +122,11 @@
                                                         {{--                                                                href="{{ route('data_assign.edit', $data_assigned_value->id) }}"><i --}}
                                                         {{--                                                                    class="icon-pencil-alt"></i></a> --}}
                                                         {{--                                                        </li> --}}
-                                                        <li class="delete" data-id="{{ $data_assigned_value->id }}"><i
-                                                                class="icon-trash"></i></li>
+                                                        <li class="delete" data-id="{{ $data_assigned_value->id }}"
+                                                            data-activity-id="{{ $data_assigned_value->activity_id }}"
+                                                            data-project-template-id="{{ $data_assigned_value->project_template_id }}" ><i
+                                                                class="icon-trash"></i>
+                                                        </li>
                                                     </ul>
                                                 </td>
                                             </tr>
@@ -272,7 +279,7 @@
                 $("#user_assigned_model").modal('show')
             }
 
-            function render_assigned_user(userassignedvalues) {
+            function render_assigned_user(userassignedvalues, verifierNames) {
 
                 window.auditData = userassignedvalues;
 
@@ -282,21 +289,20 @@
                 const dt = $("#user_render_table").DataTable();
                 dt.clear();
 
+                const verifierDisplay = (verifierNames && verifierNames.length)
+                    ? verifierNames.join(', ')
+                    : '—';
+
                 let index = 1;
 
                 userassignedvalues.forEach(user => {
-
-                    // const combinedHeadValues = (user.audits || [])
-                    //     .map(v => v.head_value?.trim())
-                    //     .filter(v => v)
-                    //     .join(', ');
 
                     const combinedHeadValues = [...new Set(
                         (user.audits || [])
                         .map(v => v.head_value?.trim())
                         .filter(v => v)
                     )].join(', ');
-                    
+
                     const deleteBtn = `
                         <a class="text-danger open-delete-modal"
                            data-user-id="${user.user_id}">
@@ -306,6 +312,7 @@
                     dt.row.add([
                         index++,
                         user.user_name,
+                        verifierDisplay,
                         combinedHeadValues,
                         deleteBtn
                     ]);
@@ -396,8 +403,11 @@
                     timer: 1500
                 });
             @endif
+
             $("#templates_table").on("click", ".delete", function(event) {
                 const data_assigned_id = $(this).data('id');
+                const activity_id = $(this).data('activity-id');
+                const project_template_id = $(this).data('project-template-id');
                 const tar_row = $(this).closest('tr');
                 Swal.fire({
                     title: 'Are you sure?',
@@ -414,7 +424,9 @@
                             type: "POST",
                             data: {
                                 "_token": "{{ csrf_token() }}", // Add the CSRF token to the data
-                                "id": data_assigned_id
+                                "id": data_assigned_id,
+                                "activity_id": activity_id,
+                                "project_template_id": project_template_id
                             },
                             success: function(response) {
                                 console.log(response);
@@ -435,8 +447,9 @@
 
             $("#templates_table").on("click", ".view_auditors", function(event) {
                 const data_assigned_id = $(this).data('id');
+                const activity_id = $(this).data('activity-id');
+                const project_template_id = $(this).data('project-template-id');
                 $("#user_assigned_model").modal('show')
-                // alert(data_assigned_id)
 
                 $.ajax({
                     url: '{{ route('auditors.show') }}',
@@ -444,13 +457,14 @@
                     data: {
                         "_token": "{{ csrf_token() }}",
                         "data_assigned_id": data_assigned_id,
+                        "activity_id": activity_id,
+                        "project_template_id": project_template_id,
                         "user_type": "auditors"
                     },
                     success: function(response) {
                         console.log(response);
                         if (response.message == "Success") {
-                            // render_assigned_user(response.user_list, response.distinctValuesAssign);
-                            render_assigned_user(response.assignedValues);
+                            render_assigned_user(response.assignedValues, response.verifierNames);
                         }
                     }
                 })

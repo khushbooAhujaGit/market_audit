@@ -2859,7 +2859,9 @@ class TaskController extends Controller
                                 'row_id' => $rowId,
                                 'user_id' => $user->id,
                                 'distributor_value' => $distributor_value,
-                                'audit_closed_status' => 1
+                                'audit_closed_status' => 1,
+                                'created_at' => now()->toDateTimeString(),
+                                'updated_at' => now()->toDateTimeString(),
                             ]);
                         }
                     }

@@ -20,7 +20,8 @@ class UploadProjectTemplateDataJob implements ShouldQueue
 
     public $requestData;
     public $filePath;
-    public $timeout = 600;
+    public int $tries   = 2;
+    public int $timeout = 600; // retry_after in queue.php must be > 600 (set to 660)
 
     /**
      * Create a new job instance.
@@ -52,6 +53,7 @@ class UploadProjectTemplateDataJob implements ShouldQueue
             $headers_data = array_shift($dataArray);
             $headers = array_slice($headers_data, 0, $template_heads_count);
             $row_id_counter = ProjectTemplateNameValue::max('row_id') + 1;
+            $now = now()->toDateTimeString();
             // Process data in chunks of 1000 rows
             $chunks = collect($dataArray)->chunk(1000);
             foreach ($chunks as $chunk) {
@@ -69,6 +71,8 @@ class UploadProjectTemplateDataJob implements ShouldQueue
                             'project_template_id' => $projectTemplateInfo->id,
                             'template_name_head_id' => $template_headInfo->id,
                             'value' => $value,
+                            'created_at' => $now,
+                            'updated_at' => $now,
                         ];
                     }
                     $row_id_counter++;

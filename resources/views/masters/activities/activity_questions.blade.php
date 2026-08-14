@@ -60,7 +60,31 @@
             </div>
             <div style="margin-bottom:16px;">
                 <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;">Help Text <span style="font-size:11px;font-weight:400;color:#9CA3AF;">(optional)</span></label>
-                <input type="text" id="aq_help" placeholder="Hint shown below the question..." style="width:100%;border:1px solid #E5E7EB;border-radius:6px;padding:8px 11px;font-size:13px;color:#111827;outline:none;box-sizing:border-box;">
+                {{-- Hidden input stores the actual value sent on save --}}
+                <input type="hidden" id="aq_help">
+                <div id="aq_help_preview" onclick="openHelpTextModal()"
+                     style="width:100%;min-height:36px;border:1px solid #E5E7EB;border-radius:6px;padding:8px 11px;font-size:13px;color:#6B7280;outline:none;box-sizing:border-box;cursor:pointer;background:#FAFAFA;white-space:pre-wrap;line-height:1.5;">
+                    Hint shown below the question...
+                </div>
+            </div>
+
+            {{-- Help Text Modal --}}
+            <div id="helpTextModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;align-items:center;justify-content:center;">
+                <div style="background:#fff;border-radius:10px;width:90%;max-width:500px;padding:20px;box-shadow:0 8px 32px rgba(0,0,0,.2);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                        <span style="font-size:15px;font-weight:600;color:#111827;">Help Text</span>
+                        <span onclick="closeHelpTextModal()" style="cursor:pointer;font-size:20px;color:#6B7280;line-height:1;">&times;</span>
+                    </div>
+                    <textarea id="aq_help_textarea" rows="5"
+                        placeholder="Type help text here. Press Enter for a new line."
+                        style="width:100%;border:1px solid #E5E7EB;border-radius:6px;padding:10px;font-size:13px;color:#111827;outline:none;box-sizing:border-box;resize:vertical;line-height:1.6;"></textarea>
+                    <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
+                        <button onclick="closeHelpTextModal()" type="button"
+                            style="padding:8px 18px;border:1px solid #E5E7EB;border-radius:6px;background:#fff;font-size:13px;cursor:pointer;color:#374151;">Cancel</button>
+                        <button onclick="saveHelpText()" type="button"
+                            style="padding:8px 18px;border:none;border-radius:6px;background:#111827;color:#fff;font-size:13px;cursor:pointer;">Save</button>
+                    </div>
+                </div>
             </div>
 
             <div style="height:1px;background:#EBEBF4;margin:0 -20px 18px;"></div>
@@ -178,7 +202,7 @@
                                 <option value="{{ $pq->id }}"
                                         data-type="{{ $pq->question_type }}"
                                         data-options='@json($pq->getOptions->pluck("option"))'>
-                                    [{{ $pq->question_type }}] {{ $pq->question }}
+                                    [{{ $pq->question_type }}] {{ html_entity_decode($pq->question, ENT_QUOTES, 'UTF-8') }}
                                 </option>
                             @endforeach
                         </select>
@@ -205,7 +229,7 @@
                     <label style="display:block;font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">Link existing question</label>
                     <select id="existing_subq_select" class="form-select form-select-sm mb-2">
                         <option value="">— select a question —</option>
-                        @foreach($activity->questions->where('is_parent', 0)->where('question_type','!=','Multi Response') as $aqOpt)
+                        @foreach($activity->questions as $aqOpt)
                             <option value="{{ $aqOpt->id }}" data-text="{{ $aqOpt->question }}" data-type="{{ $aqOpt->question_type }}">
                                 [{{ $aqOpt->question_type }}] {{ Str::limit($aqOpt->question, 60) }}
                             </option>
@@ -258,37 +282,72 @@
             $conditionalQ= $activity->questions->whereNotNull('parent_question_id')->count();
             $mrGroups    = $activity->questions->where('question_type', 'Multi Response')->count();
 
-            // Build ordered rows for the CURRENT PAGE only
+            // Build ordered rows for the CURRENT PAGE only (supports nested MR hierarchies)
             $orderedRows = [];
             $startSeq = ($parentQuestions->currentPage() - 1) * $parentQuestions->perPage() + 1;
             $codeSeq  = $startSeq - 1;
+
+            // Recursive helper: appends sub-question and conditional-child rows for any question
+            $appendChildren = null;
+            $appendChildren = function($parentQ, $parentCode, $depth) use (&$appendChildren, &$orderedRows, $allSubLinks, $allQuestions) {
+                $alpha = 0;
+
+                // Collect the IDs of all DIRECT sub-questions of this parent.
+                // Used below to detect conditional children whose trigger parent is a sibling
+                // sub-question (so we skip them in the flat sub-link pass and let recursion
+                // place them correctly under their trigger question).
+                $siblingIds = isset($allSubLinks[$parentQ->id])
+                    ? $allSubLinks[$parentQ->id]->pluck('child_question_id')->toArray()
+                    : [];
+
+                // Sub-questions (via QuestionSubQuestion)
+                if (isset($allSubLinks[$parentQ->id])) {
+                    foreach ($allSubLinks[$parentQ->id] as $sl) {
+                        $sq = $allQuestions->get($sl->child_question_id);
+                        if (!$sq) continue;
+
+                        // If this sub-question has parent_question_id pointing to a SIBLING
+                        // sub-question, it's a conditional child within the group — skip it
+                        // here; it will be rendered under its trigger sibling via recursion.
+                        if ($sq->parent_question_id && in_array($sq->parent_question_id, $siblingIds)) {
+                            continue;
+                        }
+
+                        $alpha++;
+                        $childCode  = $parentCode . chr(96 + $alpha);
+                        $isMRChild  = $sq->question_type === 'Multi Response';
+                        $subCount   = isset($allSubLinks[$sq->id]) ? $allSubLinks[$sq->id]->count() : 0;
+                        $orderedRows[] = ['q' => $sq, 'code' => $childCode, 'depth' => $depth, 'kind' => $isMRChild ? 'mr' : 'subq', 'sub_count' => $subCount, 'seq' => $sl->sequence];
+                        // Recurse: handles nested MR AND conditional children of this sub-question
+                        $appendChildren($sq, $childCode, $depth + 1);
+                    }
+                }
+                // Conditional children via parent_question_id (standalone conditional questions
+                // whose trigger is THIS question, not a sub-question of a group)
+                $condChildren = $allQuestions->filter(fn($q) => $q->parent_question_id === $parentQ->id);
+                foreach ($condChildren as $cq) {
+                    // Skip if this conditional child is also a sub-question of the same parent
+                    // (it was already handled in the sub-link pass above or its sibling recursion)
+                    if (in_array($cq->id, $siblingIds)) continue;
+                    $alpha++;
+                    $childCode = $parentCode . chr(96 + $alpha);
+                    $orderedRows[] = ['q' => $cq, 'code' => $childCode, 'depth' => $depth, 'kind' => 'conditional', 'trigger' => $cq->parent_value, 'seq' => ''];
+                }
+            };
 
             foreach ($parentQuestions as $pq) {
                 $codeSeq++;
                 $code = 'Q' . str_pad($codeSeq, 3, '0', STR_PAD_LEFT);
                 $isMR = $pq->question_type === 'Multi Response';
-
-                $conditionalChildren = $allChildren->where('parent_question_id', $pq->id)->where('is_parent', 0);
-                $subChildren = isset($subLinks[$pq->id])
-                    ? $subLinks[$pq->id]->map(fn($sl) => $allChildren->get($sl->child_question_id) ?? $allQuestions->get($sl->child_question_id))->filter()
-                    : collect();
+                $subCount = isset($allSubLinks[$pq->id]) ? $allSubLinks[$pq->id]->count() : 0;
 
                 $orderedRows[] = [
-                    'q'        => $pq, 'code' => $code, 'depth' => 0,
-                    'kind'     => $isMR ? 'mr' : 'parent', 'sub_count' => $subChildren->count(),
+                    'q'         => $pq, 'code' => $code, 'depth' => 0,
+                    'kind'      => $isMR ? 'mr' : 'parent', 'sub_count' => $subCount,
+                    'seq'       => $pq->question_sequence ?? $codeSeq,
                 ];
 
-                $subAlpha = 0;
-                foreach ($subChildren as $sq) {
-                    $subAlpha++;
-                    $orderedRows[] = ['q' => $sq, 'code' => $code.chr(96+$subAlpha), 'depth' => 1, 'kind' => 'subq'];
-                }
-
-                $condAlpha = $subAlpha;
-                foreach ($conditionalChildren as $cq) {
-                    $condAlpha++;
-                    $orderedRows[] = ['q' => $cq, 'code' => $code.chr(96+$condAlpha), 'depth' => 1, 'kind' => 'conditional', 'trigger' => $cq->parent_value];
-                }
+                $appendChildren($pq, $code, 1);
             }
 
             // Type colour map
@@ -360,6 +419,15 @@
                                     style="padding:7px 16px;background:#111827;color:white;border:none;border-radius:5px;font-size:13px;font-weight:500;cursor:pointer;">
                                 + Add Question
                             </button>
+                            <a href="{{ route('activities.questions.export', $activity->id) }}"
+                               class="btn btn-outline-success btn-sm d-none" title="Download current questions as Excel (re-importable format)">
+                                &#11015; Download Template
+                            </a>
+                            <button type="button" class="btn btn-outline-primary btn-sm d-none"
+                                    onclick="document.getElementById('importQuestionsModal').style.display='flex'"
+                                    title="Upload filled template to re-import questions">
+                                &#11014; Upload Template
+                            </button>
                             <a href="{{ route('activities.list') }}" class="btn btn-outline-secondary btn-sm">View Activities</a>
                         </div>
                     </div>
@@ -372,6 +440,7 @@
                                     @php $thBase = 'position:sticky;top:0;z-index:20;background:#F3F4F6;border-bottom:2px solid #E5E7EB;padding:11px 12px;color:#6B7280;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;'; @endphp
                                     <tr>
                                         <th style="{{ $thBase }}width:36px;text-align:center;font-weight:400;"></th>
+                                        <th style="{{ $thBase }}width:44px;text-align:center;">Seq</th>
                                         <th style="{{ $thBase }}width:70px;">Code</th>
                                         <th style="{{ $thBase }}width:140px;">Type</th>
                                         <th style="{{ $thBase }}">Question</th>
@@ -379,13 +448,14 @@
                                         <th style="{{ $thBase }}width:120px;text-align:center;">Action</th>
                                     </tr>
                                 </thead>
-                                <tbody id="qTableBody">
+                                @php $inQGroup = false; @endphp
                                 @foreach($orderedRows as $row)
                                     @php
                                         $q     = $row['q'];
                                         $code  = $row['code'];
                                         $depth = $row['depth'];
                                         $kind  = $row['kind'];
+                                        $seq   = $row['seq'] ?? '';
                                         $isMR  = $q->question_type === 'Multi Response';
                                         [$tc, $tbg] = $typeColors[$q->question_type] ?? ['#6B7280','#F9FAFB'];
 
@@ -397,11 +467,25 @@
                                         if ($kind === 'mr')          $leftBorder = 'border-left:3px solid #1D4ED8;';
                                         $indent = $depth * 24;
                                     @endphp
+                                    @if($depth === 0)
+                                        @if($inQGroup)</tbody>@endif
+                                        @php $inQGroup = true; @endphp
+                                        <tbody class="q-group" data-id="{{ $q->id }}">
+                                    @endif
                                     <tr data-qtype="{{ $q->question_type }}" data-qtext="{{ strtolower($q->question) }} {{ strtolower($code) }}"
                                         style="background:{{ $rowBg }};{{ $leftBorder }}border-bottom:1px solid #F3F4F6;">
 
-                                        {{-- Drag handle --}}
-                                        <td style="padding:10px 8px;text-align:center;color:#D1D5DB;cursor:grab;">⋮⋮</td>
+                                        {{-- Drag handle (only active for parent rows) --}}
+                                        @if($depth === 0)
+                                        <td class="drag-handle" style="padding:10px 8px;text-align:center;color:#9CA3AF;cursor:grab;user-select:none;" title="Drag to reorder">⋮⋮</td>
+                                        @else
+                                        <td style="padding:10px 8px;text-align:center;color:transparent;">⋮⋮</td>
+                                        @endif
+
+                                        {{-- Sequence number --}}
+                                        <td style="padding:10px 6px;text-align:center;font-size:12px;font-weight:600;color:{{ $depth === 0 ? '#374151' : '#9CA3AF' }};">
+                                            {{ $seq !== '' ? $seq : '' }}
+                                        </td>
 
                                         {{-- Code --}}
                                         <td style="padding:10px 12px;">
@@ -418,12 +502,14 @@
                                         {{-- Question text --}}
                                         <td style="padding:10px 12px;">
                                             <div style="padding-left:{{ $indent }}px;display:flex;align-items:flex-start;gap:8px;">
-                                                @if($depth > 0)
+                                                @if($depth === 1)
                                                     <span style="color:#9CA3AF;font-size:13px;flex-shrink:0;">↳</span>
+                                                @elseif($depth > 1)
+                                                    <span style="color:#60A5FA;font-size:13px;flex-shrink:0;">{{ str_repeat('↳', $depth) }}</span>
                                                 @endif
                                                 <div>
                                                     <div style="font-weight:{{ $isMR ? '700' : '500' }};color:#111827;line-height:1.4;">
-                                                        {{ $q->question }}
+                                                        {{ html_entity_decode($q->question, ENT_QUOTES, 'UTF-8') }}
                                                     </div>
                                                     @if($kind === 'conditional' && !empty($row['trigger']))
                                                         <div style="font-size:11px;color:#7C3AED;margin-top:2px;">
@@ -474,7 +560,7 @@
                                                        style="color:#059669;font-size:16px;text-decoration:none;">&#9783;</a>
                                                 @endif
                                                 <span class="edit" title="Edit"
-                                                    data-question="{{ e($q->question) }}"
+                                                    data-question="{{ html_entity_decode($q->question, ENT_QUOTES, 'UTF-8') }}"
                                                     data-q_type="{{ $q->question_type }}"
                                                     data-sequence="{{ $q->question_sequence }}"
                                                     data-id="{{ $q->id }}"
@@ -483,7 +569,7 @@
                                                     data-parent_question_id="{{ $q->parent_question_id ?? '' }}"
                                                     data-parent_value="{{ e($q->parent_value ?? '') }}"
                                                     data-allow_multiple_images="{{ $q->allow_multiple_images ?? 0 }}"
-                                                    data-help_text="{{ e($q->help_text ?? '') }}"
+                                                    data-help_text="{{ html_entity_decode($q->help_text ?? '', ENT_QUOTES, 'UTF-8') }}"
                                                     data-validation_rule="{{ $q->validation_rule ?? 'none' }}"
                                                     data-validation_min="{{ $q->validation_min ?? '' }}"
                                                     data-validation_max="{{ $q->validation_max ?? '' }}"
@@ -503,7 +589,7 @@
                                         </td>
                                     </tr>
                                 @endforeach
-                                </tbody>
+                                @if($inQGroup)</tbody>@endif
                             </table>
                         </div>
 
@@ -617,7 +703,7 @@
                                                                 <option value="{{ $aq->id }}"
                                                                         data-type="{{ $aq->question_type }}"
                                                                         data-options="{{ $optionsJson }}">
-                                                                    {{ $aq->question }} ({{ $aq->question_type }})
+                                                                    {{ html_entity_decode($aq->question, ENT_QUOTES, 'UTF-8') }} ({{ $aq->question_type }})
                                                                 </option>
                                                             @endforeach
                                                         </select>
@@ -715,7 +801,7 @@
                                 {{-- Multi Response section --}}
                                 <div style="background:#fff;border-radius:10px;margin-bottom:10px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);">
                                     <div style="background:#1a1a2e;padding:8px 12px;">
-                                        <div style="font-size:12px;font-weight:700;color:#fff;">{{ $pq->question }}@if($pq->answer_type)<span style="color:#f87171;margin-left:4px;">*</span>@endif</div>
+                                        <div style="font-size:12px;font-weight:700;color:#fff;">{{ html_entity_decode($pq->question, ENT_QUOTES, 'UTF-8') }}@if($pq->answer_type)<span style="color:#f87171;margin-left:4px;">*</span>@endif</div>
                                     </div>
                                     <div style="padding:10px 12px;">
                                         @foreach($subCh as $sq)
@@ -768,9 +854,65 @@
     </div>
 </div>
 
+{{-- ── Import Questions Modal ────────────────────────────────────────────── --}}
+<div id="importQuestionsModal"
+     style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);
+            align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:10px;width:440px;max-width:95vw;padding:28px 32px;box-shadow:0 8px 32px rgba(0,0,0,.2);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
+            <h5 style="margin:0;font-size:16px;font-weight:600;">Upload Questions Template</h5>
+            <button type="button" onclick="document.getElementById('importQuestionsModal').style.display='none'"
+                    style="background:none;border:none;font-size:20px;cursor:pointer;color:#6B7280;">&times;</button>
+        </div>
+
+        <p style="font-size:13px;color:#6B7280;margin-bottom:16px;">
+            Upload the filled <strong>activity questions Excel file</strong> (.xlsx).
+        </p>
+
+        <form action="{{ route('activities.questions.import_excel', $activity->id) }}"
+              method="POST" enctype="multipart/form-data">
+            @csrf
+            <div style="margin-bottom:16px;">
+                <label style="display:block;font-size:13px;font-weight:500;margin-bottom:6px;">Select Excel File</label>
+                <input type="file" name="excel_file" accept=".xlsx,.xls" required
+                       style="width:100%;padding:8px;border:1px solid #D1D5DB;border-radius:6px;font-size:13px;">
+            </div>
+            <div style="display:flex;gap:10px;justify-content:flex-end;">
+                <button type="button"
+                        onclick="document.getElementById('importQuestionsModal').style.display='none'"
+                        style="padding:8px 18px;border:1px solid #D1D5DB;border-radius:6px;background:#fff;font-size:13px;cursor:pointer;">
+                    Cancel
+                </button>
+                <button type="submit"
+                        style="padding:8px 18px;border:none;border-radius:6px;background:#111827;color:#fff;font-size:13px;font-weight:500;cursor:pointer;">
+                    Import Questions
+                </button>
+            </div>
+        </form>
+
+        @if(session('success'))
+            <div style="margin-top:14px;padding:10px 14px;background:#D1FAE5;color:#065F46;border-radius:6px;font-size:13px;">
+                {{ session('success') }}
+            </div>
+        @endif
+        @if(session('error'))
+            <div style="margin-top:14px;padding:10px 14px;background:#FEE2E2;color:#991B1B;border-radius:6px;font-size:13px;">
+                {{ session('error') }}
+            </div>
+        @endif
+    </div>
+</div>
+
 @endsection
 @section('scripts')
     <script>
+        // Auto-reopen import modal when there is a session error or success from the import
+        @if(session('error') || session('success'))
+            document.addEventListener('DOMContentLoaded', function () {
+                document.getElementById('importQuestionsModal').style.display = 'flex';
+            });
+        @endif
+
         // Preview modal: show/hide conditional questions based on parent select value
         window.previewCondChange = function(sel) {
             var qid = sel.getAttribute('data-preview-qid');
@@ -1065,7 +1207,16 @@
                                 "parent_dropdown_id":   parent_question_dropdown,
                                 "parent_value":         parent_value,
                                 "allow_multiple_images": (ques_type === 'Image' && $("#allow_multiple_images").is(":checked")) ? 1 : 0,
-                                "parent_triggers":      parent_triggers
+                                "parent_triggers":      parent_triggers,
+                                "help_text":            null,
+                                "validation_rule":      "none",
+                                "validation_min":       null,
+                                "validation_max":       null,
+                                "validation_regex":     null,
+                                "file_types":           null,
+                                "max_file_size_mb":     null,
+                                "date_min":             null,
+                                "date_max":             null
                             }
                         },
                         success: function (response) {
@@ -1444,12 +1595,13 @@
     }
 
     function updateExistingSelectOptions() {
-        var linked = (window._subqItems || []).map(function(sq) { return String(sq.id); });
-        // Update disabled state on raw DOM options.
-        // Select2 is destroyed+reinited on each open, so no Select2 refresh needed here.
+        var linked  = (window._subqItems || []).map(function(sq) { return String(sq.id); });
+        var selfId  = String(window._subqParentId || '');
         $('#existing_subq_select option').each(function() {
-            if (!$(this).val()) return;
-            $(this).prop('disabled', linked.includes($(this).val()));
+            var val = $(this).val();
+            if (!val) return;
+            // Disable already-linked sub-questions AND the parent question itself
+            $(this).prop('disabled', linked.includes(val) || val === selfId);
         });
     }
 
@@ -1521,16 +1673,22 @@
         document.getElementById('aq_text').focus();
     }
 
+    function decodeHtmlEntities(str) {
+        var txt = document.createElement('textarea');
+        txt.innerHTML = str;
+        return txt.value;
+    }
+
     function openEditPanel(btn) {
         _panelMode = 'edit';
         resetPanel(); // clear everything first
 
         var $btn = $(btn);
         var qId      = $btn.data('id');
-        var qText    = $btn.data('question');
+        var qText    = decodeHtmlEntities($btn.attr('data-question') || '');
         var qType    = $btn.data('q_type');
         var ansType  = $btn.data('answer_type');
-        var helpText = $btn.data('help_text') || '';
+        var helpText = decodeHtmlEntities($btn.attr('data-help_text') || '');
         var valRule  = $btn.data('validation_rule') || 'none';
         var valMin   = $btn.data('validation_min') || '';
         var valMax   = $btn.data('validation_max') || '';
@@ -1550,6 +1708,9 @@
         // Populate basic fields
         document.getElementById('aq_text').value  = qText;
         document.getElementById('aq_help').value  = helpText;
+        var _prev = document.getElementById('aq_help_preview');
+        if (helpText.trim()) { _prev.textContent = helpText; _prev.style.color = '#111827'; }
+        else { _prev.textContent = 'Hint shown below the question...'; _prev.style.color = '#6B7280'; }
         document.getElementById('aq_required').value = ansType ? '1' : '0';
         _reqOn = !!parseInt(ansType);
         setToggle('reqToggle','reqKnob', _reqOn);
@@ -1585,12 +1746,8 @@
             renderOptions();
         }
 
-        // In edit mode: hide Conditional Logic section unless question actually has it
-        var existingParentIdCheck = $btn.data('parent_question_id') + '';
-        var hasConditional = existingParentIdCheck && existingParentIdCheck !== 'undefined' && existingParentIdCheck !== '' && existingParentIdCheck !== 'null';
-        if (!hasConditional) {
-            document.getElementById('sec_conditional_wrapper').style.display = 'none';
-        }
+        // Conditional Logic section: always visible for non-MR types in edit mode
+        // (showSections() handles hiding it for Multi Response — no extra suppression here)
 
         // For Multi Response: fetch and display linked sub-questions as interactive rows
         if (qType === 'Multi Response') {
@@ -1656,12 +1813,45 @@
         document.getElementById('addQPanel').style.display   = 'none';
     }
 
+    function openHelpTextModal() {
+        var current = document.getElementById('aq_help').value || '';
+        document.getElementById('aq_help_textarea').value = current;
+        document.getElementById('helpTextModal').style.display = 'flex';
+        setTimeout(function() { document.getElementById('aq_help_textarea').focus(); }, 50);
+    }
+
+    function closeHelpTextModal() {
+        document.getElementById('helpTextModal').style.display = 'none';
+    }
+
+    function saveHelpText() {
+        var val = document.getElementById('aq_help_textarea').value;
+        document.getElementById('aq_help').value = val;
+        var preview = document.getElementById('aq_help_preview');
+        if (val.trim()) {
+            preview.textContent = val;
+            preview.style.color = '#111827';
+        } else {
+            preview.textContent = 'Hint shown below the question...';
+            preview.style.color = '#6B7280';
+        }
+        closeHelpTextModal();
+    }
+
+    // Close modal on backdrop click
+    document.getElementById('helpTextModal').addEventListener('click', function(e) {
+        if (e.target === this) closeHelpTextModal();
+    });
+
     function resetPanel() {
         _qTypeSelected = ''; _reqOn = true; _depOn = false;
         _allowMultOn = false; _allowMultImgOn = false; _options = [];
         document.getElementById('aq_text').value    = '';
         document.getElementById('aq_type').value    = '';
         document.getElementById('aq_help').value    = '';
+        var preview = document.getElementById('aq_help_preview');
+        preview.textContent = 'Hint shown below the question...';
+        preview.style.color = '#6B7280';
         document.getElementById('aq_required').value = '1';
         document.getElementById('aq_file_types').value = '';
         document.getElementById('aq_max_size').value   = '';
@@ -1886,7 +2076,7 @@
     function addOption() {
         var inp = document.getElementById('newOptInput');
         var val = inp.value.trim();
-        if (!val) return;
+        if (val === '') return;
         _options.push(val);
         inp.value = '';
         renderOptions();
@@ -1897,11 +2087,18 @@
         renderOptions();
     }
 
+    function updateOption(i, val) {
+        _options[i] = val;
+    }
+
     function renderOptions() {
         var html = '';
         _options.forEach((o, i) => {
             html += `<div style="display:flex;align-items:center;gap:7px;padding:7px 9px;border:1px solid #E8E8F0;border-radius:5px;margin-bottom:4px;background:#FAFAFA;">
-                <span style="flex:1;font-size:13px;color:#374151;">${escHtml(o)}</span>
+                <input type="text" value="${escHtml(o)}" oninput="updateOption(${i}, this.value)"
+                    style="flex:1;font-size:13px;color:#374151;border:1px solid transparent;background:transparent;outline:none;padding:3px 5px;border-radius:3px;min-width:0;"
+                    onfocus="this.style.background='#fff';this.style.borderColor='#C7D2FE';"
+                    onblur="this.style.background='transparent';this.style.borderColor='transparent';">
                 <button onclick="removeOption(${i})" style="background:none;border:none;cursor:pointer;color:#DC2626;font-size:17px;padding:1px 4px;line-height:1;border-radius:3px;">×</button>
             </div>`;
         });
@@ -1962,13 +2159,28 @@
             if (pid) parent_triggers.push({ parent_id: pid, trigger_value: (tv !== undefined && tv !== '') ? tv : null });
         });
 
+        // Merge the simple conditional section (aq_dep_parent / aq_dep_value) into parent_triggers.
+        // Without this, a user selecting a conditional parent in the sec_dep UI would be ignored
+        // on save because sec_dep is separate from parent_triggers_list.
+        if (_depOn && depParent) {
+            var depAlreadyIn = parent_triggers.some(function(t) { return String(t.parent_id) === String(depParent); });
+            if (depAlreadyIn) {
+                // Update trigger value in case the user changed it
+                parent_triggers.forEach(function(t) {
+                    if (String(t.parent_id) === String(depParent)) t.trigger_value = depValue || null;
+                });
+            } else {
+                parent_triggers.push({ parent_id: depParent, trigger_value: depValue || null });
+            }
+        }
+
         var data = {
             activity_id:          {{ $activity->id }},
             question:             text,
             question_type:        type,
             answer_type:          document.getElementById('aq_required').value,
             help_text:            document.getElementById('aq_help').value.trim() || null,
-            options:              _options.join('|') || null,
+            options:              _options.filter(o => o.trim() !== '').join('|') || null,
             allow_multiple_images: document.getElementById('aq_allow_multi_img').value,
             validation_rule:      document.getElementById('aq_val_rule').value,
             validation_min:       document.getElementById('aq_val_min').value  || null,
@@ -2039,4 +2251,51 @@
         if (e.key === 'Escape') closeAddPanel();
     });
     </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+    <script>
+    (function() {
+        var table = document.getElementById('question_table');
+        if (!table) return;
+
+        var reorderUrl = '{{ route("activities.questions.reorder", $activity->id) }}';
+        var csrfToken = '{{ csrf_token() }}';
+
+        new Sortable(table, {
+            draggable: 'tbody.q-group',
+            handle: '.drag-handle',
+            animation: 150,
+            ghostClass: 'sortable-ghost',
+            onEnd: function() {
+                // Collect parent question IDs in new visual order
+                var ids = Array.from(table.querySelectorAll('tbody.q-group')).map(function(el) {
+                    return el.dataset.id;
+                });
+
+                // Update displayed sequence numbers
+                table.querySelectorAll('tbody.q-group').forEach(function(tbody, idx) {
+                    var seqCell = tbody.querySelector('tr:first-child td:nth-child(2)');
+                    if (seqCell) seqCell.textContent = idx + 1;
+                });
+
+                // Save new order to server
+                fetch(reorderUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': csrfToken
+                    },
+                    body: JSON.stringify({ ids: ids })
+                }).then(function(r) { return r.json(); })
+                  .then(function(d) {
+                      if (d.status !== 'success') console.warn('Reorder failed', d);
+                  }).catch(function(e) { console.error('Reorder error', e); });
+            }
+        });
+    })();
+    </script>
+    <style>
+        .sortable-ghost { opacity: 0.4; background: #EFF6FF !important; }
+        tbody.q-group { cursor: default; }
+    </style>
 @endsection

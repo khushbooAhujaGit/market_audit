@@ -37,7 +37,33 @@
                                     </tr>
                                 </thead>
                                 <tbody>
+                                    @php $previousDone = true; @endphp
                                     @foreach ($userAssignedActivities as $userAssignedActivity)
+                                        @php
+                                            $allowRpt       = $userAssignedActivity['allow_repeat'] ?? false;
+                                            $isClosed       = $userAssignedActivity['is_fully_closed'] ?? false;
+                                            $isSentBack     = $userAssignedActivity['is_sent_back'] ?? false;
+                                            $hasAnySentBack = $userAssignedActivity['has_any_sent_back'] ?? false;
+                                            $answered   = $userAssignedActivity['answer_submitted'];
+                                            $otpOk      = $userAssignedActivity['otpVerificationDone'];
+                                            $otpNeeded  = $userAssignedActivity['project_data']['is_otp_required'] == 1;
+                                            $instancesUrl = route('user.activity.instances_list', ['row_id' => $row_id, 'activity' => $userAssignedActivity['activity_id'], 'group_info' => $userAssignedActivity['group_id']]);
+                                            $questionsUrl = route('user.project.row_id.activity', ['row_id' => $row_id, 'activity' => $userAssignedActivity['activity_id'], 'group_info' => $userAssignedActivity['group_id']]);
+
+                                            // Determine if this activity is fully completed
+                                            if ($allowRpt) {
+                                                $thisDone = $isClosed && !$isSentBack;
+                                            } elseif ($otpNeeded) {
+                                                $thisDone = $answered && $otpOk;
+                                            } else {
+                                                $thisDone = $answered && !$isSentBack;
+                                            }
+
+                                            // Lock only if the previous is not done AND this activity
+                                            // has no submitted answers and was not sent back.
+                                            // Activities already answered or sent back are always accessible.
+                                            $isLocked = !$previousDone && !$isSentBack && !$answered;
+                                        @endphp
                                         <tr @if ($userAssignedActivity['is_master']) class="bg-success" @endif>
                                             <td @if ($userAssignedActivity['is_master']) class="bg-success" @endif>
                                                 {{ $loop->iteration }}
@@ -59,32 +85,30 @@
                                                 @endif
                                             </td>
                                             <td>
-                                                @php
-                                                    $allowRpt   = $userAssignedActivity['allow_repeat'] ?? false;
-                                                    $isClosed   = $userAssignedActivity['is_fully_closed'] ?? false;
-                                                    $isSentBack = $userAssignedActivity['is_sent_back'] ?? false;
-                                                    $answered   = $userAssignedActivity['answer_submitted'];
-                                                    $otpOk      = $userAssignedActivity['otpVerificationDone'];
-                                                    $otpNeeded  = $userAssignedActivity['project_data']['is_otp_required'] == 1;
-                                                    $instancesUrl = route('user.activity.instances_list', ['row_id' => $row_id, 'activity' => $userAssignedActivity['activity_id'], 'group_info' => $userAssignedActivity['group_id']]);
-                                                    $questionsUrl = route('user.project.row_id.activity', ['row_id' => $row_id, 'activity' => $userAssignedActivity['activity_id'], 'group_info' => $userAssignedActivity['group_id']]);
-                                                    $eyeUrl = $questionsUrl;
-                                                @endphp
                                                 <ul class="action">
-                                                    @if ($allowRpt)
-                                                        {{-- Activity-add-on flow &#8212; always go directly to questions page --}}
+                                                    @if ($isLocked)
+                                                        {{-- Previous activity not yet submitted — show lock --}}
+                                                        <li>
+                                                            <i class="icon-lock text-white fs-5 bg-secondary p-2"
+                                                               title="Complete the previous activity first"></i>
+                                                        </li>
+                                                    @elseif ($allowRpt)
+                                                        {{-- Activity-add-on flow --}}
                                                         @if ($isClosed && !$isSentBack)
-                                                            {{-- All instances submitted & closed &#8212; show checkmark --}}
                                                             <li><i class="icon-check text-white fs-5 bg-success p-2"></i></li>
                                                         @elseif ($isSentBack)
-                                                            {{-- Sent back &#8212; reload icon to questions page --}}
                                                             <li class="view">
                                                                 <a href="{{ $questionsUrl }}">
-                                                                    <i class="icon-reload text-white fs-5 bg-danger p-2"></i>
+                                                                    <i class="icon-reload text-white fs-5 bg-danger p-2" title="Sent back — re-submit required"></i>
+                                                                </a>
+                                                            </li>
+                                                        @elseif ($hasAnySentBack)
+                                                            <li class="view">
+                                                                <a href="{{ $questionsUrl }}">
+                                                                    <i class="icon-eye text-white fs-5 p-2" style="background:#f97316;border-radius:4px;" title="Some instances sent back"></i>
                                                                 </a>
                                                             </li>
                                                         @else
-                                                            {{-- Open (pending or submitted but not yet closed) &#8212; eye to questions page --}}
                                                             <li class="view">
                                                                 <a href="{{ $questionsUrl }}">
                                                                     <i class="icon-eye text-white fs-5 bg-dark p-2"></i>
@@ -92,16 +116,16 @@
                                                             </li>
                                                         @endif
                                                     @else
-                                                        {{-- Standard (non-add-on) flow &#8212; original behaviour --}}
+                                                        {{-- Standard flow --}}
                                                         @if ($isSentBack)
                                                             <li class="view">
                                                                 <a href="{{ $questionsUrl }}">
-                                                                    <i class="icon-reload text-white fs-5 bg-danger p-2"></i>
+                                                                    <i class="icon-reload text-white fs-5 bg-danger p-2" title="Sent back — re-submit required"></i>
                                                                 </a>
                                                             </li>
                                                         @elseif ($otpNeeded)
                                                             @if ($answered && $otpOk)
-                                                                <a><i class="icon-check text-white fs-5"></i></a>
+                                                                <li><i class="icon-check text-white fs-5 bg-success p-2"></i></li>
                                                             @elseif ($answered && !$otpOk)
                                                                 <a class="text-white"
                                                                     href="{{ route('otp_verification_page', ['row_id' => $row_id, 'activity' => $userAssignedActivity['activity_id'], 'project_id' => $project->id]) }}">
@@ -116,7 +140,13 @@
                                                             @endif
                                                         @else
                                                             @if ($answered)
-                                                                <a><i class="icon-check text-white fs-5"></i></a>
+                                                                <li><i class="icon-check text-white fs-5 bg-success p-2"></i></li>
+                                                            @elseif ($hasAnySentBack)
+                                                                <li class="view">
+                                                                    <a href="{{ $questionsUrl }}">
+                                                                        <i class="icon-eye text-white fs-5 p-2" style="background:#f97316;border-radius:4px;" title="Some instances sent back"></i>
+                                                                    </a>
+                                                                </li>
                                                             @else
                                                                 <li class="view">
                                                                     <a href="{{ $questionsUrl }}">
@@ -129,6 +159,11 @@
                                                 </ul>
                                             </td>
                                         </tr>
+                                        @php
+                                            // Only propagate incomplete state if this activity was never answered.
+                                            // Sent-back or in-progress activities don't block already-answered ones.
+                                            if (!$thisDone && !$answered && !$isSentBack) $previousDone = false;
+                                        @endphp
                                     @endforeach
                                 </tbody>
                             </table>

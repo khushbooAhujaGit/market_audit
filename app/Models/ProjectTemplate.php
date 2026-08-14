@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 class ProjectTemplate extends Model
 {
     use HasFactory, HasEncryptedId;
-    protected $fillable = ['project_id', 'template_name_id', 'is_master', 'master_head_id', 'own_reference_head_id' , 'activity_group_name_id_or_activity_id', 'activityType', 'main_header', 'sub_header',  'completion_type', 'min_completion', 'data_add_on', 'activity_add_on', 'activity_add_on_activity_ids', 'with_data', 'activity_otp_required_ids', 'required_otp', 'company_user_id', 'compliance_column_id', 'can_edit_data'];
+    protected $fillable = ['project_id', 'template_name_id', 'is_master', 'master_head_id', 'own_reference_head_id' , 'activity_group_name_id_or_activity_id', 'activityType', 'main_header', 'sub_header',  'completion_type', 'min_completion', 'data_add_on', 'activity_add_on', 'activity_add_on_activity_ids', 'with_data', 'activity_otp_required_ids', 'required_otp', 'company_user_id', 'compliance_column_id', 'can_edit_data', 'add_signature'];
 
     public function getProject(){
         return $this->belongsTo(Project::class, 'project_id');

@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Exports\DynamicTableExport;
+use PhpOffice\PhpSpreadsheet\Cell\DataValidation;
 
 class TemplateNameController extends Controller
 {
@@ -63,15 +64,57 @@ class TemplateNameController extends Controller
             // //khushboo 17-05-25
             
             foreach ($dataArray as $template_head) {
-                TemplateNameHead::create([
-                    'template_name_id' => $newTemplate->id,
-                    'template_head_name' => $template_head[1]
+                // Columns 2 (Type), 3 (Options), and 4 (Required) are all optional — older-format
+                // uploads with only Sr/Name still work unchanged: free text, no options, not required.
+                $valueType  = $this->normalizeHeadValueType($template_head[2] ?? null);
+                $isRequired = $this->normalizeHeadRequired($template_head[4] ?? null);
+
+                $head = TemplateNameHead::create([
+                    'template_name_id'   => $newTemplate->id,
+                    'template_head_name' => $template_head[1],
+                    'value_type'         => $valueType,
+                    'is_required'        => $isRequired,
                 ]);
+
+                if ($valueType === 'dropdown') {
+                    foreach (explode('|', (string) ($template_head[3] ?? '')) as $option) {
+                        $option = trim($option);
+                        if ($option === '') continue;
+                        \App\Models\TemplateNameHeadOption::create([
+                            'template_name_head_id' => $head->id,
+                            'option'                => $option,
+                        ]);
+                    }
+                }
             }
             return redirect(route('templateName.list'))->with('message', "Template Created Successfully");
         }
     }
 
+
+    /**
+     * Normalize the free-text "Type" column from the heads-upload Excel into a stable
+     * value_type: 'dropdown', 'yes_no', or null (free text — also the default when the
+     * column is blank/absent, so older-format uploads are unaffected).
+     */
+    private function normalizeHeadValueType($rawType): ?string
+    {
+        $t = strtolower(trim((string) $rawType));
+        if ($t === '') return null;
+        if (str_contains($t, 'drop')) return 'dropdown';
+        if (str_contains($t, 'yes') && str_contains($t, 'no')) return 'yes_no';
+        return null;
+    }
+
+    /**
+     * Normalize the free-text "Required" column from the heads-upload Excel into a boolean.
+     * Blank/absent defaults to false (not required) — matches today's behavior for older uploads.
+     */
+    private function normalizeHeadRequired($rawRequired): bool
+    {
+        $t = strtolower(trim((string) $rawRequired));
+        return in_array($t, ['yes', 'y', 'true', '1', 'required'], true);
+    }
 
     public function edit($id)
     {
@@ -108,23 +151,50 @@ class TemplateNameController extends Controller
     public function downloadExcel($id)
     {
         $templateName = TemplateName::findOrFail($id);
-//        $templateHeads = TemplateNameHead::where('template_name_id', $templateName->id)->pluck('template_head_name')->toArray();
-        $templateHeads = $templateName->getTemplateHeads->pluck('template_head_name')->toArray();
-        $data = [$templateHeads]; // Wrap the headers in an array
+        $heads = $templateName->getTemplateHeads()->orderBy('id')->with('getOptions')->get();
+
+        // Raw PhpSpreadsheet (not Maatwebsite's FromArray) so we can attach per-column data
+        // validation dropdowns — same technique already used in
+        // ExcelFormatsController::userUploadTemplateDownload().
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+
+        foreach ($heads as $ci => $head) {
+            $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($ci + 1);
+            $sheet->setCellValue($col . '1', $head->template_head_name);
+
+            if (!in_array($head->value_type, ['dropdown', 'yes_no'])) {
+                continue;
+            }
+
+            $options = $head->value_type === 'yes_no'
+                ? ['Yes', 'No']
+                : $head->getOptions->pluck('option')->toArray();
+            $optionList = implode(',', $options);
+
+            // Excel's inline list formula is capped at 255 chars — skip validation (leave the
+            // column as free text) rather than fail the whole download for one long option list.
+            if ($optionList === '' || strlen($optionList) >= 255) {
+                continue;
+            }
+
+            for ($row = 2; $row <= 500; $row++) {
+                $validation = $sheet->getCell($col . $row)->getDataValidation();
+                $validation->setType(DataValidation::TYPE_LIST);
+                $validation->setErrorStyle(DataValidation::STYLE_STOP);
+                $validation->setAllowBlank(true);
+                $validation->setShowInputMessage(true);
+                $validation->setShowErrorMessage(true);
+                $validation->setShowDropDown(true);
+                $validation->setFormula1('"' . $optionList . '"');
+            }
+        }
+
         $fileName = $templateName->template_name . '.xlsx';
-        return Excel::download(new class($data) implements FromArray {
-            private $data;
+        $tmpPath  = tempnam(sys_get_temp_dir(), 'tmpl_') . '.xlsx';
+        (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet))->save($tmpPath);
 
-            public function __construct(array $data)
-            {
-                $this->data = $data;
-            }
-
-            public function array(): array
-            {
-                return $this->data;
-            }
-        }, $fileName);
+        return response()->download($tmpPath, $fileName)->deleteFileAfterSend(true);
     }
 
     function getTemplateHeads(Request $request){

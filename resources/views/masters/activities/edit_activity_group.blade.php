@@ -52,18 +52,19 @@
                                                 </div>
                                                 <div id="activites_con" class="activites_con row">
                                                     @foreach($group_info->get_group_activities as $group_activites)
-{{--                                                        <pre>{{$group_activites}}</pre>--}}
-                                                        <div class="col-md-12 col-xl-12">
+                                                        <div class="col-md-12 col-xl-12 activity-group-item">
                                                             <div class="card-wrapper border rounded-3 checkbox-checked">
-                                                                <div class="form-check-size">
-                                                                    <div class="form-check form-switch form-check-inline">
+                                                                <div class="form-check-size d-flex align-items-center gap-2">
+                                                                    <span class="activity-drag-handle" title="Drag to reorder"
+                                                                          style="cursor:grab;color:#9CA3AF;font-size:18px;padding:0 6px;user-select:none;">⋮⋮</span>
+                                                                    <div class="form-check form-switch form-check-inline mb-0">
                                                                         <input class="form-check-input check-size" id="flexSwitchCheckDefault2" type="checkbox" role="switch" checked="" data-id="{{$group_activites->activity_id}}">
                                                                     </div>
                                                                     <div class="template_name_con form-check-inline">
                                                                         {{$group_activites->getActivityInfo->activity_name}}
                                                                     </div>
                                                                     <div class="form-check form-switch form-check-inline">
-                                                                        <input class="form-control" type="number" placeholder="Enter sequence" value="{{$group_activites->sequence}}">
+                                                                        <input class="form-control seq-input" type="number" placeholder="Seq" value="{{$group_activites->sequence}}" style="width:80px;">
                                                                     </div>
                                                                     <div class="text-danger fs-5 delete">
                                                                         <i class="icon-trash delete_template_from_group" data-id="{{$group_activites->id}}"></i>
@@ -98,7 +99,27 @@
 @endsection
 @section('scripts')
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
     <script>
+        // Drag-drop reordering for activities in group
+        document.addEventListener('DOMContentLoaded', function() {
+            var con = document.getElementById('activites_con');
+            if (con) {
+                new Sortable(con, {
+                    draggable: '.activity-group-item',
+                    handle: '.activity-drag-handle',
+                    animation: 150,
+                    ghostClass: 'sortable-ghost-group',
+                    onEnd: function() {
+                        // Renumber the sequence inputs to match new visual order
+                        con.querySelectorAll('.activity-group-item').forEach(function(item, idx) {
+                            var inp = item.querySelector('.seq-input');
+                            if (inp) inp.value = idx + 1;
+                        });
+                    }
+                });
+            }
+        });
 
         $(document).ready(function () {
             $(".delete_template_from_group").click(function (){
@@ -155,24 +176,23 @@
                 if (!temp_arr.includes(template_info.id)) {
                     temp_arr.push(template_info.id);
                     let temp = `
-                 <div class="col-md-12 col-xl-12">
-                                                        <div class="card-wrapper border rounded-3 checkbox-checked">
-                                                            <div class="form-check-size">
-                                                                <div class="form-check form-switch form-check-inline">
-                                                                    <input class="form-check-input check-size" id="flexSwitchCheckDefault2" type="checkbox" role="switch" checked="" data-id="${template_info.id}">
-                                                                </div>
-                                                                <div class="template_name_con form-check-inline">
-                                                                    ${template_info.activity_name}
-                                                                </div>
-                                                                <div class="form-check form-switch form-check-inline">
-                                                                    <input class="form-control" type="number" placeholder="Enter sequence" value="${temp_arr.length}">
-                                                                </div>
-                                                                 <div class="text-danger fs-5 delete">
-                                                                        <i class="icon-trash delete_template_from_group_now" data-id="${template_info.id}"></i>
-                                                                    </div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
+                 <div class="col-md-12 col-xl-12 activity-group-item">
+                    <div class="card-wrapper border rounded-3 checkbox-checked">
+                        <div class="form-check-size d-flex align-items-center gap-2">
+                            <span class="activity-drag-handle" title="Drag to reorder" style="cursor:grab;color:#9CA3AF;font-size:18px;padding:0 6px;user-select:none;">⋮⋮</span>
+                            <div class="form-check form-switch form-check-inline mb-0">
+                                <input class="form-check-input check-size" type="checkbox" role="switch" checked="" data-id="${template_info.id}">
+                            </div>
+                            <div class="template_name_con form-check-inline">${template_info.activity_name}</div>
+                            <div class="form-check form-switch form-check-inline">
+                                <input class="form-control seq-input" type="number" placeholder="Seq" value="${temp_arr.length}" style="width:80px;">
+                            </div>
+                            <div class="text-danger fs-5 delete">
+                                <i class="icon-trash delete_template_from_group_now" data-id="${template_info.id}"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 `;
                     $("#activites_con").append(temp)
                     $(".delete_template_from_group_now").click(function () {
@@ -239,7 +259,7 @@
                     let selectedCheckboxesData = []; // Array to store objects
                     selectedCheckboxes.each(function () {
                         let checkboxId = $(this).data("id"); // Get the data-id of the checkbox
-                        let sequenceValue = $(this).closest('.form-check-size').find('.form-control').val(); // Get the sequence value
+                        let sequenceValue = $(this).closest('.form-check-size').find('.seq-input').val(); // Get the sequence value
                         let templateName = $(this).closest('.form-check-size').find('.template_name_con').text(); // Get the template name
                         selectedCheckboxesData.push({
                             id: checkboxId,

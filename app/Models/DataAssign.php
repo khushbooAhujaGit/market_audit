@@ -37,7 +37,16 @@ class DataAssign extends Model
 //
     public function getAutiors()
     {
-        return $this->hasMany(UserActivityDataAssign::class, 'data_assign_id')->distinct()->count('user_id');
+        // Count distinct users across all DataAssigns for same activity + project_template
+        // (handles duplicate records created by the old null activity_group_id comparison bug)
+        $siblingIds = static::where('activity_id', $this->activity_id)
+            ->where('project_template_id', $this->project_template_id)
+            ->pluck('id')
+            ->toArray();
+
+        return UserActivityDataAssign::whereIn('data_assign_id', $siblingIds)
+            ->selectRaw('COUNT(DISTINCT user_id) as cnt')
+            ->value('cnt') ?? 0;
     }
 
     public function getAuditorIds()

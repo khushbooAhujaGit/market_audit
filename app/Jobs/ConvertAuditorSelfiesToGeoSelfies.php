@@ -18,6 +18,9 @@ class ConvertAuditorSelfiesToGeoSelfies implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels, InterventionImage;
 
+    public int $tries   = 3;
+    public int $timeout = 120;
+
     protected $images;
 
     /**

@@ -12,9 +12,18 @@ class TempUserActivityAnswersData extends Model
     protected $fillable = ['user_id', 'row_id', 'activity_group_name_id', 'activity_sequence', 'activity_id', 'question_id', 'parent_context_id', 'user_answer', 'same_answer_id', 'status', 'is_draft', 'remark', 'verified_by', 'edited_by_verifier', 'mobile_no', 'mobile_otp','otp_verified_status', 'latitude', 'longitude', 'subjective_parent'];
 
     protected $casts = [
-        'parent_context_id' => 'integer',
+        'id'                => 'integer',
+        'user_id'           => 'integer',
+        'row_id'            => 'integer',
+        'activity_id'       => 'integer',
+        'activity_sequence' => 'integer',
+        'activity_group_name_id' => 'integer',
         'question_id'       => 'integer',
+        'parent_context_id' => 'integer',
         'same_answer_id'    => 'integer',
+        'status'            => 'integer',
+        'is_draft'          => 'integer',
+        'verified_by'       => 'integer',
         'answer_type'       => 'integer',
     ];
 

@@ -2,8 +2,7 @@
 <div class="sidebar-wrapper" data-layout="stroke-svg">
     <div>
         <div class="logo-wrapper"><a href="/">
-                <img class="img-fluid" width="135px"
-                    src="{{ asset('assets/images/logo/tnbtlogo.png') }}" alt="">
+                <img class="img-fluid" width="135px" src="{{ asset('assets/images/logo/tnbtlogo.png') }}" alt="">
             </a>
             <div class="back-btn"><i class="fa fa-angle-left"></i></div>
             <div class="toggle-sidebar">
@@ -27,13 +26,13 @@
                                 aria-hidden="true"></i></div>
                     </li>
                     <li class="pin-title sidebar-main-title">
-                        <div style="background-color: white;" >
-                            <h6 style="color: #042b39;" >Pinned</h6>
+                        <div style="background-color: white;">
+                            <h6 style="color: #042b39;">Pinned</h6>
                         </div>
                     </li>
                     <li class="sidebar-main-title">
-                        <div style="background-color: white;" >
-                            <h6 class="lan-1" style="color: #042b39;" >General</h6>
+                        <div style="background-color: white;">
+                            <h6 class="lan-1" style="color: #042b39;">General</h6>
                         </div>
                     </li>
                     <li class="sidebar-list d-none"><i class="fa fa-thumb-tack"></i><a
@@ -219,6 +218,24 @@
                             </ul>
                         </li>
                     @endcan
+                    @can('Reports')
+                        <li class="sidebar-list"><i class="fa fa-thumb-tack"> </i><a class="sidebar-link sidebar-title"
+                                href="javascript:void(0)">
+                                <svg class="stroke-icon">
+                                    <use href="../assets/svg/icon-sprite.svg#stroke-project"></use>
+                                </svg>
+                                <svg class="fill-icon">
+                                    <use href="../assets/svg/icon-sprite.svg#fill-project"></use>
+                                </svg><span>Report </span></a>
+                            <ul class="sidebar-submenu">
+                                <li><a href="{{ route('view-report') }}">Report Dump</a></li>
+                                @can('Project Report')
+                                    <li><a href="{{ route('project-report') }}">Project Report</a></li>
+                                @endcan
+                                <li><a href="{{ route('infiltration.index') }}">Infiltration Report</a></li>
+                            </ul>
+                        </li>
+                    @endcan
                     @can('My Verifications')
                         <li class="sidebar-list"><i class="fa fa-thumb-tack"></i><a
                                 class="sidebar-link sidebar-title link-nav" href="{{ route('user.verification.list') }}">
@@ -229,6 +246,7 @@
                                     <use href="../assets/svg/icon-sprite.svg#fill-file"></use>
                                 </svg><span>My Verifications</span></a></li>
                     @endcan
+                    
                     @can('Company Verification')
                         <li class="sidebar-list"><i class="fa fa-thumb-tack"></i><a
                                 class="sidebar-link sidebar-title link-nav" href="{{ route('company.verifyPage') }}">
@@ -239,6 +257,7 @@
                                     <use href="../assets/svg/icon-sprite.svg#fill-file"></use>
                                 </svg><span>Company Verification</span></a></li>
                     @endcan
+                    
                     @can('PDF Download')
                         <li class="sidebar-list"><i class="fa fa-thumb-tack"></i><a
                                 class="sidebar-link sidebar-title link-nav" href="{{ route('report_page') }}">
@@ -252,8 +271,7 @@
                     @endcan
                     @can('Non Compliance Report')
                         <li class="sidebar-list"><i class="fa fa-thumb-tack"></i><a
-                                class="sidebar-link sidebar-title link-nav"
-                                href="{{ route('company.nonCompliancePage') }}">
+                                class="sidebar-link sidebar-title link-nav" href="{{ route('company.nonCompliancePage') }}">
                                 <svg class="stroke-icon">
                                     <use href="../assets/svg/icon-sprite.svg#stroke-file"></use>
                                 </svg>
@@ -261,28 +279,7 @@
                                     <use href="../assets/svg/icon-sprite.svg#fill-file"></use>
                                 </svg><span>Non Compliance Report</span></a></li>
                     @endcan
-                    @can('Reports')
-                        <li class="sidebar-list"><i class="fa fa-thumb-tack"></i><a
-                                class="sidebar-link sidebar-title link-nav" href="{{ route('view-report') }}">
-                                <svg class="stroke-icon">
-                                    <use href="../assets/svg/icon-sprite.svg#stroke-file"></use>
-                                </svg>
-                                <svg class="fill-icon">
-                                    <use href="../assets/svg/icon-sprite.svg#fill-file"></use>
-                                </svg>
-                                <span>Reports</span></a></li>
-                    @endcan
-                    @can('Project Report')
-                        <li class="sidebar-list"><i class="fa fa-thumb-tack"></i><a
-                                class="sidebar-link sidebar-title link-nav" href="{{ route('project-report') }}">
-                                <svg class="stroke-icon">
-                                    <use href="../assets/svg/icon-sprite.svg#stroke-file"></use>
-                                </svg>
-                                <svg class="fill-icon">
-                                    <use href="../assets/svg/icon-sprite.svg#fill-file"></use>
-                                </svg>
-                                <span>Project Report</span></a></li>
-                    @endcan
+                    
                     @can('My Projects')
                         <li class="sidebar-list"><i class="fa fa-thumb-tack"></i><a
                                 class="sidebar-link sidebar-title link-nav" href="{{ route('user.projects') }}">

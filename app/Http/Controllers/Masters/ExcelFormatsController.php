@@ -104,9 +104,14 @@ class ExcelFormatsController extends Controller
         if (!file_exists($templateFilePath)) {
             return abort(404); // Return 404 if the file doesn't exist
         }
-        // Return a response with the file
+        // No-cache: this file's content changes when the sample columns are updated (e.g. the
+        // Type/Options columns added for dropdown/yes-no heads) — without this, browsers can keep
+        // serving a stale previously-downloaded copy for this same URL indefinitely.
         return new BinaryFileResponse($templateFilePath, 200, [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Type'  => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Cache-Control' => 'no-cache, no-store, must-revalidate',
+            'Pragma'        => 'no-cache',
+            'Expires'       => '0',
         ]);
     }
 }

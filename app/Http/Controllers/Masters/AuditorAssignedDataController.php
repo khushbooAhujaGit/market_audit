@@ -4,9 +4,14 @@ namespace App\Http\Controllers\Masters;
 
 use App\Exports\DynamicTableExport;
 use App\Http\Controllers\Controller;
+use App\Models\ActivityInstanceClose;
+use App\Models\ActivityRepeatInstance;
 use App\Models\AuditorAssignedData;
 use App\Models\DataAssign;
 use App\Models\Project;
+use App\Models\ProjectTemplate;
+use App\Models\ProjectTemplateNameValuesNew;
+use App\Models\TempUserActivityAnswersData;
 use App\Models\User;
 use App\Models\UserActivityDataAssign;
 use App\Models\UserAuditAssigns;
@@ -20,39 +25,48 @@ class AuditorAssignedDataController extends Controller
 {
     public function auditor_assigned_data()
     {
-        //khushboo 03-04-2025
-        $currentUser = User::find(Auth::user()->id);
-        if ($currentUser->getRoleNames()->first() == 'Agency') {
+        $currentUser     = User::find(Auth::user()->id);
+        $currentUserRole = $currentUser->getRoleNames()->first();
+
+        if (in_array($currentUserRole, ['Super Admin', 'Admin'])) {
+            // Full visibility
+            $data_assigned_values = DataAssign::latest()->paginate(10);
+
+        } elseif ($currentUserRole == 'Agency') {
             $getProjectDataWithAgency = Project::where('is_agency_required', 1)->first();
-//            dd($getProjectDataWithAgency);
             if (!empty($getProjectDataWithAgency)) {
                 $data_assigned_values = DataAssign::where('project_id', $getProjectDataWithAgency->id)->latest()->paginate(10);
+            } else {
+                $data_assigned_values = DataAssign::whereRaw('0')->paginate(10); // empty result
             }
-            // $getProjectTemplateData = ProjectTemplate::where('project_id', $getProjectDataWithAgency->id)->get();
-        } else {
-            $data_assigned_values = DataAssign::latest()->paginate(10);
-        }
-        //khushboo 03-04-2025
 
-//         $data_assigned_values = DataAssign::latest()->paginate(10);
+        } else {
+            // Any other role (Auditor, Verifier, etc.) — show only their own assignments
+            $assignedDataIds = \App\Models\UserActivityDataAssign::where('user_id', $currentUser->id)
+                ->distinct()
+                ->pluck('data_assign_id');
+
+            $data_assigned_values = DataAssign::whereIn('id', $assignedDataIds)->latest()->paginate(10);
+        }
+
         return view('masters.data_templates.data_assigned', compact('data_assigned_values'));
     }
 
     public function get_assigned_auditors(Request $request)
     {
         if ($request->user_type == "auditors") {
-//            $user_list = AuditorAssignedData::where('data_assign_id', $request->data_assigned_id)->with('get_user_info')->get();
+            //            $user_list = AuditorAssignedData::where('data_assign_id', $request->data_assigned_id)->with('get_user_info')->get();
 
             // $user_list = UserActivityDataAssign::where('data_assign_id', $request->data_assigned_id)->with('get_user_info')->get();
-            
+
             // $user_list = UserActivityDataAssign::where('data_assign_id', $request->data_assigned_id)
             //     ->select('user_id')   // only select user_id
             //     ->distinct()
             //     ->with('get_user_info')
             //     ->get();
-    
+
             // $assignedValues = [];
-            
+
             // foreach($user_list as $user){
             //     // dd($user->get_user_info->name);
             //     $common_Ids = UserActivityDataAssign::where('data_assign_id', $request->data_assigned_id)->where('user_id', $user->get_user_info->id)->distinct()->pluck('common_id')->toArray();
@@ -68,7 +82,7 @@ class AuditorAssignedDataController extends Controller
 
             //     $assignedValues[$user->get_user_info->name] = $distinctValuesAssign;
             // }
-            
+
             // dd($assignedValues);
             // $common_Ids = UserActivityDataAssign::where('data_assign_id', $request->data_assigned_id)->distinct()->pluck('common_id')->toArray();
             // $getAssignedData = DataAssign::find($request->data_assigned_id);
@@ -80,9 +94,21 @@ class AuditorAssignedDataController extends Controller
             //         DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"$getAssignedData->template_name_head_id\"')) as head_value")
             //     )
             //     ->get();
-            
-             /* Get all assigned records at once */
-            $user_list = UserActivityDataAssign::where('data_assign_id', $request->data_assigned_id)
+
+            /* Find ALL data_assign IDs for this activity + project_template combination.
+               This handles duplicate DataAssign records where users may be stored
+               under a different data_assign_id than the one that was clicked. */
+            if ($request->filled('activity_id') && $request->filled('project_template_id')) {
+                $siblingIds = DataAssign::where('activity_id', $request->activity_id)
+                    ->where('project_template_id', $request->project_template_id)
+                    ->pluck('id')
+                    ->toArray();
+            } else {
+                $siblingIds = [$request->data_assigned_id];
+            }
+
+            /* Get all assigned records across all matching DataAssigns */
+            $user_list = UserActivityDataAssign::whereIn('data_assign_id', $siblingIds)
                 ->select('user_id', 'common_id')
                 ->with('get_user_info')
                 ->get()
@@ -116,26 +142,80 @@ class AuditorAssignedDataController extends Controller
                     'audits' => $distinctValuesAssign
                 ];
             }
-            
+
+            // Fetch verifier names assigned to this project template
+            $verifierNames = DB::table('verifiers')
+                ->join('users', 'verifiers.user_id', '=', 'users.id')
+                ->where('verifiers.project_template_name_id', $request->project_template_id)
+                ->pluck('users.name')
+                ->unique()
+                ->values()
+                ->toArray();
 
         }
-        return response()->json(['message' => "Success", 'user_list' => $user_list,  'assignedValues' => $assignedValues]);
+        return response()->json([
+            'message'        => "Success",
+            'user_list'      => $user_list,
+            'assignedValues' => $assignedValues,
+            'verifierNames'  => $verifierNames ?? [],
+        ]);
     }
+
 
     public function assignedDestroy(Request $request)
     {
-        $dataAssign = DataAssign::findOrFail($request->id);
-        AuditorAssignedData::where('data_assign_id', $dataAssign->id)->delete();
-        //        VerifyUserAssignedData::where('data_assign_id', $dataAssign->id)->delete();
-        $commonIds = UserActivityDataAssign::where('data_assign_id', $dataAssign->id)->distinct()->pluck('common_id')->toArray();
-        $userIds = UserActivityDataAssign::where('data_assign_id', $dataAssign->id)->distinct()->pluck('user_id')->toArray();
-        UserAuditAssigns::whereIn('common_id', $commonIds)->delete();
-        UserActivityDataAssign::where('data_assign_id', $dataAssign->id)->delete();
-        Verifier::whereIn('user_id', $userIds)->where('project_template_name_id', $dataAssign->project_template_id)->delete();
+        $request->validate([
+            'activity_id' => 'required|integer',
+            'project_template_id' => 'required|integer',
+        ]);
 
-        $dataAssign->delete();
-        return "Success";
+        return DB::transaction(function () use ($request) {
+
+            // Fetch matching DataAssign rows once, grab both id and project_id from the same query
+            $dataAssigns = DataAssign::where('activity_id', $request->activity_id)
+                ->where('project_template_id', $request->project_template_id)
+                ->get(['id', 'project_id']);
+
+            $dataAssignIds = $dataAssigns->pluck('id')->toArray();
+
+            if (empty($dataAssignIds)) {
+                return response()->json(['message' => 'No matching data assignments found'], 404);
+            }
+
+            $commonIds = UserActivityDataAssign::whereIn('data_assign_id', $dataAssignIds)
+                ->distinct()->pluck('common_id')->toArray();
+
+            $userIds = UserActivityDataAssign::whereIn('data_assign_id', $dataAssignIds)
+                ->distinct()->pluck('user_id')->toArray();
+
+            UserAuditAssigns::whereIn('common_id', $commonIds)->delete();
+            UserActivityDataAssign::whereIn('data_assign_id', $dataAssignIds)->delete();
+
+            Verifier::whereIn('user_id', $userIds)
+                ->where('project_template_name_id', $request->project_template_id)
+                ->delete();
+
+            DataAssign::whereIn('id', $dataAssignIds)->delete();
+
+            // Delete rows and activity answer data for THIS template only
+            // (previously this incorrectly pulled ALL templates for the project)
+            $rowIds = ProjectTemplateNameValuesNew::where('project_template_id', $request->project_template_id)
+                ->pluck('id');
+
+            if ($rowIds->isNotEmpty()) {
+                ActivityInstanceClose::whereIn('row_id', $rowIds)
+                    ->where('activity_id', $request->activity_id)->delete();
+
+                ActivityRepeatInstance::whereIn('row_id', $rowIds)
+                    ->where('activity_id', $request->activity_id)->delete();
+
+                TempUserActivityAnswersData::whereIn('row_id', $rowIds)->delete();
+            }
+
+            return response()->json(['message' => 'Success']);
+        });
     }
+
 
     //khushboo 13-05-25
     public function auditorAssignDataExport()

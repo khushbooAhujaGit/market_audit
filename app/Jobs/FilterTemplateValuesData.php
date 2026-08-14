@@ -15,6 +15,9 @@ class FilterTemplateValuesData implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    public int $tries   = 3;
+    public int $timeout = 300;
+
     /**
      * Create a new job instance.
      */

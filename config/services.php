@@ -36,7 +36,18 @@ return [
         'client_secret' => env('MS_GRAPH_CLIENT_SECRET'),
         'tenant_id' => env('MS_GRAPH_TENANT_ID'),
         'sender_email' => env('MS_GRAPH_SENDER_EMAIL'),
+        // Whose OneDrive the Infiltration Report's "Upload to OneDrive" button uploads
+        // into (app-only auth, single fixed account — see OneDriveService). Must be an
+        // account with an actual OneDrive license, which a mail-only sender address may
+        // not have. Falls back to MS_GRAPH_SENDER_EMAIL if not set separately.
+        'onedrive_target_user' => env('MS_GRAPH_ONEDRIVE_USER', env('MS_GRAPH_SENDER_EMAIL')),
     ],
 
+    'infiltration_tool' => [
+        // Path/command to invoke Python 3 on this server. Override in .env if the server's
+        // python binary isn't on PATH as "python3" (e.g. cPanel-style hosts often need a
+        // full path like /usr/local/bin/python3.11).
+        'python_bin' => env('INFILTRATION_TOOL_PYTHON_BIN', 'python3'),
+    ],
 
 ];

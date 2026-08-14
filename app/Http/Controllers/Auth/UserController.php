@@ -35,7 +35,7 @@ class UserController extends Controller
         }
         //Verifier
         if ($currentUserRole == 'Verifier') {
-            $users = User::where('id', Auth::user()->id)->get();
+            $users = User::where('verifier_user_id', Auth::user()->id)->orWhere('id', Auth::user()->id)->get();
         }
         //Agency
         if ($currentUserRole == 'Agency') {
@@ -47,12 +47,17 @@ class UserController extends Controller
 
     public function create()
     {
-        $roles = Role::all();
-        //khushboo 31-03-2025
         $currentUser = User::find(Auth::user()->id);
         $currentUserRole = $currentUser->getRoleNames()->first();
         $agencies = User::role('agency')->get();
-        //khushboo 31-03-2025
+
+        // Verifier cannot create Super Admin users — exclude that role from the dropdown
+        if ($currentUserRole == 'Verifier') {
+            $roles = Role::where('name', '!=', 'Super Admin')->get();
+        } else {
+            $roles = Role::all();
+        }
+
         return view('role-permission.user.create', compact('roles', 'currentUserRole', 'agencies'));
     }
 
@@ -86,6 +91,10 @@ class UserController extends Controller
         $currentUser = User::find(Auth::user()->id);
         $currentUserRole = $currentUser->getRoleNames()->first();
 
+        if ($currentUserRole == 'Verifier' && $request->roles == 'Super Admin') {
+            return redirect()->back()->withErrors(['roles' => 'You are not allowed to create a Super Admin user.'])->withInput();
+        }
+
         if ($currentUserRole == 'Agency') {
             $user = User::create([
                 'name' => $request->name,
@@ -101,6 +110,27 @@ class UserController extends Controller
                 'pincode' => $request->pincode,
                 'is_agency_user' => 1,
                 'agency_user_id' => Auth::user()->id,
+            ]);
+
+            $user->syncRoles($request->roles);
+
+            return redirect("/users")->with('message', "User created successfully with roles");
+        }
+
+        if ($currentUserRole == 'Verifier') {
+            $user = User::create([
+                'name' => $request->name,
+                'email' => $request->email,
+                'mobile' => $request->mobile,
+                'password' => Hash::make($request->password),
+                'address1' => $request->address1,
+                'address2' => $request->address2,
+                'city' => $request->city,
+                'district' => $request->district,
+                'state' => $request->state,
+                'password_info' => $request->password,
+                'pincode' => $request->pincode,
+                'verifier_user_id' => Auth::user()->id,
             ]);
 
             $user->syncRoles($request->roles);
@@ -314,49 +344,40 @@ class UserController extends Controller
         $project_info = Project::findOrFail($request->project_id);
         $act_group_id = $request->activity_group_name_id ?? null;
         $project_template_id = ProjectTemplate::where('project_id', $request->project_id)->where('template_name_id', $request->template_name_id)->first();
+        $companyUserId = $request->has('company_user') ? $request->company_user : null;
+        $agencyId = $request->has('agency_list') ? $request->agency_list : null;
 
         foreach ($request->activity_id as $selected_activities) {
-            // this was to insert the select activity of the group in the data assign
-            $check_data_assign = DataAssign::where('company_id', $project_info->company_id)
-                ->where('zone_id', $project_info->zone_id)
-                ->where('unit_id', $project_info->unit_id)
-                ->where('project_id', $request->project_id)
-                ->where('activity_id', $selected_activities)
-                ->where('activity_group_id', $act_group_id)
-                ->where('template_name_id', $request->template_name_id)
-                ->where('project_template_id', $project_template_id->id)
-                ->where('template_name_head_id', $request->template_name_head_id)
-                ->where('is_outlet_assigned', $is_outlet_assinged)
-                ->first();
-//            dd($check_data_assign);
-            if ($check_data_assign) {
-                $dataAssign = $check_data_assign;
-            }
-            else {
-                $companyUserId = null;
-                $agencyId = null;
-                if ($request->has('company_user')) {
-                    $companyUserId = $request->company_user;
+            // Use a transaction + pessimistic lock to prevent duplicate data_assigns
+            // when the form is submitted concurrently (e.g. double-click).
+            $dataAssign = DB::transaction(function () use (
+                $project_info, $selected_activities, $act_group_id, $request,
+                $project_template_id, $is_outlet_assinged, $companyUserId, $agencyId
+            ) {
+                $searchFields = [
+                    'company_id'           => $project_info->company_id,
+                    'zone_id'              => $project_info->zone_id,
+                    'unit_id'              => $project_info->unit_id,
+                    'project_id'           => $request->project_id,
+                    'activity_id'          => $selected_activities,
+                    'activity_group_id'    => $act_group_id,
+                    'template_name_id'     => $request->template_name_id,
+                    'project_template_id'  => $project_template_id->id,
+                    'template_name_head_id'=> $request->template_name_head_id,
+                    'is_outlet_assigned'   => $is_outlet_assinged,
+                ];
+                $query = DataAssign::query();
+                foreach ($searchFields as $col => $val) {
+                    $query = is_null($val) ? $query->whereNull($col) : $query->where($col, $val);
                 }
-                //give agency admin permission to view project if its selected
-                if ($request->has('agency_list')) {
-                    $agencyId = $request->agency_list;
-                }
-                $dataAssign = DataAssign::create([
-                    'company_id' => $project_info->company_id,
-                    'zone_id' => $project_info->zone_id,
-                    'unit_id' => $project_info->unit_id,
-                    'project_id' => $request->project_id,
-                    'activity_id' => $selected_activities,
-                    'activity_group_id' => $act_group_id,
-                    'template_name_id' => $request->template_name_id,
-                    'project_template_id' => $project_template_id->id,
-                    'template_name_head_id' => $request->template_name_head_id,
-                    'is_outlet_assigned' => $is_outlet_assinged,
+                $existing = $query->lockForUpdate()->first();
+                if ($existing) return $existing;
+
+                return DataAssign::create(array_merge($searchFields, [
                     'company_user_id' => $companyUserId,
-                    'agency_id' => $agencyId
-                ]);
-            }
+                    'agency_id'       => $agencyId,
+                ]));
+            });
 
             if (isset($request->template_name_head_values) && !empty($request->template_name_head_values)) {
                 foreach ($request->template_name_head_values as $template_name_head_v) {
@@ -606,7 +627,7 @@ class UserController extends Controller
                 ->where('unit_id', $project_info->unit_id)
                 ->where('project_id', $request->project_id)
                 ->where('activity_id', $selected_activities)
-                ->where('activity_group_id', $act_group_id)
+                ->when($act_group_id === null, fn($q) => $q->whereNull('activity_group_id'), fn($q) => $q->where('activity_group_id', $act_group_id))
                 ->where('template_name_id', $request->template_name_id)
                 ->where('project_template_id', $project_template_id->id)
                 ->where('template_name_head_id', $request->template_name_head_id)

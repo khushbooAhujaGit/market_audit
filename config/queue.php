@@ -38,7 +38,7 @@ return [
             'driver' => 'database',
             'table' => 'jobs',
             'queue' => 'default',
-            'retry_after' => 90,
+            'retry_after' => 960, // must exceed the longest job $timeout (GenerateInfiltrationReportJob = 900s)
             'after_commit' => false,
         ],
 

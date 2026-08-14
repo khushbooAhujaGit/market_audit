@@ -56,7 +56,8 @@
                                                 aria-labelledby="wizard-info-tab">
                                                 <form method="POST" action="{{ route('assignToUsers.data') }}"
                                                     enctype="multipart/form-data" class="row g-3 needs-validation"
-                                                    novalidate="">
+                                                    novalidate=""
+                                                    onsubmit="this.querySelector('#assignNowButton').disabled=true;">
                                                     @csrf
 
                                                     <div class="col-xl-3 col-sm-3">

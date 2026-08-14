@@ -11,10 +11,10 @@
                                 <div class="btn-group">
                                     <button class="btn btn-warning text-black dropdown-toggle" type="button"
                                             data-bs-toggle="dropdown"
-                                            aria-expanded="false">{{ $activity_group_info->activity_group_name }}</button>
+                                            aria-expanded="false">{{ $activity_info->activity_name }}</button>
                                     <ul class="dropdown-menu dropdown-block">
                                         @foreach ($activity_group_info->get_group_activities as $group_activity)
-                                            <li><a class="dropdown-item"
+                                            <li><a class="dropdown-item {{ $group_activity->activity_id == $activity_info->id ? 'active' : '' }}"
                                                    href="{{ route('activityGroup.verification.view', ['pt' => $projectTemplateInfo->id, 'g' => $activity_group_info->id, 's' => $group_activity->sequence, 'a' => $group_activity->activity_id]) }}">{{ $group_activity->activityName->activity_name }}</a>
                                             </li>
                                         @endforeach

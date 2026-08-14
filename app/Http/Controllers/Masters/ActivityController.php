@@ -49,8 +49,18 @@ class ActivityController extends Controller
         // Check if file is present in the request
         if ($request->hasFile('questions_excel')) {
             $file = $request->file('questions_excel');
-            $data = Excel::toCollection(Excel::class, $file)->first();
-            $dataArray = $data->toArray();
+
+            // Use PhpSpreadsheet directly with formula evaluation enabled.
+            // Excel::toCollection() returns formula strings (e.g. "=B4") instead of computed
+            // values, causing parent_group_question references to break. toArray(null,true)
+            // forces formula calculation so cell-reference-based parent_group_question values
+            // resolve to the actual question text.
+            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($file->getPathname());
+            $worksheet   = $spreadsheet->getActiveSheet();
+            // calculateFormulas=true, formatData=false, returnCellRef=false
+            $rawRows = $worksheet->toArray(null, true, false, false);
+            // Convert to numeric-indexed array of arrays (same shape as toCollection)
+            $dataArray = array_values($rawRows);
 
             // ── Auto-detect column positions from the header row ──────────────────
             // This makes the import work regardless of column order or template version
@@ -77,24 +87,53 @@ class ActivityController extends Controller
             $sequenceToQuestionId = [];
             $questionTextToId     = [];
 
+            // ── PRE-SCAN: Build a map of row-index → parent_group_question for ALL rows.
+            // We use the row INDEX (not Sr.Number) as the key because sub-question rows
+            // often use Excel formulas like =A3+1 for their Sr.Number. When the file is
+            // read without formula evaluation those cells return the formula string, which
+            // PHP casts to 0 — causing every sub-question to collide on key 0.
+            // Using the row index avoids this entirely.
+            $rowToParentGroup  = []; // [rowIndex => parent_group_question_text]
+            $rowToDepQuestion  = []; // [rowIndex => depends_on_question_text]
+            $rowToDepAnswer    = []; // [rowIndex => depends_on_answer]
+            foreach ($dataArray as $rowIdx => $row) {
+                $pgText  = trim((string)($col($row, 'parent_group_question') ?? ''));
+                $dqText  = trim((string)($col($row, 'depends_on_question')   ?? ''));
+                $daText  = trim((string)($col($row, 'depends_on_answer')     ?? ''));
+                if ($pgText)  $rowToParentGroup[$rowIdx] = $pgText;
+                if ($dqText)  $rowToDepQuestion[$rowIdx] = $dqText;
+                if ($daText)  $rowToDepAnswer[$rowIdx]   = $daText;
+            }
+
             // ── PASS 1: Create all questions ──────────────────────────────────
-            foreach ($dataArray as $row) {
+            foreach ($dataArray as $rowIdx => $row) {
                 if (empty($row[0]) && empty($row[$colMap['question_text'] ?? 1] ?? null)) continue;
 
                 $questionText = trim((string)($col($row, 'question_text') ?? ''));
                 if (!$questionText) continue;
 
-                if (Question::where('activity_id', $acitivity->id)->where('question', $questionText)->exists()) {
-                    $existing = Question::where('activity_id', $acitivity->id)->where('question', $questionText)->first();
-                    if ($existing) {
-                        $seqVal = $col($row, 'sr._number') ?? $col($row, 'sr.number') ?? $row[0] ?? null;
-                        if ($seqVal) $sequenceToQuestionId[(int)$seqVal] = $existing->id;
-                        $questionTextToId[$questionText] = $existing->id;
-                    }
-                    continue;
-                }
-
+                // Read type early — needed for duplicate resolution logic below
                 $questionType = trim((string)($col($row, 'type') ?? 'Free Text'));
+
+                $parentGroupTextCheck = trim((string)($col($row, 'parent_group_question') ?? ''));
+
+                // Duplicate check for standalone questions (no parent_group_question):
+                // Same text + same type → duplicate, skip and reuse existing.
+                // Same text + different type → different question, allow creation.
+                if (empty($parentGroupTextCheck)) {
+                    $existingQ = Question::where('activity_id', $acitivity->id)
+                        ->where('question', $questionText)
+                        ->where('question_type', $questionType)
+                        ->where('is_parent', 1)
+                        ->first();
+
+                    if ($existingQ) {
+                        $seqVal = $col($row, 'sr._number') ?? $col($row, 'sr.number') ?? $row[0] ?? null;
+                        if ($seqVal) $sequenceToQuestionId[(int)$seqVal] = $existingQ->id;
+                        $questionTextToId[$questionText] = $existingQ->id;
+                        continue;
+                    }
+                }
                 $answerType   = strtolower(trim((string)($col($row, 'required') ?? 'Required'))) === 'optional' ? 0 : 1;
 
                 $parentGroupText = trim((string)($col($row, 'parent_group_question') ?? ''));
@@ -121,8 +160,8 @@ class ActivityController extends Controller
                 $fileTypes       = trim((string)($col($row, 'file_types')        ?? '')) ?: null;
                 $rawMb           = $col($row, 'max_file_size_mb');
                 $maxFileSizeMb   = is_numeric($rawMb) ? (float)$rawMb : null;
-                $dateMin         = trim((string)($col($row, 'date_min')          ?? '')) ?: null;
-                $dateMax         = trim((string)($col($row, 'date_max')          ?? '')) ?: null;
+                $dateMin         = $this->excelDateToString($col($row, 'date_min'));
+                $dateMax         = $this->excelDateToString($col($row, 'date_max'));
 
                 $new_question = Question::create([
                     'activity_id'           => $acitivity->id,
@@ -145,8 +184,10 @@ class ActivityController extends Controller
                     'date_max'              => $dateMax,
                 ]);
 
-                $seqVal = $col($row, 'sr._number') ?? $col($row, 'sr.number') ?? $row[0] ?? null;
-                if ($seqVal) $sequenceToQuestionId[(int)$seqVal] = $new_question->id;
+                // Row index is always unique — no collision from formula-based or reused Sr.Numbers.
+                // Never write the Sr.Number as an additional key: plain Sr.Numbers (e.g. "2") would
+                // overwrite an earlier rowIdx entry that happens to share that integer.
+                $sequenceToQuestionId[$rowIdx] = $new_question->id;
                 $questionTextToId[$questionText] = $new_question->id;
 
                 // Create dropdown/multiselect options
@@ -175,20 +216,30 @@ class ActivityController extends Controller
                 if ($isParent) $sequence_counter++;
             }
 
-            // ── PASS 2 & 3: Use full DB map (safe for any row order) ────────────────
-            $allActivityQuestions = Question::where('activity_id', $acitivity->id)
-                ->pluck('id', 'question')
-                ->toArray();
+            // ── PASS 2 & 3: Use full DB maps (safe for any row order) ───────────────
+            // Group by question text to correctly resolve duplicates (prefer is_parent=1)
+            $allQByTextAll = Question::where('activity_id', $acitivity->id)
+                ->get()
+                ->groupBy('question'); // text → collection
 
-            // PASS 2 — sub-question links via parent_group_question
-            foreach ($dataArray as $row) {
-                $questionText    = trim((string)($col($row, 'question_text') ?? ''));
-                $parentGroupText = trim((string)($col($row, 'parent_group_question') ?? ''));
-                if (!$questionText || !$parentGroupText) continue;
+            // Helper: given question text, return the best-matching parent ID.
+            // Prefers questions with is_parent=1; falls back to any match.
+            // This handles both top-level MR parents AND nested MR sub-questions as parents.
+            $resolveParentId = function(string $text) use ($allQByTextAll): ?int {
+                $candidates = $allQByTextAll[$text] ?? collect();
+                $q = $candidates->firstWhere('is_parent', 1) ?? $candidates->first();
+                return $q?->id ?? null;
+            };
 
-                $childId  = $allActivityQuestions[$questionText]    ?? null;
-                $parentId = $allActivityQuestions[$parentGroupText] ?? null;
-                if (!$childId || !$parentId || $childId === $parentId) continue;
+            // PASS 2 — sub-question links via parent_group_question.
+            // Uses $rowToParentGroup (row-index → parent text) — immune to formula Sr.Numbers.
+            // Works for ANY row order: child can appear before OR after its parent.
+            // Supports nested MR: a sub-question can itself be an MR parent of deeper sub-questions.
+            foreach ($rowToParentGroup as $rowIdx => $parentGroupText) {
+                if (!isset($sequenceToQuestionId[$rowIdx])) continue; // child not created
+                $childId  = $sequenceToQuestionId[$rowIdx];
+                $parentId = $resolveParentId($parentGroupText);
+                if (!$parentId || $childId === $parentId) continue;
 
                 $exists = QuestionSubQuestion::where('parent_question_id', $parentId)
                     ->where('child_question_id', $childId)->exists();
@@ -202,24 +253,27 @@ class ActivityController extends Controller
                 }
             }
 
-            // PASS 3 — depends_on_question links (conditional child of Dropdown / Yes-No parent)
-            // Stores ONLY in parent_question_id + parent_value on the question.
-            // Does NOT create question_sub_questions entries — that is for parent_group_question only.
-            foreach ($dataArray as $row) {
-                $questionText    = trim((string)($col($row, 'question_text')       ?? ''));
-                $dependsOnText   = trim((string)($col($row, 'depends_on_question') ?? ''));
-                $dependsOnAnswer = trim((string)($col($row, 'depends_on_answer')   ?? ''));
-                if (!$questionText || !$dependsOnText) continue;
+            // PASS 3 — depends_on_question links (conditional children).
+            // Uses $rowToDepQuestion (row-index → parent text) — immune to formula Sr.Numbers.
+            // The child can appear on ANY row — before or after its parent question.
+            // Reuses $allQByTextAll (built above) — no extra DB query.
+            foreach ($rowToDepQuestion as $rowIdx => $dependsOnText) {
+                if (!isset($sequenceToQuestionId[$rowIdx])) continue;
+                $childId   = $sequenceToQuestionId[$rowIdx];
+                $depAnswer = $rowToDepAnswer[$rowIdx] ?? '';
 
-                $childId  = $allActivityQuestions[$questionText]  ?? null;
-                $parentId = $allActivityQuestions[$dependsOnText] ?? null;
+                // Find the parent: prefer is_parent=1 question with that text;
+                // fall back to any question with that text (covers sub-question parents too).
+                $parentCandidates = $allQByTextAll[$dependsOnText] ?? collect();
+                $parentQ = $parentCandidates->firstWhere('is_parent', 1)
+                        ?? $parentCandidates->first();
+                $parentId = $parentQ?->id ?? null;
+
                 if (!$childId || !$parentId) continue;
 
-                // Normalize depends_on_answer:
-                // blank / "non_empty" / "is_answered" / "any" → '__non_empty__' sentinel
-                // anything else → use as-is (specific value match for Yes/No, Dropdown)
-                $normalizedAnswer = $dependsOnAnswer;
-                if (in_array(strtolower($dependsOnAnswer), ['', 'non_empty', 'is_answered', 'any', 'not_empty', '__non_empty__'])) {
+                // Normalize depends_on_answer: blank/"is_answered"/etc → __non_empty__ sentinel
+                $normalizedAnswer = $depAnswer;
+                if (in_array(strtolower($depAnswer), ['', 'non_empty', 'is_answered', 'any', 'not_empty', '__non_empty__'])) {
                     $normalizedAnswer = '__non_empty__';
                 }
 
@@ -342,22 +396,534 @@ class ActivityController extends Controller
 
         $parentQuestions = $parentQuery->paginate($perPage)->withQueryString();
 
-        // Load ALL sub-question data for the parents on this page only
-        $parentIds   = $parentQuestions->pluck('id')->toArray();
-        $subLinks    = \App\Models\QuestionSubQuestion::whereIn('parent_question_id', $parentIds)
+        // Load ALL questions for this activity (needed for nested sub-question resolution)
+        $allQuestions = Question::where('activity_id', $activity_id)->get()->keyBy('id');
+
+        // Load ALL QuestionSubQuestion links for the activity (supports nested MR hierarchies)
+        $allQuestionIds = $allQuestions->keys()->toArray();
+        $allSubLinks    = \App\Models\QuestionSubQuestion::whereIn('parent_question_id', $allQuestionIds)
                             ->orderBy('sequence')->get()->groupBy('parent_question_id');
-        $allChildren = Question::where('activity_id', $activity_id)->where('is_parent', 0)->get()->keyBy('id');
+
+        // BC aliases so the view's existing references still work
+        $subLinks    = $allSubLinks;
+        $allChildren = $allQuestions;
 
         return view('masters.activities.activity_questions', compact(
-            'activity', 'parentQuestions', 'subLinks', 'allChildren',
+            'activity', 'parentQuestions', 'subLinks', 'allSubLinks', 'allChildren', 'allQuestions',
             'search', 'sortBy', 'sortDir', 'perPage'
         ));
+    }
+
+    public function reorderQuestions($activity_id, \Illuminate\Http\Request $request)
+    {
+        $ids = $request->input('ids', []);
+        foreach ($ids as $index => $id) {
+            Question::where('id', $id)
+                ->where('activity_id', $activity_id)
+                ->update(['question_sequence' => $index + 1]);
+        }
+        return response()->json(['status' => 'success']);
     }
 
     public function bulkAddQuestions($activity_id)
     {
         $activity = Activity::findOrFail($activity_id);
         return view('masters.activities.bulk_add_questions', compact('activity'));
+    }
+
+    /**
+     * Export the current activity questions as an Excel file in the same
+     * format as the bulk-import template so users can edit and re-upload.
+     */
+    public function exportActivityQuestions($activity_id)
+    {
+        $activity = Activity::findOrFail($activity_id);
+
+        // Load all questions for this activity with their options and sub-question links.
+        $allQuestions = Question::where('activity_id', $activity_id)
+            ->with(['getOptions', 'subQuestions.childQuestion'])
+            ->orderBy('question_sequence')
+            ->orderBy('id')
+            ->get()
+            ->keyBy('id');
+
+        // Build ordered flat list of rows the same way the import expects them:
+        //   parent → its MR sub-questions → conditional children of each
+        $rows     = [];
+        $visited  = [];
+
+        // Recursive helper: appends a question and all its descendants to $rows.
+        $flatten = null;
+        $flatten = function (Question $q, ?string $mrParentText, ?string $condParentText, ?string $condTrigger) use (
+            &$rows, &$visited, &$flatten, $allQuestions
+        ) {
+            // Only deduplicate top-level parents; sub-questions are shared across
+            // multiple MR parents and must be exported once per parent.
+            $isTopLevel = ($mrParentText === null && $condParentText === null);
+            if ($isTopLevel) {
+                if (isset($visited[$q->id])) return;
+                $visited[$q->id] = true;
+            }
+
+            // Options (pipe-separated)
+            $options = $q->getOptions->pluck('option')->implode('|');
+
+            // parent_group_question — text of MR parent if this is a sub-question
+            $parentGroupQ = $mrParentText;
+
+            // depends_on_question / depends_on_answer — for conditional children
+            $dependsOnQ   = $condParentText;
+            $dependsOnA   = $condTrigger;
+
+            // answer_type
+            $required = $q->answer_type == 1 ? 'Required' : 'Optional';
+
+            // Multiple Answers Allowed — only meaningful for Multi select
+            $multipleAnswers = ($q->question_type === 'Multi select') ? 'Yes' : null;
+
+            // Allow Multiple Images
+            $multipleImages = ($q->question_type === 'Image' && $q->allow_multiple_images) ? 'Yes' : null;
+
+            // Validation rule — blank if 'none'
+            $valRule = ($q->validation_rule && $q->validation_rule !== 'none') ? $q->validation_rule : null;
+
+            $rows[] = [
+                'question_id'             => $q->id,
+                'question_text'           => $q->question,
+                'type'                    => $q->question_type,
+                'required'                => $required,
+                'help_text'               => $q->help_text,
+                'options'                 => $options ?: null,
+                'multiple_answers_allowed'=> $multipleAnswers,
+                'allow_multiple_images'   => $multipleImages,
+                'validation_rule'         => $valRule,
+                'validation_min'          => $q->validation_min,
+                'validation_max'          => $q->validation_max,
+                'validation_regex'        => $q->validation_regex,
+                'file_types'              => $q->file_types,
+                'max_file_size_mb'        => $q->max_file_size_mb,
+                'date_min'                => $q->date_min,
+                'date_max'                => $q->date_max,
+                'parent_group_question'   => $parentGroupQ,
+                'depends_on_question'     => $dependsOnQ,
+                'depends_on_answer'       => $dependsOnA,
+            ];
+
+            // MR sub-questions (via QuestionSubQuestion pivot)
+            foreach ($q->subQuestions->sortBy('sequence') as $link) {
+                $child = $link->childQuestion ?? $allQuestions[$link->child_question_id] ?? null;
+                if (!$child) continue;
+                $flatten($child, $q->question, null, null);
+
+                // Conditional children of this sub-question
+                $condChildren = Question::where('parent_question_id', $child->id)
+                    ->with('getOptions')
+                    ->orderBy('question_sequence')
+                    ->get();
+                foreach ($condChildren as $cc) {
+                    $triggerVal = ($cc->parent_value === '__non_empty__' || !$cc->parent_value)
+                        ? 'is_answered'
+                        : $cc->parent_value;
+                    $flatten($cc, null, $child->question, $triggerVal);
+                }
+            }
+
+            // Conditional children of this top-level question
+            if (!$mrParentText && !$condParentText) {
+                $condChildren = Question::where('parent_question_id', $q->id)
+                    ->with('getOptions')
+                    ->orderBy('question_sequence')
+                    ->get();
+                foreach ($condChildren as $cc) {
+                    $triggerVal = ($cc->parent_value === '__non_empty__' || !$cc->parent_value)
+                        ? 'is_answered'
+                        : $cc->parent_value;
+                    $flatten($cc, null, $q->question, $triggerVal);
+                }
+            }
+        };
+
+        // Process top-level parent questions in sequence order
+        $parents = $allQuestions->filter(fn($q) => $q->is_parent == 1)->sortBy('question_sequence');
+        foreach ($parents as $parent) {
+            $flatten($parent, null, null, null);
+        }
+
+        // Build the spreadsheet
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $sheet       = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Questions');
+
+        // ── Header row 1: column names (no question_id — stored in hidden sheet) ──
+        $headers = [
+            'Sr. Number', 'question_text', 'type', 'required', 'help_text', 'options',
+            'Multiple Answers Allowed', 'Allow Multiple Images', 'validation_rule',
+            'validation_min', 'validation_max', 'validation_regex', 'file_types',
+            'max_file_size_mb', 'date_min', 'date_max',
+            'parent_group_question', 'depends_on_question', 'depends_on_answer',
+        ];
+
+        $headerStyle = [
+            'font'      => ['bold' => true, 'color' => ['argb' => 'FFFFFFFF']],
+            'fill'      => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                            'startColor' => ['argb' => 'FF1F3864']],
+            'alignment' => ['horizontal' => \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER,
+                            'wrapText'   => true],
+            'borders'   => ['allBorders' => ['borderStyle' => \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN,
+                                             'color' => ['argb' => 'FFAAAAAA']]],
+        ];
+
+        $descStyle = [
+            'font' => ['italic' => true, 'color' => ['argb' => 'FF555555'], 'size' => 9],
+            'fill' => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                       'startColor' => ['argb' => 'FFEEF2FF']],
+            'alignment' => ['wrapText' => true, 'vertical' => \PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_TOP],
+        ];
+
+        // Row 1 headers
+        foreach ($headers as $col => $hdr) {
+            $cell = $sheet->getCellByColumnAndRow($col + 1, 1);
+            $cell->setValue($hdr);
+            $sheet->getStyleByColumnAndRow($col + 1, 1)->applyFromArray($headerStyle);
+        }
+        $sheet->getRowDimension(1)->setRowHeight(22);
+
+        // Row 2: descriptions
+        $descriptions = [
+            'Sequential row number (1, 2, 3 ...)',
+            'Full question text shown to the auditor  REQUIRED',
+            'Question type — pick from dropdown  REQUIRED',
+            'Mandatory?  Required  or  Optional  REQUIRED',
+            'Hint / instruction text shown below the question (optional)',
+            'Dropdown / Multi select: pipe-separated choices  e.g.  Option A|Option B|Option C',
+            'Multi select only — Yes = auditor can choose multiple options; No or blank = single choice',
+            'Image only — Yes = auditor can upload multiple images (shows + button); No or blank = single image',
+            'Validation rule — pick from dropdown  (default: none)',
+            'Min value / char-count / digit-count for the selected rule',
+            'Max value / char-count / digit-count for the selected rule',
+            'Regex pattern — only used when validation_rule = regex',
+            'Image / File Upload: accepted extensions  e.g.  .jpg,.png,.pdf',
+            'Image / File Upload: max file size in MB (number only)  e.g.  10',
+            'Date / Date & Time: earliest date allowed  YYYY-MM-DD',
+            'Date / Date & Time: latest date allowed  YYYY-MM-DD',
+            'Sub-question: paste exact question_text of the parent Multi Response question',
+            'Conditional: paste exact question_text of the PARENT question.',
+            'Conditional trigger value:  "Yes" / "No" or dropdown option, or "is_answered" for any non-empty parent',
+        ];
+        foreach ($descriptions as $col => $desc) {
+            $cell = $sheet->getCellByColumnAndRow($col + 1, 2);
+            $cell->setValue($desc);
+            $sheet->getStyleByColumnAndRow($col + 1, 2)->applyFromArray($descStyle);
+        }
+        $sheet->getRowDimension(2)->setRowHeight(50);
+
+        // ── Data rows (starting at row 3) ──────────────────────────────────────
+        $dataStyle = [
+            'alignment' => ['vertical' => \PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_TOP],
+            'borders'   => ['allBorders' => ['borderStyle' => \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN,
+                                             'color' => ['argb' => 'FFDDDDDD']]],
+        ];
+        $subQStyle  = ['fill' => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                                   'startColor' => ['argb' => 'FFF0F4FF']]];
+        $condStyle  = ['fill' => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                                   'startColor' => ['argb' => 'FFFFF8F0']]];
+
+        foreach ($rows as $idx => $row) {
+            $excelRow = $idx + 3;
+            $sr       = $idx + 1;
+
+            // Write all fields except question_id (which goes to the hidden sheet)
+            $rowValues = [
+                $sr,
+                $row['question_text'],
+                $row['type'],
+                $row['required'],
+                $row['help_text'],
+                $row['options'],
+                $row['multiple_answers_allowed'],
+                $row['allow_multiple_images'],
+                $row['validation_rule'],
+                $row['validation_min'],
+                $row['validation_max'],
+                $row['validation_regex'],
+                $row['file_types'],
+                $row['max_file_size_mb'],
+                $row['date_min'],
+                $row['date_max'],
+                $row['parent_group_question'],
+                $row['depends_on_question'],
+                $row['depends_on_answer'],
+            ];
+
+            foreach ($rowValues as $col => $val) {
+                $sheet->getCellByColumnAndRow($col + 1, $excelRow)->setValue($val);
+            }
+
+            $sheet->getStyleByColumnAndRow(1, $excelRow, count($headers), $excelRow)
+                ->applyFromArray($dataStyle);
+
+            // Tint sub-question rows and conditional rows
+            if (!empty($row['parent_group_question'])) {
+                $sheet->getStyleByColumnAndRow(1, $excelRow, count($headers), $excelRow)
+                    ->applyFromArray($subQStyle);
+            } elseif (!empty($row['depends_on_question'])) {
+                $sheet->getStyleByColumnAndRow(1, $excelRow, count($headers), $excelRow)
+                    ->applyFromArray($condStyle);
+            }
+        }
+
+        // ── Hidden sheet: activity_id lock + Sr. Number → question_id mapping ────
+        $metaSheet = $spreadsheet->createSheet();
+        $metaSheet->setTitle('_meta');
+        $metaSheet->setSheetState(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet::SHEETSTATE_VERYHIDDEN);
+        // Row 1: activity_id lock — import will reject if this doesn't match
+        $metaSheet->setCellValue('A1', 'activity_id');
+        $metaSheet->setCellValue('B1', (int) $activity_id);
+        // Row 2: column headers for Sr → question_id map
+        $metaSheet->setCellValue('A2', 'sr');
+        $metaSheet->setCellValue('B2', 'question_id');
+        foreach ($rows as $idx => $row) {
+            $metaSheet->setCellValue('A' . ($idx + 3), $idx + 1);
+            $metaSheet->setCellValue('B' . ($idx + 3), $row['question_id']);
+        }
+
+        // Column widths
+        $colWidths = [8, 45, 18, 10, 25, 30, 12, 12, 18, 8, 8, 18, 18, 10, 12, 12, 40, 40, 20];
+        foreach ($colWidths as $i => $w) {
+            $sheet->getColumnDimensionByColumn($i + 1)->setWidth($w);
+        }
+
+        // Freeze top 2 rows
+        $sheet->freezePane('A3');
+        $spreadsheet->setActiveSheetIndex(0);
+
+        $filename = preg_replace('/[^A-Za-z0-9_\-]/', '_', $activity->activity_name) . '_questions.xlsx';
+        $writer   = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
+
+        return response()->stream(function () use ($writer) {
+            $writer->save('php://output');
+        }, 200, [
+            'Content-Type'        => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            'Cache-Control'       => 'max-age=0',
+        ]);
+    }
+
+    public function importQuestionsFromExcel(Request $request, $activity_id)
+    {
+        $request->validate(['excel_file' => 'required|file|mimes:xlsx,xls']);
+
+        $activity = Activity::findOrFail($activity_id);
+
+        $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($request->file('excel_file')->getRealPath());
+        $sheet       = $spreadsheet->getActiveSheet();
+        $rows        = $sheet->toArray(null, true, true, false);
+
+        // Row 0 = header names, Row 1 = descriptions, data starts at Row 2
+        if (count($rows) < 3) {
+            return back()->with('error', 'The uploaded file has no question data.');
+        }
+
+        $headers = array_map('strtolower', array_map('trim', $rows[0]));
+        $col     = array_flip($headers);
+
+        // Read _meta sheet: validate activity_id lock and build Sr → question_id map
+        $srToQuestionId = [];
+        if ($spreadsheet->sheetNameExists('_meta')) {
+            $metaRows = $spreadsheet->getSheetByName('_meta')->toArray(null, true, true, false);
+
+            // Row 0: activity_id lock
+            if (!empty($metaRows[0]) && strtolower(trim($metaRows[0][0] ?? '')) === 'activity_id') {
+                $fileActivityId = (int)($metaRows[0][1] ?? 0);
+                if ($fileActivityId && $fileActivityId !== (int) $activity_id) {
+                    return back()->with('error',
+                        'This template was downloaded for a different activity and cannot be uploaded here. Please use the correct template for this activity.');
+                }
+            }
+
+            // Row 1: headers (sr / question_id), data from row 2 onward
+            foreach (array_slice($metaRows, 2) as $mr) {
+                $sr  = (int)($mr[0] ?? 0);
+                $qid = (int)($mr[1] ?? 0);
+                if ($sr && $qid) $srToQuestionId[$sr] = $qid;
+            }
+        }
+
+        // Load existing questions keyed by ID and grouped by text
+        // (grouped because multiple questions can share the same text e.g. "Remark")
+        $existingById    = Question::where('activity_id', $activity_id)->get()->keyBy('id');
+        $existingByText  = $existingById->groupBy(fn($q) => trim($q->question));
+        $textMatchCursor = []; // tracks how many times each text has been matched (for round-robin)
+
+        $sequence      = 1;
+        $nameToId      = [];
+        $textToFirstId = [];
+        $subLinks      = []; // one entry per Excel row with parent_group_question (preserves shared sub-questions)
+        $created = $updated = 0;
+
+        // First pass: upsert questions — match by _meta sheet question_id first, then fall back to text.
+        // Questions NOT in the file are left untouched (never deleted).
+        for ($i = 2; $i < count($rows); $i++) {
+            $row  = $rows[$i];
+            $text = trim($row[$col['question_text'] ?? 1] ?? '');
+            if (empty($text)) continue;
+
+            $sr          = (int)($row[0] ?? ($i - 1));
+            $qIdFromFile = $srToQuestionId[$sr] ?? 0;
+            $qtype         = trim($row[$col['type']      ?? 2] ?? 'Free Text');
+            $required      = strtolower(trim($row[$col['required'] ?? 3] ?? '')) === 'required' ? 1 : 0;
+            $helpText      = trim($row[$col['help_text']  ?? 4] ?? '') ?: null;
+            $options       = trim($row[$col['options']    ?? 5] ?? '') ?: null;
+            $allowMultiImg  = strtolower(trim($row[$col['allow multiple images'] ?? 7] ?? '')) === 'yes' ? 1 : 0;
+            $multipleAnswers = strtolower(trim($row[$col['multiple answers allowed'] ?? 6] ?? '')) === 'yes' ? 1 : 0;
+            $valRule        = isset($col['validation_rule'])   ? (trim($row[$col['validation_rule']]   ?? '') ?: null) : null;
+            $valMin         = isset($col['validation_min'])    ? (trim($row[$col['validation_min']]    ?? '') ?: null) : null;
+            $valMax         = isset($col['validation_max'])    ? (trim($row[$col['validation_max']]    ?? '') ?: null) : null;
+            $valRegex       = isset($col['validation_regex'])  ? (trim($row[$col['validation_regex']]  ?? '') ?: null) : null;
+            $fileTypes      = isset($col['file_types'])        ? (trim($row[$col['file_types']]        ?? '') ?: null) : null;
+            $maxFileSizeMb  = isset($col['max_file_size_mb'])  ? (trim($row[$col['max_file_size_mb']]  ?? '') ?: null) : null;
+            $dateMin        = isset($col['date_min'])          ? $this->excelDateToString($row[$col['date_min']] ?? null) : null;
+            $dateMax        = isset($col['date_max'])          ? $this->excelDateToString($row[$col['date_max']] ?? null) : null;
+
+            $parentGroupQ = isset($col['parent_group_question'])
+                ? (trim($row[$col['parent_group_question']] ?? '') ?: null) : null;
+            $dependsOnQ   = isset($col['depends_on_question'])
+                ? (trim($row[$col['depends_on_question']]  ?? '') ?: null) : null;
+            $dependsOnA   = isset($col['depends_on_answer'])
+                ? (trim($row[$col['depends_on_answer']]    ?? '') ?: null) : null;
+
+            $isParent = ($parentGroupQ === null && $dependsOnQ === null) ? 1 : 0;
+
+            $attrs = [
+                'question_type'          => $qtype,
+                'question_sequence'      => $isParent ? $sequence++ : null,
+                'answer_type'            => $required,
+                'is_parent'              => $isParent,
+                'help_text'              => $helpText,
+                'allow_multiple_images'  => $allowMultiImg,
+                'validation_rule'        => $valRule,
+                'validation_min'         => $valMin,
+                'validation_max'         => $valMax,
+                'validation_regex'       => $valRegex,
+                'file_types'             => $fileTypes,
+                'max_file_size_mb'       => $maxFileSizeMb,
+                'date_min'               => $dateMin,
+                'date_max'               => $dateMax,
+                'parent_question_id'     => null,
+            ];
+
+            // Match by question_id from _meta, BUT verify the DB question text matches
+            // the row text (or is close enough). If _meta is stale due to row deletions/
+            // reordering in Excel, the Sr number shifts and we get a wrong question_id.
+            $metaQId       = $qIdFromFile && isset($existingById[$qIdFromFile]) ? $qIdFromFile : 0;
+            $metaTextMatch = $metaQId && (trim($existingById[$metaQId]->question) === $text);
+
+            if ($metaTextMatch) {
+                // _meta question_id confirmed — text matches exactly
+                $q = $existingById[$metaQId];
+                $q->update($attrs);
+                $updated++;
+            } elseif ($existingByText->has($text)) {
+                // Text match — same text, possibly multiple questions with different types.
+                // First try to find one with the same question_type as the Excel row (exact match).
+                // If no type match, fall back to cursor order (round-robin) so that duplicate
+                // same-text same-type questions are picked in sequence without cross-type collision.
+                // When cursor exceeds group size, clamp to last() to avoid wrapping back to first().
+                $group = $existingByText->get($text);
+                $typeMatch = $group->first(fn($q) => $q->question_type === $qtype);
+                if ($typeMatch) {
+                    $q = $typeMatch;
+                } else {
+                    $cursor = $textMatchCursor[$text] ?? 0;
+                    $q      = $cursor < $group->count()
+                        ? $group->values()->get($cursor)
+                        : $group->values()->last();
+                    $textMatchCursor[$text] = $cursor + 1;
+                }
+                $q->update($attrs);
+                $updated++;
+            } elseif ($metaQId) {
+                // _meta has a question_id but text differs — user renamed the question text.
+                // Trust the question_id and update including the new text.
+                $q = $existingById[$metaQId];
+                $q->update(array_merge($attrs, ['question' => $text]));
+                $updated++;
+            } else {
+                // New question not in DB
+                $q = Question::create(array_merge($attrs, [
+                    'activity_id' => $activity_id,
+                    'question'    => $text,
+                ]));
+                $created++;
+            }
+
+            // Sync options: delete old, recreate from Excel
+            if (in_array($qtype, ['Multi Response', 'Multi select', 'Single select', 'Dropdown'])) {
+                \App\Models\QuestionDropdown::where('question_id', $q->id)->delete();
+                if ($options) {
+                    foreach (explode('|', $options) as $opt) {
+                        $opt = trim($opt);
+                        if ($opt !== '') {
+                            \App\Models\QuestionDropdown::create(['question_id' => $q->id, 'option' => $opt]);
+                        }
+                    }
+                }
+            }
+
+            // Key by question_id (not text) to avoid collisions on duplicate texts like "Remark"
+            $nameToId[$q->id] = [
+                'id'         => $q->id,
+                'text'       => $text,
+                'dependsOnQ' => $dependsOnQ,
+                'dependsOnA' => $dependsOnA,
+            ];
+            // Collect per-row MR sub-question links (one entry per Excel row) so shared
+            // sub-questions that appear under multiple MR parents all get their links preserved.
+            if ($parentGroupQ) {
+                $subLinks[] = ['childId' => $q->id, 'parentGroupQ' => $parentGroupQ];
+            }
+            // Also keep a text→id map for parent lookups in second pass
+            $textToFirstId[$text] = $textToFirstId[$text] ?? $q->id;
+        }
+
+        // Second pass: re-link sub-questions and conditional children for processed questions only.
+        // Delete only links where BOTH parent AND child are in processedIds — using OR would nuke
+        // links for shared sub-questions (e.g. "Remark" linked to 13 MR parents) that aren't
+        // being re-created via the same pass.
+        $processedIds = array_keys($nameToId);
+        \App\Models\QuestionSubQuestion::whereIn('parent_question_id', $processedIds)
+            ->whereIn('child_question_id', $processedIds)->delete();
+
+        // Re-create MR sub-question links from per-row $subLinks (not from $nameToId which
+        // deduplicates by question_id and would lose all-but-last parent for shared sub-questions).
+        $seqByParent = [];
+        foreach ($subLinks as $link) {
+            if (!isset($textToFirstId[$link['parentGroupQ']])) continue;
+            $parentId = $textToFirstId[$link['parentGroupQ']];
+            $childId  = $link['childId'];
+            if ($childId === $parentId) continue;
+            $seqByParent[$parentId] = ($seqByParent[$parentId] ?? 0) + 1;
+            \App\Models\QuestionSubQuestion::create([
+                'parent_question_id' => $parentId,
+                'child_question_id'  => $childId,
+                'sequence'           => $seqByParent[$parentId],
+            ]);
+            Question::where('id', $childId)->update(['is_parent' => 0]);
+        }
+
+        foreach ($nameToId as $qId => $info) {
+            if ($info['dependsOnQ'] && isset($textToFirstId[$info['dependsOnQ']])) {
+                $parentId   = $textToFirstId[$info['dependsOnQ']];
+                $triggerVal = ($info['dependsOnA'] === 'is_answered') ? '__non_empty__' : $info['dependsOnA'];
+                Question::where('id', $qId)->update([
+                    'parent_question_id' => $parentId,
+                    'parent_value'       => $triggerVal,
+                    'is_parent'          => 0,
+                ]);
+            }
+        }
+
+        return back()->with('success', "Import complete: {$created} added, {$updated} updated.");
     }
 
     public function bulkStoreQuestions(Request $request, $activity_id)
@@ -440,6 +1006,7 @@ class ActivityController extends Controller
         $activity->update($validated);
         return redirect(route('activities.list'))->with('message', 'Activity Updated');
     }
+    
     public function destroy(Request $request)
     {
         $request->validate([
@@ -515,12 +1082,10 @@ class ActivityController extends Controller
         // Raw numeric PK of the parent so we can exclude it from its own selection
         $parentRawId = $question->getKey();
 
-        // Show ALL non-Multi-Response questions except the parent itself and already-linked ones.
-        // Include both standalone (is_parent=1) and child (is_parent=0) questions —
-        // any question can be linked as a sub-question of a Multi Response parent.
+        // Show ALL questions except the parent itself and already-linked ones.
+        // Multi Response questions are allowed as sub-questions (nested MR hierarchy).
         $available_questions = Question::where('activity_id', $question->activity_id)
             ->whereRaw('id != ?', [$parentRawId])
-            ->where('question_type', '!=', 'Multi Response')
             ->whereNotIn('id', $linked_ids)
             ->orderBy('question_sequence')
             ->get();
@@ -631,5 +1196,34 @@ class ActivityController extends Controller
 
     }
     //khushboo 06-03-2026
+
+    private function excelDateToString($value): ?string
+    {
+        if ($value === null || $value === '') return null;
+        $str = trim((string) $value);
+        if ($str === '') return null;
+        // Excel stores dates as integer serial numbers (e.g. 46204)
+        if (is_numeric($str)) {
+            try {
+                // Excel epoch: Dec 30, 1899 (accounting for Lotus 1-2-3 leap-year bug)
+                $date = \Carbon\Carbon::createFromFormat('Y-m-d', '1899-12-30')
+                    ->addDays((int) $str);
+                return $date->format('Y-m-d');
+            } catch (\Exception $e) {
+                return null;
+            }
+        }
+        // Already a date string — normalise to Y-m-d
+        try {
+            foreach (['d-m-Y', 'd/m/Y', 'Y-m-d'] as $fmt) {
+                try {
+                    return \Carbon\Carbon::createFromFormat($fmt, $str)->format('Y-m-d');
+                } catch (\Exception $e) {}
+            }
+            return \Carbon\Carbon::parse($str)->format('Y-m-d');
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
 
 }

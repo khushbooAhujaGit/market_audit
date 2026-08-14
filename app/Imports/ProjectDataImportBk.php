@@ -73,6 +73,7 @@ class ProjectDataImportBk implements ToCollection, WithChunkReading, ShouldQueue
 
     private function processChunk(Collection $collection, $projectTemplateInfo)
     {
+        $now = now()->toDateTimeString();
         $insertProjectTemplateData = [];
         foreach ($collection as $row) {
 
@@ -92,6 +93,8 @@ class ProjectDataImportBk implements ToCollection, WithChunkReading, ShouldQueue
                     'project_template_id' => $projectTemplateInfo->id,
                     'template_name_head_id' => $this->templateHeadsMap[$header],
                     'value' => $value,
+                    'created_at' => $now ?? now()->toDateTimeString(),
+                    'updated_at' => $now ?? now()->toDateTimeString(),
                 ];
             }
             $this->row_id_counter++;

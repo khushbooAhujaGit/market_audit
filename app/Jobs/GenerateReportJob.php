@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Mail\SendReportMail;
 use App\Models\Activity;
+use App\Models\Project;
 use App\Models\AuditorAssignedData;
 use App\Models\DataAssign;
 use App\Models\ProjectTemplate;
@@ -32,6 +33,9 @@ class GenerateReportJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    public int $tries   = 3;
+    public int $timeout = 300; // 5 min; retry_after in queue.php must be > this
+
     protected $validated;
     protected $request;
     protected $user;
@@ -50,11 +54,125 @@ class GenerateReportJob implements ShouldQueue
     }
 
     /**
-     * Execute the job.
+     * Execute the job. 
      */
     public function handle(): void
     {
-        Log::info('job started');
+        Log::info('GenerateReportJob started');
+
+        // Delegate to the same ReportController::buildReportFile() used by the direct download,
+        // so the mailed report is always identical to the downloaded one (question codes, sub-questions, etc.)
+        $controller = app(\App\Http\Controllers\Masters\ReportController::class);
+        $result     = $controller->buildReportFile($this->request, $this->validated);
+
+        $xlsxPath = $result['path'];
+        $fileName = $result['file_name'];
+
+        // ── PDF zip generation (only when PDF Required checkbox was checked) ─
+        // Use already-generated PDFs from activityAnswerImages/.../answerPdfs/
+        // instead of regenerating them — avoids massive file sizes.
+        $zipFilePath = null;
+
+        if ($this->request->has('pdf_required')) {
+            $project = \App\Models\Project::find($this->validated['project_id']);
+            $projectName = $project ? $project->project_name : null;
+
+            $localPaths = [];
+
+            if ($projectName) {
+                $sanitized  = str_replace(' ', '-', $projectName);
+                $baseDir    = public_path('activityAnswerImages/' . $projectName . '/');
+
+                // Collect PDFs across all month subdirectories that fall in the date range
+                $fromDate = \Carbon\Carbon::parse($this->validated['from_date']);
+                $toDate   = \Carbon\Carbon::parse($this->validated['to_date']);
+
+                if (is_dir($baseDir)) {
+                    foreach (scandir($baseDir) as $monthDir) {
+                        if ($monthDir === '.' || $monthDir === '..') continue;
+                        $pdfDir = $baseDir . $monthDir . '/answerPdfs/';
+                        if (!is_dir($pdfDir)) continue;
+
+                        foreach (scandir($pdfDir) as $file) {
+                            if (pathinfo($file, PATHINFO_EXTENSION) !== 'pdf') continue;
+                            $fullPath = $pdfDir . $file;
+                            $fileDate = \Carbon\Carbon::createFromTimestamp(filemtime($fullPath));
+                            if ($fileDate->between($fromDate->startOfDay(), $toDate->copy()->endOfDay())) {
+                                $localPaths[] = $fullPath;
+                            }
+                        }
+                    }
+                }
+            }
+
+            Log::info('GenerateReportJob: found ' . count($localPaths) . ' existing PDFs for zip');
+
+            if (!empty($localPaths)) {
+                if (!file_exists(public_path('temp'))) {
+                    mkdir(public_path('temp'), 0777, true);
+                }
+                $zipFileName = 'Pdf_Attachment-' . time() . '.zip';
+                $zipFilePath = public_path('temp/' . $zipFileName);
+                $zip = new \ZipArchive();
+                if ($zip->open($zipFilePath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) === true) {
+                    foreach ($localPaths as $file) {
+                        $zip->addFile($file, basename($file));
+                    }
+                    $zip->close();
+                }
+            }
+        }
+        // ──────────────────────────────────────────────────────────────────
+
+        // ── Log individual file sizes ──────────────────────────────────────
+        $xlsxSizeKb = file_exists($xlsxPath) ? round(filesize($xlsxPath) / 1024, 1) : 0;
+        $pdfSizeKb  = ($zipFilePath && file_exists($zipFilePath)) ? round(filesize($zipFilePath) / 1024, 1) : 0;
+        Log::info("GenerateReportJob file sizes — Report (xlsx): {$xlsxSizeKb} KB, PDF zip: {$pdfSizeKb} KB, combined: " . round(($xlsxSizeKb + $pdfSizeKb), 1) . ' KB');
+
+        // ── Bundle xlsx + PDF zip into one single zip for the mail ────────
+        if (!file_exists(public_path('temp'))) {
+            mkdir(public_path('temp'), 0777, true);
+        }
+        $bundleZipName = 'Report-' . time() . '.zip';
+        $bundleZipPath = public_path('temp/' . $bundleZipName);
+        $bundleZip = new \ZipArchive();
+        if ($bundleZip->open($bundleZipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) === true) {
+            $bundleZip->addFile($xlsxPath, $fileName);
+            if ($zipFilePath && file_exists($zipFilePath)) {
+                $bundleZip->addFile($zipFilePath, 'PDFs_' . basename($zipFilePath));
+            }
+            $bundleZip->close();
+        }
+        $bundleSizeKb = file_exists($bundleZipPath) ? round(filesize($bundleZipPath) / 1024, 1) : 0;
+        Log::info("GenerateReportJob bundle zip size: {$bundleSizeKb} KB");
+        // ──────────────────────────────────────────────────────────────────
+
+        $htmlBody = '<!DOCTYPE html><html><head><style>
+            body { font-family: Arial, sans-serif; background-color: #f9f9f9; padding: 20px; }
+            .container { background-color: #ffffff; padding: 20px; border-radius: 10px; }
+            .header { font-size: 24px; color: #333; margin-bottom: 10px; }
+            .content { font-size: 16px; color: #555; }
+            .footer { font-size: 12px; color: #aaa; margin-top: 20px; }
+            </style></head><body><div class="container">
+            <div class="header">Hello ' . htmlspecialchars($this->user->name) . ',</div>
+            <div class="content"><p>Your requested report is now ready. You\'ll find it attached to this email.</p></div>
+            <div class="footer">© ' . date('Y') . ' TNBT</div>
+            </div></body></html>';
+
+        Log::info('GenerateReportJob sending mail to ' . $this->user->email);
+        $this->mailer->sendMail(
+            $this->user->email,
+            'Report Mail - ' . $fileName,
+            $htmlBody,
+            [$bundleZipPath]
+        );
+        Log::info('GenerateReportJob mail sent');
+
+        if (file_exists($xlsxPath)) unlink($xlsxPath);
+        if ($zipFilePath && file_exists($zipFilePath)) unlink($zipFilePath);
+        if (file_exists($bundleZipPath)) unlink($bundleZipPath);
+
+        /* ---- OLD logic kept for reference (not used) ----
         $start_date = $this->validated['from_date'];
         $end_date = $this->validated['to_date'];
         $additionalHeaders = [];
@@ -571,38 +689,7 @@ class GenerateReportJob implements ShouldQueue
                     </body>
                 </html>';
 
-        Log::info('job mail started');
-        $this->mailer->sendMail(
-            'ahujakhushboo135@gmail.com',
-            'Report Mail',
-            $htmlBody,
-            $attachment
-        );
-
-        Log::info('job mail send');
-
-        //khushboo 22-05-25
-        $folderPath = public_path('temp');
-
-        // if (is_dir($folderPath)) {
-        //     $files = glob($folderPath . '/*'); // Get all files in the directory
-
-        //     if ($files) {
-        //         foreach ($files as $file) {
-        //             if (is_file($file)) {
-        //                 unlink($file); // Delete the file
-        //             }
-        //         }
-        //     }
-        // }
-
-        // After sending the email, delete the file from 'public/testing'
-        if (file_exists($fullFilePath)) {
-            unlink($fullFilePath);
-        }
-
-        //khushboo 22-05-25
-
+        ---- END OLD logic ---- */
     }
 
     private function buildReportHeaders(
@@ -638,7 +725,10 @@ class GenerateReportJob implements ShouldQueue
 
         $activity_check = DB::table('activities')->find($a);
 
-        $related_questions = DB::table('questions')->where('activity_id', $activity_check->id)->orderBy('question_sequence', 'asc')->get();
+        $related_questions = Question::with(['subQuestions.childQuestion'])
+            ->where('activity_id', $activity_check->id)
+            ->orderBy('question_sequence', 'asc')
+            ->get();
 
         $user_responses = TempUserActivityAnswersData::with('getUser')
             ->where('row_id', $r)

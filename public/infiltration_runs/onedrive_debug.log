@@ -1,0 +1,20 @@
+[2026-08-06 15:44:23] UploadInfiltrationReportToSharedOneDriveJob: started {"user":"ahujakhushboo135@gmail.com"}
+[2026-08-06 15:44:26] OneDriveSharedService: upload starting {"targetUser":"khushboo@tnbttech.com","fileName":"Infiltration Audit Report - 06-08-2026.zip","localPath":"D:\\marketaudit_tnbttech\\public\\infiltration_runs\/run_6a745e80afc5a5.14218983.zip","size":855528}
+[2026-08-06 15:44:27] OneDriveSharedService: access token acquired []
+[2026-08-06 15:44:27] OneDriveSharedService: folder check FAILED {"body":"{\"error\":{\"code\":\"accessDenied\",\"message\":\"Access denied\"}}"}
+[2026-08-06 15:44:27] UploadInfiltrationReportToSharedOneDriveJob: FAILED {"error":"Failed to check for OneDrive folder: {\"error\":{\"code\":\"accessDenied\",\"message\":\"Access denied\"}}"}
+[2026-08-06 15:44:29] UploadInfiltrationReportToSharedOneDriveJob: started {"user":"ahujakhushboo135@gmail.com"}
+[2026-08-06 15:44:31] OneDriveSharedService: upload starting {"targetUser":"khushboo@tnbttech.com","fileName":"Infiltration Audit Report - 06-08-2026.zip","localPath":"D:\\marketaudit_tnbttech\\public\\infiltration_runs\/run_6a745e867090f8.81757209.zip","size":855530}
+[2026-08-06 15:44:32] OneDriveSharedService: access token acquired []
+[2026-08-06 15:44:33] OneDriveSharedService: folder check FAILED {"body":"{\"error\":{\"code\":\"accessDenied\",\"message\":\"Access denied\"}}"}
+[2026-08-06 15:44:33] UploadInfiltrationReportToSharedOneDriveJob: FAILED {"error":"Failed to check for OneDrive folder: {\"error\":{\"code\":\"accessDenied\",\"message\":\"Access denied\"}}"}
+[2026-08-06 15:45:45] UploadInfiltrationReportToSharedOneDriveJob: started {"user":"ahujakhushboo135@gmail.com"}
+[2026-08-06 15:45:49] OneDriveSharedService: upload starting {"targetUser":"khushboo@tnbttech.com","fileName":"Infiltration Audit Report - 06-08-2026.zip","localPath":"D:\\marketaudit_tnbttech\\public\\infiltration_runs\/run_6a745ed36fab67.49382560.zip","size":855530}
+[2026-08-06 15:45:50] OneDriveSharedService: access token acquired []
+[2026-08-06 15:45:51] OneDriveSharedService: folder check FAILED {"body":"{\"error\":{\"code\":\"accessDenied\",\"message\":\"Access denied\"}}"}
+[2026-08-06 15:45:51] UploadInfiltrationReportToSharedOneDriveJob: FAILED {"error":"Failed to check for OneDrive folder: {\"error\":{\"code\":\"accessDenied\",\"message\":\"Access denied\"}}"}
+[2026-08-06 15:51:55] UploadInfiltrationReportToSharedOneDriveJob: started {"user":"ahujakhushboo135@gmail.com"}
+[2026-08-06 15:51:58] OneDriveSharedService: upload starting {"targetUser":"khushboo@tnbttech.com","fileName":"Infiltration Audit Report - 06-08-2026.zip","localPath":"D:\\marketaudit_tnbttech\\public\\infiltration_runs\/run_6a7460459412d9.20948381.zip","size":855534}
+[2026-08-06 15:52:00] OneDriveSharedService: access token acquired []
+[2026-08-06 15:52:01] OneDriveSharedService: folder check FAILED {"body":"{\"error\":{\"code\":\"accessDenied\",\"message\":\"Access denied\"}}"}
+[2026-08-06 15:52:01] UploadInfiltrationReportToSharedOneDriveJob: FAILED {"error":"Failed to check for OneDrive folder: {\"error\":{\"code\":\"accessDenied\",\"message\":\"Access denied\"}}"}

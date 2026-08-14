@@ -69,7 +69,10 @@ class SendReportMail extends Mailable
 
         // Attach the primary file if provided
         if (isset($this->file_path)) {
-            $attachments[] = Attachment::fromPath(public_path($this->file_path));
+            $fullPath = str_starts_with($this->file_path, DIRECTORY_SEPARATOR) || preg_match('/^[A-Za-z]:[\\/]/', $this->file_path)
+                ? $this->file_path
+                : public_path($this->file_path);
+            $attachments[] = Attachment::fromPath($fullPath);
         }
 
         // Attach all PDF files if provided

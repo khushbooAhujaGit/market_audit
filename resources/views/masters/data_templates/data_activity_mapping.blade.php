@@ -102,6 +102,20 @@
 @endsection
 @section('scripts')
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <style>
+        /* Make Add-On selected activity tags visually distinct (dark background) */
+        .addon-select2-wrap .select2-selection__choice {
+            background-color: #1a1a2e !important;
+            color: #fff !important;
+            border-color: #1a1a2e !important;
+        }
+        .addon-select2-wrap .select2-selection__choice__remove {
+            color: #ccc !important;
+        }
+        .addon-select2-wrap .select2-selection__choice__remove:hover {
+            color: #fff !important;
+        }
+    </style>
     <script>
         $('#project_id').select2();
         $(document).ready(function() {
@@ -235,8 +249,10 @@
                                                 </div>
                     <div class="col-md-4 col-sm-6 activity-addon-select-wrap d-none" id="addon_wrap_${template.id}">
                         <label class="form-label">Select Activities for Add On</label>
-                        <select class="form-select activity-addon-select" id="activity_addon_select_${template.id}" multiple>
-                        </select>
+                        <div class="addon-select2-wrap">
+                            <select class="form-select activity-addon-select" id="activity_addon_select_${template.id}" multiple>
+                            </select>
+                        </div>
                     </div>
                     <div class="col-xl-3 col-sm-3 ">
                                                     <div class="form-check checkbox checkbox-primary mb-0">
@@ -248,6 +264,12 @@
                                                     <div class="form-check checkbox checkbox-primary mb-0">
                                                         <input class="form-check-input can_edit_data" name="can_edit_data" id="can_edit_data_${template.id}" type="checkbox" >
                                                         <label class="form-check-label" for="can_edit_data_${template.id}">Can Edit Data</label>
+                                                    </div>
+                    </div>
+                    <div class="col-xl-3 col-sm-3 ">
+                                                    <div class="form-check checkbox checkbox-primary mb-0">
+                                                        <input class="form-check-input add_signature" name="add_signature" id="add_signature_${template.id}" type="checkbox" >
+                                                        <label class="form-check-label" for="add_signature_${template.id}">Add Signature</label>
                                                     </div>
                     </div>
 
@@ -357,6 +379,11 @@
                         $(`#can_edit_data_${template.id}`).prop("checked", true);
                     }else{
                         $(`#can_edit_data_${template.id}`).prop("checked", false);
+                    }
+                    if (template.add_signature == 1) {
+                        $(`#add_signature_${template.id}`).prop("checked", true);
+                    }else{
+                        $(`#add_signature_${template.id}`).prop("checked", false);
                     }
                     const ownHeadSelect = $(`#own_template_head${template.id}`);
                     const mainHeaderSelect = $(`#main_header${template.id}`);
@@ -546,6 +573,7 @@
                         const addon_activity_ids = row.find(".activity-addon-select").val() || [];
                         const is_with_data = row.find(".with_data").is(":checked") ? 1 : 0;
                         const is_can_edit_data = row.find(".can_edit_data").is(":checked") ? 1 : 0;
+                        const is_add_signature = row.find(".add_signature").is(":checked") ? 1 : 0;
 
                         //khushboo 02-05-2025
                         const compliance_column_Id = row.find(".compliance_column").val() ? row
@@ -566,6 +594,7 @@
                             'activity_add_on_activity_ids': addon_activity_ids,
                             'with_data': is_with_data,
                             'can_edit_data': is_can_edit_data,
+                            'add_signature': is_add_signature,
                             'master_head': master_headId,
                             'own_head': own_headId,
                             'sub_header': sub_headerId,

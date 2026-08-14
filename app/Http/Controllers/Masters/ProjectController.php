@@ -14,6 +14,8 @@ use App\Models\Activity;
 use App\Models\ActivityGroup;
 use App\Models\ActivityGroupName;
 use App\Models\ActivityGroupPivot;
+use App\Models\ActivityInstanceClose;
+use App\Models\ActivityRepeatInstance;
 use App\Models\AuditorAssignedData;
 use App\Models\Company;
 use App\Models\ComplianceAnswerData;
@@ -143,6 +145,9 @@ class ProjectController extends Controller
         if ($request->has('with_data')) {
             $formFields['with_data'] = 1;
         }
+        if ($request->has('is_infiltration_report_applicable')) {
+            $formFields['is_infiltration_report_applicable'] = 1;
+        }
         if ($request->has('data_add_on')) {
             $formFields['data_add_on'] = 1;
         }
@@ -230,6 +235,11 @@ class ProjectController extends Controller
         } else {
             $formFields['with_data'] = 0;
         }
+        if ($request->has('is_infiltration_report_applicable')) {
+            $formFields['is_infiltration_report_applicable'] = 1;
+        } else {
+            $formFields['is_infiltration_report_applicable'] = 0;
+        }
 
         //khushboo 01-04-2025
 
@@ -298,24 +308,43 @@ class ProjectController extends Controller
         try {
             $project = Project::findOrFail($request->id);
 
-            ProjectTemplatesCommonHeads::where('project_id', $project->id)->delete();
-            DataAssign::where('project_id', $project->id)->delete();
-            AuditorAssignedData::where('project_id', $project->id)->delete();
+            DB::transaction(function () use ($project) {
+                $projectId = $project->id;
 
-            $projectTemplatesIds = ProjectTemplate::where('project_id', $project->id)->pluck('id')->toArray();
-            if (!empty($projectTemplatesIds)) {
-                $projectTemplateRowIds = ProjectTemplateNameValuesNew::whereIn('project_template_id', $projectTemplatesIds)->pluck('id')->toArray();
-                if (!empty($projectTemplateRowIds)) {
-                    TempUserActivityAnswersData::whereIn('row_id', $projectTemplateRowIds)->delete();
+                // 1. Collect IDs needed for cascading deletes
+                $dataAssignIds = DataAssign::where('project_id', $projectId)->pluck('id');
+
+                $commonIds   = UserActivityDataAssign::whereIn('data_assign_id', $dataAssignIds)->pluck('common_id');
+                $activityIds = UserActivityDataAssign::whereIn('data_assign_id', $dataAssignIds)->pluck('activity_id');
+
+                // 2. Delete assignment records
+                UserAuditAssigns::whereIn('common_id', $commonIds)->delete();
+                UserActivityDataAssign::whereIn('data_assign_id', $dataAssignIds)->delete();
+                ProjectTemplatesCommonHeads::where('project_id', $projectId)->delete();
+                DataAssign::where('project_id', $projectId)->delete();
+
+                // 3. Delete template rows and their activity answer data
+                $templateIds = ProjectTemplate::where('project_id', $projectId)->pluck('id');
+
+                if ($templateIds->isNotEmpty()) {
+                    $rowIds = ProjectTemplateNameValuesNew::whereIn('project_template_id', $templateIds)->pluck('id');
+
+                    if ($rowIds->isNotEmpty()) {
+                        ActivityInstanceClose::whereIn('row_id', $rowIds)->whereIn('activity_id', $activityIds)->delete();
+                        ActivityRepeatInstance::whereIn('row_id', $rowIds)->whereIn('activity_id', $activityIds)->delete();
+                        TempUserActivityAnswersData::whereIn('row_id', $rowIds)->delete();
+                    }
+
+                    ProjectTemplateNameValuesNew::whereIn('project_template_id', $templateIds)->delete();
+                    ProjectTemplate::where('project_id', $projectId)->delete();
                 }
-                ProjectTemplateNameValuesNew::whereIn('project_template_id', $projectTemplatesIds)->delete();
-                ProjectTemplate::where('project_id', $project->id)->delete();
-            }
 
-            $project->delete();
+                $project->delete();
+            });
+
             return "Success";
         } catch (\Exception $e) {
-            \Log::info('Project Deletion Error with id - ' . $request->id . $e->getMessage());
+            \Log::error('Project deletion failed [id=' . $request->id . ']: ' . $e->getMessage());
             return "Error";
         }
     }
@@ -767,6 +796,7 @@ class ProjectController extends Controller
                 return redirect()->back()->withErrors(['data_excel' => 'The data format is not correct as per the data template.'])->withInput();
             }
             $row_id_counter = ProjectTemplateNameValue::max('row_id') + 1;
+            $now = now()->toDateTimeString();
             foreach ($dataArray as $index => $template_data) {
                 // Check if all values in the row are empty, ' ', or null
                 if (empty(array_filter($template_data, fn($value) => !is_null($value) && $value !== ''))) {
@@ -783,7 +813,9 @@ class ProjectController extends Controller
                             'row_id' => $row_id_counter,
                             'project_template_id' => $projectTemplate_id,
                             'template_name_head_id' => $template_headInfo->id,
-                            'value' => $data
+                            'value' => $data,
+                            'created_at' => $now,
+                            'updated_at' => $now,
                         ];
                     }
                 }
@@ -1047,6 +1079,17 @@ class ProjectController extends Controller
             }
             $projectTemplate = ProjectTemplate::where('project_id', $request->project_id)
                 ->where('template_name_id', $mapping_data['templateNameId'])->first();
+
+            // When Activity Add On is checked but the user picked a single activity
+            // (not a group activity), the group-activity picker never sends
+            // activity_add_on_activity_ids, leaving it null. An empty/null list is
+            // treated downstream (verification gating) as "applies to every activity"
+            // instead of "just this one", so scope it explicitly to the chosen activity.
+            $activityAddOnIds = $mapping_data['activity_add_on_activity_ids'] ?? null;
+            if (!empty($mapping_data['activity_add_on']) && empty($activityAddOnIds) && $type_helper == 0) {
+                $activityAddOnIds = [$activity_or_group_id];
+            }
+
             $projectTemplate->update([
                 'activity_group_name_id_or_activity_id' => $activity_or_group_id,
                 'activityType' => $type_helper,
@@ -1054,9 +1097,10 @@ class ProjectController extends Controller
                 'min_completion' => $mapping_data['min_completion'],
                 'data_add_on' => $mapping_data['data_add_on'],
                 'activity_add_on' => $mapping_data['activity_add_on'] ?? 0,
-                'activity_add_on_activity_ids' => isset($mapping_data['activity_add_on_activity_ids']) && !empty($mapping_data['activity_add_on_activity_ids']) ? json_encode($mapping_data['activity_add_on_activity_ids']) : null,
+                'activity_add_on_activity_ids' => !empty($activityAddOnIds) ? json_encode($activityAddOnIds) : null,
                 'with_data' => $mapping_data['with_data'],
                 'can_edit_data' => $mapping_data['can_edit_data'],
+                'add_signature' => $mapping_data['add_signature'] ?? 0,
                 'master_head_id' => $mapping_data['master_head'],
                 'own_reference_head_id' => $mapping_data['own_head'],
                 'sub_header' => $mapping_data['sub_header'],

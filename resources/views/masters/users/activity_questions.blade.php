@@ -158,6 +158,11 @@
             right: 0;
             z-index: 1050;
             box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            /* Force GPU compositing — prevents position:fixed clipping in Android WebView */
+            -webkit-transform: translateZ(0);
+            transform: translateZ(0);
+            -webkit-backface-visibility: hidden;
+            backface-visibility: hidden;
         }
 
         .instance-header-placeholder {
@@ -187,8 +192,8 @@
 @endsection
 
 @section('content')
-    <!-- Location Permission Overlay -->
-    <div id="locationOverlay" class="location-overlay">
+    <!-- Location Permission Overlay (hidden by default; shown only when permission is needed) -->
+    <div id="locationOverlay" class="location-overlay" style="display:none">
         <div class="spinner" id="locationSpinner"></div>
         <h3>Location Permission Required</h3>
         <p id="locationMessage">Please allow location access to continue filling the form. This is required for all
@@ -233,32 +238,35 @@
                                 @if (!empty($allow_repeat))
                                     <div class="d-flex align-items-center gap-2">
                                         @if (!$is_closed)
-                                            {{-- Add button: hidden when any instance is sent back for correction --}}
-                                            @if (empty($has_any_sent_back))
-                                                <button type="button" id="addInstanceBtn"
-                                                    style="background:{{ $original_submitted ? 'rgba(40,167,69,0.9)' : 'rgba(108,117,125,0.5)' }};border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:5px;cursor:{{ $original_submitted ? 'pointer' : 'not-allowed' }};"
-                                                    title="{{ $original_submitted ? 'Add new instance' : 'Save the original first before adding a new instance' }}"
-                                                    {{ $original_submitted ? '' : 'disabled' }}>
-                                                    <i class="fa fa-plus" style="font-size:11px;"></i> Add
+                                            {{-- Delete button: only for non-original instances that haven't been submitted --}}
+                                            @if (!empty($repeat_instance) && $repeat_instance->status == 0)
+                                                <button type="button" id="deleteInstanceBtn"
+                                                    data-instance-id="{{ $repeat_instance->id }}"
+                                                    style="background:rgba(220,53,69,0.15);border:1px solid rgba(220,53,69,0.5);color:#dc3545;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:4px;cursor:pointer;"
+                                                    title="Remove this instance">
+                                                    <i class="fa fa-trash" style="font-size:11px;"></i>
                                                 </button>
                                             @endif
-                                            {{-- Submit button: only show when no instances are sent back --}}
-                                            @if (empty($has_any_sent_back))
-                                                <button type="button" id="submitActivityBtn"
-                                                    style="background:rgba(220,53,69,0.9);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:5px;">
-                                                    <i class="fa fa-check" style="font-size:11px;"></i> Submit
-                                                </button>
-                                            @else
-                                                {{-- Some instances are sent back &#226;&#8364;&#8221; show re-submit prompt --}}
-                                                <div style="background:rgba(255,152,0,0.15);border:1px solid rgba(255,152,0,0.6);border-radius:8px;padding:5px 12px;display:flex;align-items:center;gap:6px;">
-                                                    <i class="fa fa-exclamation-triangle" style="color:#ff9800;font-size:12px;"></i>
-                                                    <span style="color:#e65100;font-size:11px;font-weight:600;">Fix sent-back instance(s), then Submit</span>
-                                                </div>
-                                                {{-- Show Submit only after all sent-back instances are corrected --}}
-                                                <button type="button" id="submitActivityBtn"
-                                                    style="background:rgba(220,53,69,0.9);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:5px;">
-                                                    <i class="fa fa-check" style="font-size:11px;"></i> Submit
-                                                </button>
+                                            {{-- Add button moved to FAB above bottom nav --}}
+                                            {{-- Submit button: only show when the original instance is saved and no sent-backs --}}
+                                            @if ($original_submitted)
+                                                @if (empty($has_any_sent_back))
+                                                    <button type="button" id="submitActivityBtn"
+                                                        style="background:rgba(220,53,69,0.9);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:5px;">
+                                                        <i class="fa fa-check" style="font-size:11px;"></i> Submit
+                                                    </button>
+                                                @else
+                                                    {{-- Some instances are sent back — show re-submit prompt --}}
+                                                    <div style="background:rgba(255,152,0,0.15);border:1px solid rgba(255,152,0,0.6);border-radius:8px;padding:5px 12px;display:flex;align-items:center;gap:6px;">
+                                                        <i class="fa fa-exclamation-triangle" style="color:#ff9800;font-size:12px;"></i>
+                                                        <span style="color:#e65100;font-size:11px;font-weight:600;">Fix sent-back instance(s), then Submit</span>
+                                                    </div>
+                                                    {{-- Show Submit only after all sent-back instances are corrected --}}
+                                                    <button type="button" id="submitActivityBtn"
+                                                        style="background:rgba(220,53,69,0.9);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:5px;">
+                                                        <i class="fa fa-check" style="font-size:11px;"></i> Submit
+                                                    </button>
+                                                @endif
                                             @endif
                                         @else
                                             <div style="background:rgba(40,167,69,0.2);border:1px solid rgba(40,167,69,0.5);border-radius:20px;padding:5px 14px;display:flex;align-items:center;gap:6px;">
@@ -277,13 +285,21 @@
                                     $prevSeq = null;
                                     $nextSeq = null;
                                     $navSequences = array_merge([0], $all_instances->pluck('activity_sequence')->toArray());
+                                    // Ensure the current sequence is always in the nav list
+                                    // (can be missing after a delete+add cycle with non-sequential IDs)
+                                    if ($currentSeq > 0 && !in_array($currentSeq, $navSequences)) {
+                                        $navSequences[] = $currentSeq;
+                                        sort($navSequences);
+                                    }
                                     $navIdx = array_search($currentSeq, $navSequences);
                                     if ($navIdx !== false) {
                                         if ($navIdx > 0) $prevSeq = $navSequences[$navIdx - 1];
                                         if ($navIdx < count($navSequences) - 1) $nextSeq = $navSequences[$navIdx + 1];
                                     }
                                     $totalNav = count($navSequences);
-                                    $instanceLabel = $currentSeq == 0 ? 'Original' : ('Instance ' . ($currentSeq + 1));
+                                    $instanceLabel = $currentSeq == 0
+                                        ? 'Original'
+                                        : ($repeat_instance->instance_label ?? ('Instance ' . $currentSeq));
                                 @endphp
                                 <div class="d-flex align-items-center justify-content-center gap-3 px-3 py-2">
                                     @if ($prevSeq !== null)
@@ -397,7 +413,8 @@
 
                                             <form id="activityForm" method="post"
                                                 action="{{ route('user.rowId.activity.answers', ['activity_sequence' => $activity_sequence ?? 0]) }}"
-                                                enctype="multipart/form-data">
+                                                enctype="multipart/form-data"
+                                                novalidate>
                                                 @csrf
                                                 @if (isset($group_info->id))
                                                     <input type="hidden" name="group_id" value="{{ $group_info->id }}">
@@ -494,6 +511,59 @@
                                                         ->filter()
                                                         ->unique()
                                                         ->toArray();
+
+                                                    // IDs of ALL questions referenced as a conditional trigger (parent_question_id).
+                                                    // Used to add .parent-question class even on is_parent=0 questions
+                                                    // (e.g. Yes/No sub-question inside MR that has its own conditional children).
+                                                    $conditionalTriggerIds = $related_questions
+                                                        ->pluck('parent_question_id')
+                                                        ->filter()
+                                                        ->unique()
+                                                        ->toArray();
+
+                                                    // Build question code maps:
+                                                    // $questionCodeMap[question_id] = 'Q001' (parent codes)
+                                                    // $subCodeMap[parent_id][child_id] = 'Q001a' (per-parent sub-question codes)
+                                                    // Using per-parent map because the same physical question can be a sub-question
+                                                    // of multiple MR parents with different sequence positions (Q001a vs Q002b etc.)
+                                                    $questionCodeMap = [];
+                                                    $subCodeMap = [];
+                                                    $parentSeq = 0;
+
+                                                    $subLinksByParent = $related_questions
+                                                        ->flatMap(fn($q) => $q->subQuestions ?? collect())
+                                                        ->groupBy('parent_question_id');
+
+                                                    foreach ($related_questions as $_cq) {
+                                                        if ($_cq->is_parent != 1) continue;
+                                                        if (in_array($_cq->id, $sub_question_child_ids)) continue;
+                                                        $parentSeq++;
+                                                        $parentCode = 'Q' . str_pad($parentSeq, 3, '0', STR_PAD_LEFT);
+                                                        $questionCodeMap[$_cq->id] = $parentCode;
+
+                                                        $alpha = 0;
+                                                        foreach (($subLinksByParent[$_cq->id] ?? collect())->sortBy('sequence') as $_sl) {
+                                                            $child = $_sl->childQuestion ?? null;
+                                                            if ($child) {
+                                                                $alpha++; // only increment for sub-questions that actually exist
+                                                                // Per-parent code: each MR parent gets its own codes for its sub-questions
+                                                                $subCodeMap[$_cq->id][$child->id] = $parentCode . chr(96 + $alpha);
+                                                                // Also store in flat map for first occurrence (fallback for non-shared questions)
+                                                                if (!isset($questionCodeMap[$child->id])) {
+                                                                    $questionCodeMap[$child->id] = $parentCode . chr(96 + $alpha);
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    // Conditional children (is_parent=0 with parent_question_id) that aren't MR sub-questions
+                                                    foreach ($related_questions as $_cq) {
+                                                        if (isset($questionCodeMap[$_cq->id])) continue;
+                                                        if ($_cq->is_parent == 0 && $_cq->parent_question_id && isset($questionCodeMap[$_cq->parent_question_id])) {
+                                                            $baseCode = $questionCodeMap[$_cq->parent_question_id];
+                                                            $alpha = count($subLinksByParent[$_cq->parent_question_id] ?? collect()) + 1;
+                                                            $questionCodeMap[$_cq->id] = $baseCode . chr(96 + $alpha);
+                                                        }
+                                                    }
                                                 @endphp
 
                                                 <table class="table mb-0">
@@ -540,20 +610,20 @@
                                                                 $vMsg   = '';
                                                                 switch ($vRule) {
                                                                     case 'numericrange':
-                                                                        $vAttrs = 'type="number"'
+                                                                        $vAttrs = 'type="number" step="any"'
                                                                             . ($vMin !== null ? " min=\"{$vMin}\"" : '')
                                                                             . ($vMax !== null ? " max=\"{$vMax}\"" : '');
-                                                                        $vMsg = "Enter a number" . ($vMin !== null ? " &#226;&#8240;&#165; {$vMin}" : '') . ($vMax !== null ? " and &#226;&#8240;&#164; {$vMax}" : '');
+                                                                        $vMsg = "Enter a number" . ($vMin !== null ? " ≥ {$vMin}" : '') . ($vMax !== null ? " and ≤ {$vMax}" : '');
                                                                         break;
                                                                     case 'digitlength':
                                                                         $vAttrs = 'inputmode="numeric" pattern="\d{'
                                                                             . ($vMin ?? '1') . ',' . ($vMax ?? '') . '}"';
-                                                                        $vMsg = "Enter " . ($vMin == $vMax ? "{$vMin}" : "{$vMin}&#226;&#8364;&#8220;{$vMax}") . " digits";
+                                                                        $vMsg = "Enter " . ($vMin == $vMax ? "{$vMin}" : "{$vMin}–{$vMax}") . " digits";
                                                                         break;
                                                                     case 'textlength':
                                                                         $vAttrs = ($vMin !== null ? " minlength=\"{$vMin}\"" : '')
                                                                             . ($vMax !== null ? " maxlength=\"{$vMax}\"" : '');
-                                                                        $vMsg = "Enter " . ($vMin !== null ? "at least {$vMin}" : '') . ($vMax !== null ? "&#226;&#8364;&#8220;{$vMax}" : '') . " characters";
+                                                                        $vMsg = "Enter " . ($vMin !== null ? "at least {$vMin}" : '') . ($vMax !== null ? "–{$vMax}" : '') . " characters";
                                                                         break;
                                                                     case 'email':
                                                                         $vAttrs = 'type="email"';
@@ -582,9 +652,17 @@
                                                                 @endif>
                                                                 <td>
                                                                     <div class="col-sm-4 col-md-6 fw-medium mt-2">
-                                                                        {{ $related_question->question }}
+                                                                        @if(isset($questionCodeMap[$related_question->id]))
+                                                                            <span style="font-size:10px;font-family:monospace;background:#F3F4F6;border:1px solid #E5E7EB;border-radius:4px;padding:1px 5px;color:#374151;font-weight:700;margin-right:5px;vertical-align:middle;white-space:nowrap;">{{ $questionCodeMap[$related_question->id] }}</span>
+                                                                        @endif
+                                                                        {{ html_entity_decode($related_question->question, ENT_QUOTES, 'UTF-8') }}
                                                                         @if ($related_question->answer_type)
                                                                             <span class="txt-danger">*</span>
+                                                                        @endif
+                                                                        @if (!empty($related_question->help_text))
+                                                                            <span class="help-text-icon"
+                                                                                data-help="{{ html_entity_decode($related_question->help_text, ENT_QUOTES, 'UTF-8') }}"
+                                                                                style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#2563EB;color:#fff;font-size:10px;font-weight:700;cursor:pointer;margin-left:4px;vertical-align:middle;flex-shrink:0;">i</span>
                                                                         @endif
                                                                     </div>
                                                                     <div class="col-sm-6 col-md-6 mt-2">
@@ -611,10 +689,7 @@
                                                                                             <div class="multi-img-row d-flex align-items-center gap-2 mb-2 saved-img-row">
                                                                                                 <img src="{{ asset($sp) }}"
                                                                                                      style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #ccc;flex-shrink:0;">
-                                                                                                <span class="text-muted" style="font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                                                                                                    {{ basename($sp) }}
-                                                                                                </span>
-                                                                                                <button type="button" class="btn btn-outline-danger btn-sm remove-saved-img-btn flex-shrink-0"
+                                                                                                <button type="button" class="btn btn-outline-danger btn-sm remove-saved-img-btn"
                                                                                                         style="width:32px;height:32px;padding:0;font-size:16px;line-height:1;" title="Remove">&#215;</button>
                                                                                                 <input type="hidden" name="multi_images_{{ $mainInputName }}[]" value="{{ $sp }}">
                                                                                             </div>
@@ -648,20 +723,41 @@
                                                                                             <img src="{{ asset($savedAnswer) }}"
                                                                                                 alt="Existing image"
                                                                                                 style="max-width:100%; max-height:160px; border-radius:6px; border:1px solid #ddd;">
-                                                                                            <small class="text-muted d-block mt-1">Current image &#226;&#8364;&#8221; upload a new one to replace it</small>
+                                                                                            <small class="text-muted d-block mt-1">Current image - upload a new one to replace it</small>
                                                                                         </div>
                                                                                         <input type="hidden" name="{{ $mainInputName }}_existing" value="{{ $savedAnswer }}">
                                                                                     @endif
                                                                                     @php $camUid = $mainInputName . '_single_' . uniqid(); @endphp
-                                                                                    <input type="file" id="cam_{{ $camUid }}" name="{{ $mainInputName }}" class="d-none" accept="image/*" capture="environment" @if($related_question->answer_type && !$savedAnswer) required @endif>
-                                                                                    <input type="file" id="gal_{{ $camUid }}" name="{{ $mainInputName }}" class="d-none" accept="image/*" @if($related_question->answer_type && !$savedAnswer) required @endif>
+                                                                                    {{-- Single input: Camera button adds capture="environment" then clicks it;
+                                                                                         Gallery button removes capture then clicks it. One named input = PHP
+                                                                                         always receives exactly one file regardless of which button was used. --}}
+                                                                                    <input type="file" id="sel_{{ $camUid }}" name="{{ $mainInputName }}"
+                                                                                           class="d-none single-img-input" accept="image/*"
+                                                                                           @if($related_question->answer_type && !$savedAnswer) data-img-required="true" @endif>
                                                                                     <div class="d-flex gap-2 mt-1">
-                                                                                        <button type="button" onclick="document.getElementById('cam_{{ $camUid }}').click()" class="btn btn-sm" style="flex:1;border:1.5px solid #2563EB;background:#EFF6FF;color:#1D4ED8;font-weight:600;">&#128247; Camera</button>
-                                                                                        <button type="button" onclick="document.getElementById('gal_{{ $camUid }}').click()" class="btn btn-sm" style="flex:1;border:1.5px solid #059669;background:#F0FDF4;color:#065F46;font-weight:600;">&#128247; Gallery</button>
+                                                                                        <button type="button" id="camBtn_{{ $camUid }}" class="btn btn-sm" style="flex:1;border:1.5px solid #2563EB;background:#EFF6FF;color:#1D4ED8;font-weight:600;">Camera</button>
+                                                                                        <button type="button" id="galBtn_{{ $camUid }}" class="btn btn-sm" style="flex:1;border:1.5px solid #059669;background:#F0FDF4;color:#065F46;font-weight:600;">Gallery</button>
                                                                                     </div>
                                                                                     <div id="fn_{{ $camUid }}" style="font-size:11px;color:#6B7280;margin-top:4px;display:none;"></div>
                                                                                     <script>
-                                                                                    (function(){['cam_','gal_'].forEach(function(p){var el=document.getElementById(p+'{{ $camUid }}');if(!el)return;el.addEventListener('change',function(){if(this.files&&this.files[0]){document.getElementById('fn_{{ $camUid }}').textContent=this.files[0].name;document.getElementById('fn_{{ $camUid }}').style.display='block';}});});})();
+                                                                                    (function(){
+                                                                                        var sel=document.getElementById('sel_{{ $camUid }}');
+                                                                                        var fn =document.getElementById('fn_{{ $camUid }}');
+                                                                                        document.getElementById('camBtn_{{ $camUid }}').addEventListener('click',function(){
+                                                                                            sel.setAttribute('capture','environment');
+                                                                                            sel.click();
+                                                                                        });
+                                                                                        document.getElementById('galBtn_{{ $camUid }}').addEventListener('click',function(){
+                                                                                            sel.removeAttribute('capture');
+                                                                                            sel.click();
+                                                                                        });
+                                                                                        sel.addEventListener('change',function(){
+                                                                                            if(this.files&&this.files[0]){
+                                                                                                fn.textContent=this.files[0].name;
+                                                                                                fn.style.display='block';
+                                                                                            }
+                                                                                        });
+                                                                                    })();
                                                                                     </script>
                                                                                 @endif
                                                                             @break
@@ -673,17 +769,11 @@
                                                                                     @if(in_array($qid,$nonEmptyParentIds)) data-question-id="{{ $qid }}" @endif
                                                                                     {!! $vAttrs !!} {!! $vDataAttrs !!}
                                                                                     @if ($related_question->answer_type) required data-required="true" @endif>
-                                                                                @if($related_question->help_text)
-                                                                                    <small class="text-muted">{{ $related_question->help_text }}</small>
-                                                                                @endif
-                                                                                @if($vMsg)
-                                                                                    <small class="text-muted d-block">{{ $vMsg }}</small>
-                                                                                @endif
                                                                             @break
 
                                                                             @case('Yes / No')
                                                                                 <select
-                                                                                    class="form-select {{ $related_question->is_parent == 1 ? 'parent-question' : '' }}"
+                                                                                    class="form-select {{ ($related_question->is_parent == 1 || in_array($qid, $conditionalTriggerIds)) ? 'parent-question' : '' }}"
                                                                                     data-question-id="{{ $qid }}"
                                                                                     name="{{ $mainInputName }}"
                                                                                     @if ($related_question->answer_type) required data-required="true" @endif>
@@ -699,7 +789,7 @@
 
                                                                             @case('Dropdown')
                                                                                 <select
-                                                                                    class="form-select {{ $related_question->is_parent == 1 ? 'parent-question' : '' }}"
+                                                                                    class="form-select {{ ($related_question->is_parent == 1 || in_array($qid, $conditionalTriggerIds)) ? 'parent-question' : '' }}"
                                                                                     data-question-id="{{ $qid }}"
                                                                                     name="{{ $mainInputName }}"
                                                                                     @if ($related_question->answer_type) required data-required="true" @endif>
@@ -826,8 +916,7 @@
                                                                                     <div class="mb-2">
                                                                                         <a href="{{ asset($savedAnswer) }}"
                                                                                             target="_blank"
-                                                                                            class="btn btn-sm btn-outline-secondary">&#240;&#376;&#8220;&#381;
-                                                                                            View existing file</a>
+                                                                                            class="btn btn-sm btn-outline-secondary">View existing file</a>
                                                                                         <small
                                                                                             class="text-muted d-block mt-1">Upload
                                                                                             a new file to replace it</small>
@@ -1133,7 +1222,7 @@
                                                                                                         <a href="{{ asset($depVal) }}"
                                                                                                             target="_blank"
                                                                                                             class="btn btn-sm btn-outline-secondary mb-1 {{ $subjectSaved === $subject->subject ? '' : 'd-none' }}">
-                                                                                                            &#240;&#376;&#8220;&#381; View existing file
+                                                                                                            View existing file
                                                                                                         </a>
                                                                                                         <input type="hidden"
                                                                                                             name="{{ $qid }}FileUpload_existing"
@@ -1272,6 +1361,7 @@
                                                                                                 'parentQuestionId' => $qid,
                                                                                                 'subLinkTrigger'   => $sub_link->trigger_value,
                                                                                                 'row_data'         => $row_data,
+                                                                                                'subCodeMap'       => $subCodeMap,
                                                                                             ])
                                                                                         @endif
                                                                                     @endforeach
@@ -1296,14 +1386,19 @@
                                                 @php
                                                     $thisInstanceLocked = !empty($has_any_sent_back) && empty($is_sent_back);
                                                 @endphp
-                                                @if ($thisInstanceLocked)
+                                                @if ($is_closed)
+                                                    {{-- Activity fully closed — no saves allowed --}}
+                                                @elseif ($thisInstanceLocked)
                                                     <button type="button" class="btn btn-secondary float-end" disabled
-                                                        title="This instance is verified. Fix the sent-back instance(s) first.">
-                                                        <i class="fa fa-lock me-1"></i> Verified
+                                                        title="Fix the sent-back instance(s) first before editing this one.">
+                                                        <i class="fa fa-lock me-1"></i> Locked
                                                     </button>
                                                 @else
-                                                    <button type="submit" id="approve" name="save"
-                                                        class="btn btn-primary float-end">Save</button>
+                                                    <div class="mb-4">
+                                                        <button type="submit" id="approve" name="save"
+                                                            class="btn btn-primary float-end">Save
+                                                        </button>
+                                                    </div>
                                                 @endif
                                                 <button type="button" id="reject" name="reject"
                                                     class="btn btn-danger float-end d-none">Reject</button>
@@ -1318,6 +1413,24 @@
             </div>
         </div>
     </div>
+
+    {{-- Floating Add Instance Button (FAB) — only shown for add-on activities when not closed/sent-back --}}
+    @if (!$is_closed && empty($has_any_sent_back))
+        @php $canAddInstance = $current_instance_saved ?? $original_submitted; @endphp
+        <button type="button" id="addInstanceBtn"
+            data-can-add="{{ $canAddInstance ? '1' : '0' }}"
+            style="position:fixed;bottom:76px;right:20px;
+                   width:54px;height:54px;border-radius:50%;border:none;
+                   background:{{ $canAddInstance ? '#1e293b' : '#6b7280' }};
+                   color:#fff;
+                   box-shadow:0 4px 16px rgba(0,0,0,0.28);
+                   display:flex;align-items:center;justify-content:center;
+                   cursor:pointer;
+                   z-index:1040;
+                   transition:transform .15s,box-shadow .15s;">
+            <i class="fa fa-plus" style="font-size:22px;"></i>
+        </button>
+    @endif
 
     {{-- Bottom Navigation --}}
     <nav class="mobile-bottom-nav d-md-none">
@@ -1393,6 +1506,35 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
         let locationObtained = false,
             permissionDenied = false;
 
+        // ── React Native WebView bridge ───────────────────────────────────────
+        // Detect RN WebView by checking the injected global or user-agent.
+        var isRNWebView = !!(window.ReactNativeWebView) ||
+                          /\bwv\b|ReactNative/i.test(navigator.userAgent);
+
+        // Called by the RN app to inject device-level GPS coordinates:
+        //   webViewRef.injectJavaScript("window.setRNLocation(lat, lng);");
+        window.setRNLocation = function(lat, lng) {
+            if (!lat || !lng) return;
+            $('#latitude').val(lat);
+            $('#longitude').val(lng);
+            sessionStorage.setItem('loc_lat', lat);
+            sessionStorage.setItem('loc_lng', lng);
+            locationObtained = true;
+            enableFormInputs(lat, lng);
+        };
+
+        // Also listen for postMessage events from the RN app:
+        //   webViewRef.postMessage(JSON.stringify({ type: 'location', lat: x, lng: y }));
+        function _rnMessageHandler(e) {
+            var data;
+            try { data = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch(_) { return; }
+            if (data && data.type === 'location' && data.lat && data.lng) {
+                window.setRNLocation(data.lat, data.lng);
+            }
+        }
+        window.addEventListener('message',   _rnMessageHandler);   // iOS WebView
+        document.addEventListener('message', _rnMessageHandler);   // Android WebView
+
         // Show pre-selected child rows (for sent-back pre-filled forms)
         function initParentChildOldadsdVisibility() {
             $('.parent-question').each(function() {
@@ -1400,7 +1542,6 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                 let selectedValue = String($(this).val() || '').trim();
                 let parentRow = $(this).closest('tr');
                 let lastInserted = parentRow;
-
                 $('tr.child-question[data-parent-id="' + parentId + '"]').each(function() {
                     let childParentValue = String($(this).data('parent-value')).trim();
 
@@ -1600,7 +1741,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
         });
 
 
-        function enableFormInputs(lat, lng) {
+        function enableFormInputs(lat, lng, silent) {
             // Cache coordinates so the next instance page doesn't need to re-ask
             if (lat !== undefined && lng !== undefined) {
                 sessionStorage.setItem('loc_lat', lat);
@@ -1628,58 +1769,28 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                 });
             });
             $('#locationOverlay').fadeOut(300);
-            // Swal.fire({
-            //     position: "top-center",
-            //     icon: "success",
-            //     title: "Location access granted!",
-            //     text: "You can now fill the form.",
-            //     showConfirmButton: false,
-            //     timer: 1500
-            // });
-            
-            // Inside enableFormInputs(), after the location success Swal:
-            // Swal.fire({
-            //     position: "top-center",
-            //     icon: "success",
-            //     title: "Location access granted!",
-            //     showConfirmButton: false,
-            //     timer: 1500
-            // }).then(() => {
-            //     // Show error AFTER location alert closes, so it's not overridden
-            //     @if (session()->has('error'))
-            //     Swal.fire({
-            //         icon: 'error',
-            //         title: 'Submission Failed',
-            //         text: "{{ session('error') }}",
-            //         confirmButtonText: 'OK',
-            //         confirmButtonColor: '#111111'
-            //     });
-            //     @endif
-            // });
-            
-            
-            @if (session()->has('error'))
-                // Error occurred &#226;&#8364;&#8221; show error alert directly, skip location success alert
-                Swal.fire({
-                    icon: 'error',
-                    title: 'Submission Failed',
-                    text: "{{ session('error') }}",
-                    confirmButtonText: 'OK',
-                    confirmButtonColor: '#111111',
-                    timer: 4000,
-                    timerProgressBar: true,
-                }).then(() => {
-                    location.reload();
-                });
-            @else
-                Swal.fire({
-                    position: "top-center",
-                    icon: "success",
-                    title: "Location access granted!",
-                    showConfirmButton: false,
-                    timer: 1500
-                });
-            @endif
+
+            if (!silent) {
+                @if (session()->has('error'))
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Submission Failed',
+                        text: "{{ session('error') }}",
+                        confirmButtonText: 'OK',
+                        confirmButtonColor: '#111111',
+                        timer: 4000,
+                        timerProgressBar: true,
+                    }).then(() => { location.reload(); });
+                @else
+                    Swal.fire({
+                        position: "top-center",
+                        icon: "success",
+                        title: "Location access granted!",
+                        showConfirmButton: false,
+                        timer: 1500
+                    });
+                @endif
+            }
 
             locationObtained = true;
             permissionDenied = false;
@@ -1726,19 +1837,22 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
         async function requestLocation() {
             const permissionState = await checkPermissionState();
             if (permissionState === 'granted') {
-                $('#locationMessage').text('Getting your location...');
-                $('#locationSpinner').removeClass('d-none');
-                $('#permissionDeniedGuide').addClass('d-none');
+                // Permission already granted — fetch silently without showing the overlay
+                $('#locationOverlay').hide();
+                enableFormInputs(undefined, undefined, true); // enable form immediately; coords fill in below
                 navigator.geolocation.getCurrentPosition(function(position) {
                     $('#longitude').val(position.coords.longitude);
                     $('#latitude').val(position.coords.latitude);
-                    enableFormInputs(position.coords.latitude, position.coords.longitude);
+                    sessionStorage.setItem('loc_lat', position.coords.latitude);
+                    sessionStorage.setItem('loc_lng', position.coords.longitude);
+                    locationObtained = true;
                 }, function(error) {
-                    disableFormInputs('Failed to get location. Please try again.', false);
+                    // Silent failure — location fields stay empty, form stays usable
+                    console.warn('Silent location fetch failed:', error.message);
                 }, {
                     enableHighAccuracy: true,
                     timeout: 10000,
-                    maximumAge: 0
+                    maximumAge: 60000
                 });
             } else if (permissionState === 'denied') {
                 permissionDenied = true;
@@ -1778,7 +1892,28 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                             if (result.isConfirmed) requestLocation();
                         });
                     } else {
-                        disableFormInputs('Failed to get location. Please try again.', false);
+                        // Timeout / position unavailable — hide spinner, show retry button
+                        $('#locationSpinner').addClass('d-none');
+                        var errMsg = error.code === error.TIMEOUT
+                            ? 'Location request timed out. Please try again.'
+                            : 'Failed to get location. Please try again.';
+                        $('#locationMessage').text(errMsg);
+                        Swal.fire({
+                            icon: 'warning',
+                            title: 'Location Error',
+                            text: errMsg,
+                            confirmButtonText: 'Try Again',
+                            showCancelButton: true,
+                            cancelButtonText: 'Cancel',
+                            allowOutsideClick: false
+                        }).then(function(result) {
+                            if (result.isConfirmed) {
+                                requestLocation();
+                            } else {
+                                // User cancelled — keep overlay but show retry button clearly
+                                $('#locationMessage').text('Location access is required. Click "Retry Location Access" to try again.');
+                            }
+                        });
                     }
                 }, {
                     enableHighAccuracy: true,
@@ -1796,14 +1931,138 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
         var _csrfToken = '{{ csrf_token() }}';
         var _activityUrl = '{{ route('user.project.row_id.activity', ['row_id' => $row_data->id, 'activity' => $related_questions->first()->activity_id ?? 0, 'group_info' => $group_info->id ?? '']) }}';
         var _closeUrl = '{{ route('user.activity.close_instances') }}';
+
+        // Track in-progress background image uploads so Save can wait for them
+        var _pendingUploads = 0;
+        // Track in-flight auto-save AJAX calls so Save waits for the last blur to finish
+        var _pendingAutoSaves = 0;
+
+        // Compress an image file to ≤1024px JPEG before uploading
+        function compressImage(file) {
+            return new Promise(function(resolve) {
+                if (file.size < 200 * 1024) { resolve(file); return; }
+                var img = new Image();
+                var url = URL.createObjectURL(file);
+                img.onload = function() {
+                    URL.revokeObjectURL(url);
+                    var MAX = 1024;
+                    var w = img.width, h = img.height;
+                    if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+                    if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+                    var canvas = document.createElement('canvas');
+                    canvas.width = w; canvas.height = h;
+                    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                    canvas.toBlob(function(blob) { resolve(blob || file); }, 'image/jpeg', 0.72);
+                };
+                img.onerror = function() { URL.revokeObjectURL(url); resolve(file); };
+                img.src = url;
+            });
+        }
+
+        // Compress then POST one image to the server; returns Promise<path>
+        function compressAndUpload(file, url, rowId) {
+            return compressImage(file).then(function(blob) {
+                var fd = new FormData();
+                fd.append('image',     blob, 'photo.jpg');
+                fd.append('row_id',    rowId);
+                fd.append('latitude',  $('#latitude').val() || '');
+                fd.append('longitude', $('#longitude').val() || '');
+                fd.append('_token',    _csrfToken);
+                return fetch(url, { method: 'POST', body: fd })
+                    .then(function(resp) { return resp.ok ? resp.json() : Promise.reject('HTTP ' + resp.status); })
+                    .then(function(res) {
+                        if (!res.path) return Promise.reject('no path');
+                        return res.path;
+                    });
+            });
+        }
         var _sendOtpUrl = '{{ route('send_otp') }}';
         var _verifyOtpUrl = '{{ route('verify_otp') }}';
         var _addInstanceUrl = '{{ route('user.activity.add_instance') }}';
 
-        // &#226;&#8221;&#8364;&#226;&#8221;&#8364; Unified form submit: images upload first, then AJAX save, then OTP if needed &#226;&#8221;&#8364;&#226;&#8221;&#8364;
+        // ── Inline field validation ────────────────────────────────────────────────
+        function isFieldVisible($el) {
+            if ($el.prop('disabled')) return false;
+            // Hidden if the element itself or any ancestor has d-none (Bootstrap hidden class)
+            return $el.closest('.d-none').length === 0;
+        }
+
+        function getFieldError($el) {
+            if (!isFieldVisible($el)) return null;
+            var el = $el[0];
+            var val = $el.val();
+            var isRequired = $el.prop('required') || $el.attr('data-required') === 'true';
+            var customMsg = $el.attr('data-validation-msg') || '';
+
+            // Required check
+            var isEmpty = !val || (Array.isArray(val) ? val.length === 0 : String(val).trim() === '');
+            if (isRequired && isEmpty) return 'This field is required';
+            if (isEmpty) return null; // optional + empty = OK
+
+            // Delegate to native browser validity (checks pattern, min, max, type, minlength, maxlength)
+            if (el.checkValidity && !el.checkValidity()) {
+                return customMsg || el.validationMessage || 'Invalid value';
+            }
+            return null;
+        }
+
+        function showFieldError($el, msg) {
+            // For select2 elements the container span is inserted after the <select>,
+            // so we anchor the error after the select2 container (or the element itself).
+            var $anchor = $el;
+            var $s2 = $el.nextAll('.select2-container').first();
+            if ($s2.length) $anchor = $s2;
+
+            var $err = $anchor.next('.field-error');
+            if (!$err.length) {
+                $err = $('<small class="field-error text-danger d-block mt-1" style="font-size:12px;"></small>').insertAfter($anchor);
+            }
+            $err.text(msg).show();
+            $el.addClass('is-invalid').css('border-color', '#dc3545');
+        }
+
+        function clearFieldError($el) {
+            var $s2 = $el.nextAll('.select2-container').first();
+            var $anchor = $s2.length ? $s2 : $el;
+            $anchor.next('.field-error').remove();
+            $el.siblings('.field-error').remove(); // fallback sweep
+            $el.removeClass('is-invalid').css('border-color', '');
+        }
+
+        function validateField($el) {
+            var msg = getFieldError($el);
+            if (msg) { showFieldError($el, msg); return false; }
+            clearFieldError($el);
+            return true;
+        }
+
+        function validateForm() {
+            var valid = true;
+            var $firstError = null;
+            $('#activityForm').find('input:not([type="hidden"]):not([type="file"]), select, textarea').each(function() {
+                var $el = $(this);
+                if (!isFieldVisible($el)) return;
+                if (!validateField($el)) {
+                    valid = false;
+                    if (!$firstError) $firstError = $el;
+                }
+            });
+            if (!valid && $firstError) {
+                setTimeout(function() {
+                    $firstError[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 50);
+            }
+            return valid;
+        }
+        // ── End inline field validation ────────────────────────────────────────────
+
+        // ── Unified form submit: images upload first, then AJAX save, then OTP if needed ──
         $('#activityForm').on('submit', function(e) {
             e.preventDefault();
             var $form = $(this);
+
+            // 0. Validate all visible fields first
+            if (!validateForm()) return;
 
             // 1. Location guard
             if (!locationObtained || !$('#latitude').val() || !$('#longitude').val()) {
@@ -1814,7 +2073,19 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                 return;
             }
 
-            // 2. Validate required multi-image slots
+            // 2a. Validate required single-image (Camera/Gallery) slots
+            var missingSingle = false;
+            $form.find('.single-img-input[data-img-required="true"]').each(function () {
+                var hasFile   = this.files && this.files[0];
+                var hasHidden = $form.find('input[name="' + $(this).attr('name') + '_existing"]').length > 0;
+                if (!hasFile && !hasHidden) missingSingle = true;
+            });
+            if (missingSingle) {
+                Swal.fire('Required', 'Please capture or select an image for all required image questions.', 'warning');
+                return;
+            }
+
+            // 2b. Validate required multi-image slots
             var missingImg = false;
             $form.find('.multi-image-required').each(function () {
                 var qid = $(this).data('qid');
@@ -1828,27 +2099,32 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                 return;
             }
 
-            // 3. Collect new multi-image file inputs that have a file selected
-            var uploads = [];
-            $form.find('.multi-image-wrapper').each(function () {
-                var wrapper   = this;
-                var qid       = $(wrapper).data('qid');
-                var uploadUrl = $(wrapper).data('upload-url');
-                var rowId     = $(wrapper).data('row-id');
-                $(wrapper).find('.multi-image-file-input').each(function () {
-                    if (this.files && this.files[0]) {
-                        uploads.push({ input: this, qid: qid, url: uploadUrl, rowId: rowId, wrapper: wrapper });
-                    }
+            // 3. Check for any images that background-upload failed (red border) and need retry
+            var failedRows = [];
+            $form.find('.bg-upload-failed').each(function() {
+                var $row = $(this);
+                var $wrapper = $row.closest('.multi-image-wrapper');
+                failedRows.push({
+                    row: $row,
+                    qid: $wrapper.data('qid'),
+                    url: $wrapper.data('upload-url'),
+                    rowId: $wrapper.data('row-id')
                 });
             });
 
-            // 4. Show SweetAlert loader + block navigation while submitting
-            var _totalUploads = uploads.length;
+            // 4. Blur active element so its auto-save fires before we proceed
+            if (document.activeElement &&
+                document.activeElement !== document.body &&
+                !$(document.activeElement).is('[type="submit"],[type="button"],button,a')) {
+                $(document.activeElement).blur();
+            }
+
+            // 5. Show SweetAlert loader + block navigation while submitting
+            var _hasPending = _pendingUploads > 0;
+            var _hasFailedRows = failedRows.length > 0;
             Swal.fire({
-                title: _totalUploads ? 'Uploading images...' : 'Saving...',
-                html: _totalUploads
-                    ? '<div id="swalProgressWrap" style="margin-top:8px;"><div style="height:6px;background:#E5E7EB;border-radius:4px;overflow:hidden;"><div id="swalProgressBar" style="height:6px;background:#111827;border-radius:4px;width:0%;transition:width .3s;"></div></div><small id="swalProgressTxt" style="color:#6B7280;font-size:12px;margin-top:6px;display:block;">0 of ' + _totalUploads + ' images</small></div><p style="font-size:12px;color:#9CA3AF;margin-top:10px;margin-bottom:0;"><b>Please do not go back or close this page.</b></p>'
-                    : '<p style="font-size:13px;color:#555;margin:0;">Please wait, do not go back.</p>',
+                title: (_hasPending || _hasFailedRows) ? 'Finishing image uploads...' : 'Saving...',
+                html: '<p style="font-size:13px;color:#555;margin:0;">Please wait, do not go back.</p>',
                 allowOutsideClick: false,
                 allowEscapeKey: false,
                 showConfirmButton: false,
@@ -1864,119 +2140,101 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
             window.addEventListener('beforeunload', _unloadHandler);
             $(document).on('click.submitlock', 'a', function(e) { e.preventDefault(); });
 
-            // 5. Compress then upload ALL images in PARALLEL
-            //    Compression: 4MB camera photo -> ~120KB (JPEG 1024px, 70% quality)
-            //    Result: 30-40&#215; smaller files -> 30-40&#215; faster upload on slow networks
-            function compressImage(file) {
-                return new Promise(function(resolve) {
-                    // Skip compression for already-small files (< 200KB)
-                    if (file.size < 200 * 1024) { resolve(file); return; }
-                    var img = new Image();
-                    var url = URL.createObjectURL(file);
-                    img.onload = function() {
-                        URL.revokeObjectURL(url);
-                        var MAX = 1024; // max width/height px
-                        var w = img.width, h = img.height;
-                        if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
-                        if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
-                        var canvas = document.createElement('canvas');
-                        canvas.width = w; canvas.height = h;
-                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-                        canvas.toBlob(function(blob) {
-                            resolve(blob || file); // fallback to original if toBlob fails
-                        }, 'image/jpeg', 0.72);
-                    };
-                    img.onerror = function() { URL.revokeObjectURL(url); resolve(file); };
-                    img.src = url;
-                });
-            }
-
-            if (uploads.length === 0) {
-                doAjaxSubmit();
-            } else {
-                var completedUploads = 0;
-                var lat = $('#latitude').val();
-                var lng = $('#longitude').val();
-
-                var uploadPromises = uploads.map(function(u) {
-                    return new Promise(function(resolve, reject) {
-                        compressImage(u.input.files[0]).then(function(blob) {
-                        var fd = new FormData();
-                        fd.append('image',     blob, 'photo.jpg');
-                        fd.append('row_id',    u.rowId);
-                        fd.append('latitude',  lat);
-                        fd.append('longitude', lng);
-                        fd.append('_token',    _csrfToken);
-
-                        fetch(u.url, { method: 'POST', body: fd })
-                            .then(function(resp) {
-                                return resp.ok ? resp.json() : Promise.reject(resp.statusText);
-                            })
-                            .then(function(res) {
-                                if (res.path) {
-                                    $('<input type="hidden">')
-                                        .attr('name', 'multi_images_' + u.qid + '[]')
-                                        .val(res.path)
-                                        .appendTo($(u.wrapper));
-                                }
-                                completedUploads++;
-                                var pct = Math.round((completedUploads / _totalUploads) * 100);
-                                $('#swalProgressBar').css('width', pct + '%');
-                                $('#swalProgressTxt').text(completedUploads + ' of ' + _totalUploads + ' images');
-                                resolve(res);
-                            })
-                            .catch(function(err) { reject(err); });
-                        }); // end compressImage().then
+            // 6. Wait for any still-in-progress background uploads AND in-flight auto-saves,
+            //    then retry failed image rows, then save
+            function waitForPendingThenSave() {
+                // Wait for both: background image uploads AND in-flight auto-save AJAX calls
+                if (_pendingUploads > 0 || _pendingAutoSaves > 0) {
+                    setTimeout(waitForPendingThenSave, 300);
+                    return;
+                }
+                // Retry any rows that failed during background upload
+                if (failedRows.length === 0) {
+                    doAjaxSubmit();
+                    return;
+                }
+                var retryPromises = failedRows.map(function(u) {
+                    var $row = u.row;
+                    var $inp = $row.find('.multi-image-file-input[id^="cam_"]');
+                    // Re-read the original file from the cam input (still holds the File object)
+                    var file = null;
+                    $row.find('.multi-image-file-input').each(function() {
+                        if (this.files && this.files[0]) { file = this.files[0]; return false; }
+                    });
+                    if (!file) { return Promise.resolve({ ok: false }); }
+                    return compressAndUpload(file, u.url, u.rowId).then(function(path) {
+                        $row.find('.bg-upload-path').remove();
+                        $('<input type="hidden" class="bg-upload-path">').attr('name', 'multi_images_' + u.qid + '[]').val(path).appendTo($row);
+                        $row.removeClass('bg-upload-failed');
+                        return { ok: true };
+                    }).catch(function() {
+                        return { ok: false };
                     });
                 });
-
-                Promise.all(uploadPromises)
-                    .then(function() { doAjaxSubmit(); })
-                    .catch(function(err) {
-                        // On slow network: some images failed -- save text answers anyway,
-                        // show a warning (not a hard block), let user retry image uploads
-                        console.warn('Some image uploads failed:', err);
+                Promise.allSettled(retryPromises).then(function(results) {
+                    var stillFailed = results.filter(function(r) { return r.value && r.value.ok === false; }).length;
+                    if (stillFailed === 0) {
+                        doAjaxSubmit();
+                    } else {
                         unlockNavigation();
                         Swal.close();
                         $('#approve').prop('disabled', false).text('Save');
                         Swal.fire({
                             icon: 'warning',
                             title: 'Image Upload Issue',
-                            html: 'Some images could not be uploaded due to slow network.<br><br>'
-                                + '<b>Your text answers are safe.</b> Try saving again when your connection improves.',
+                            html: stillFailed + ' image(s) could not be uploaded due to poor network.<br><br>'
+                                + '<b>Your other answers are safe.</b> Try saving again when connection improves.',
                             showCancelButton: true,
-                            confirmButtonText: 'Save Answers Without Images',
+                            confirmButtonText: 'Save Without Failed Images',
                             cancelButtonText: 'Try Again'
                         }).then(function(result) {
-                            if (result.isConfirmed) {
-                                // Save text-only answers -- images skipped
-                                doAjaxSubmit(true);
-                            } else {
-                                // Re-enable save button so user can retry
-                                $('#approve').prop('disabled', false).text('Save');
-                            }
+                            if (result.isConfirmed) { doAjaxSubmit(); }
+                            else { $('#approve').prop('disabled', false).text('Save'); }
                         });
-                    });
+                    }
+                });
             }
+            waitForPendingThenSave();
 
             function doAjaxSubmit(skipImages) {
-                Swal.update({ title: 'Saving\u2026' });
-                var formData = new FormData($form[0]);
-                // If skipImages=true, remove image paths from FormData (save text answers only)
-                if (skipImages) {
-                    var toDelete = [];
-                    for (var pair of formData.entries()) {
-                        if (pair[0].startsWith('multi_images_')) toDelete.push(pair[0]);
-                    }
-                    toDelete.forEach(function(k) { formData.delete(k); });
+                // Build a lean FormData: metadata + images only.
+                // Text/select/radio answers were already persisted via auto-save on blur/change,
+                // so we don't re-send them here (saves bandwidth on slow networks).
+                var formData = new FormData();
+
+                // Always include submission metadata
+                // _token comes from the hidden @csrf input already in the form
+                formData.append('_token',            $form.find('[name="_token"]').val());
+                formData.append('row_id',            $form.find('[name="row_id"]').val());
+                formData.append('activity_id',       $form.find('[name="activity_id"]').val());
+                formData.append('activity_sequence', $form.find('[name="activity_sequence"]').val() || '0');
+                formData.append('group_id',          $form.find('[name="group_id"]').val() || '');
+                formData.append('latitude',          $('#latitude').val()  || '');
+                formData.append('longitude',         $('#longitude').val() || '');
+
+                if (!skipImages) {
+                    // Single-image file inputs (Camera / Gallery)
+                    $form.find('input[type="file"].single-img-input').each(function() {
+                        if (this.files && this.files[0]) {
+                            formData.append(this.name, this.files[0]);
+                        }
+                    });
+                    // Multi-image paths (hidden inputs set by background uploader)
+                    $form.find('input[type="hidden"][name^="multi_images_"]').each(function() {
+                        formData.append(this.name, this.value);
+                    });
                 }
+
+                Swal.update({ title: 'Saving\u2026', text: 'Please keep the app open.' });
+
                 $.ajax({
                     url: $form.attr('action'),
                     method: 'POST',
                     data: formData,
                     processData: false,
                     contentType: false,
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    timeout: 0,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
                     success: function (res) {
                         unlockNavigation();
                         Swal.close();
@@ -1993,16 +2251,33 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                                     }
                                 });
                         } else {
-                            Swal.fire({ icon: 'error', title: 'Error', text: res.message || 'Submission failed.' });
+                            console.error('[submit failed]', res);
+                            Swal.fire({ icon: 'error', title: 'Submission Failed', text: res.message || JSON.stringify(res) });
                         }
                     },
                     error: function (xhr) {
                         unlockNavigation();
                         Swal.close();
                         $('#approve').prop('disabled', false).text('Save');
-                        var msg = 'Submission failed. Please try again.';
-                        try { msg = JSON.parse(xhr.responseText).message || msg; } catch(err) {}
-                        Swal.fire({ icon: 'error', title: 'Error', text: msg });
+                        var msg = 'HTTP ' + xhr.status + ': ';
+                        if (xhr.status === 0) {
+                            msg = 'Network error. Please check your connection.';
+                        } else {
+                            try {
+                                var parsed = JSON.parse(xhr.responseText);
+                                if (parsed.message) {
+                                    msg += parsed.message;
+                                } else if (parsed.errors) {
+                                    msg += Object.values(parsed.errors).flat().join('; ');
+                                } else {
+                                    msg += xhr.responseText.substring(0, 300);
+                                }
+                            } catch(e) {
+                                msg += xhr.responseText.substring(0, 300);
+                            }
+                        }
+                        console.error('[submit error]', xhr.status, xhr.responseText);
+                        Swal.fire({ icon: 'error', title: 'Error ('+xhr.status+')', text: msg });
                     }
                 });
             }
@@ -2159,8 +2434,67 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
         }
 
         // &#226;&#8221;&#8364;&#226;&#8221;&#8364; Add Instance Button &#226;&#8221;&#8364;&#226;&#8221;&#8364;
+        var _deleteInstanceUrl = '{{ route('user.activity.delete_instance') }}';
+
+        $(document).on('click', '#deleteInstanceBtn', function() {
+            var instanceId = $(this).data('instance-id');
+            Swal.fire({
+                title: 'Remove Instance?',
+                text: 'This will permanently delete this instance and all its answers.',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'Yes, Remove',
+                confirmButtonColor: '#dc3545',
+                cancelButtonText: 'Cancel'
+            }).then(function(result) {
+                if (!result.isConfirmed) return;
+                var form = $('<form method="POST" action="' + _deleteInstanceUrl + '" style="display:none">' +
+                    '<input name="_token" value="' + _csrfToken + '">' +
+                    '<input name="instance_id" value="' + instanceId + '">' +
+                    '<input name="row_id" value="' + _rowId + '">' +
+                    '<input name="activity_id" value="' + _activityId + '">' +
+                    '<input name="group_id" value="' + (_groupId || '') + '">' +
+                    '</form>');
+                $('body').append(form);
+                form.submit();
+            });
+        });
+
+        // FAB press feedback
+        $(document).on('mousedown touchstart', '#addInstanceBtn', function() {
+            $(this).css({ transform: 'scale(0.91)', boxShadow: '0 2px 6px rgba(0,0,0,0.18)' });
+        }).on('mouseup mouseleave touchend', '#addInstanceBtn', function() {
+            $(this).css({ transform: 'scale(1)', boxShadow: '0 4px 16px rgba(0,0,0,0.28)' });
+        });
+
         $(document).on('click', '#addInstanceBtn', function() {
             if (!_allowRepeat) return;
+
+            // If the current instance has never been saved at all, block immediately
+            if ($(this).data('can-add') != '1') {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Complete Current Instance',
+                    text: 'Please save your answers for the current instance before adding a new one.',
+                    confirmButtonText: 'OK',
+                    confirmButtonColor: '#2563EB'
+                });
+                return;
+            }
+
+            // Even when some auto-saved answers exist, validate that ALL required fields
+            // are filled before allowing a new instance to be created.
+            if (!validateForm()) {
+                // validateForm() already highlights missing fields and scrolls to the first one
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Current Instance Incomplete',
+                    text: 'Please fill all required fields before adding a new instance.',
+                    confirmButtonText: 'OK',
+                    confirmButtonColor: '#2563EB'
+                });
+                return;
+            }
             // No label prompt &#226;&#8364;&#8221; backend auto-generates "Instance N"
             var form = $('<form method="POST" action="' + _addInstanceUrl + '" style="display:none">' +
                 '<input name="_token" value="' + _csrfToken + '">' +
@@ -2214,7 +2548,159 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
 
 
         $(document).ready(function() {
-            
+
+            // ── Help text popup ───────────────────────────────────────────────────
+            function decodeHtmlEntities(str) {
+                var txt = document.createElement('textarea');
+                txt.innerHTML = str;
+                return txt.value;
+            }
+
+            $(document).on('click', '.help-text-icon', function(e) {
+                e.stopPropagation();
+                var msg = decodeHtmlEntities($(this).attr('data-help') || '');
+                var $modal = $('#help-text-modal');
+                if (!$modal.length) {
+                    $modal = $([
+                        '<div id="help-text-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center;">',
+                        '  <div style="background:#fff;border-radius:10px;width:82vw;max-width:340px;padding:16px;box-shadow:0 8px 32px rgba(0,0,0,.3);">',
+                        '    <div id="help-text-modal-body" style="font-size:13px;color:#111827;line-height:1.6;white-space:pre-wrap;max-height:50vh;overflow-y:auto;"></div>',
+                        '    <button id="help-text-modal-close" type="button" style="margin-top:12px;width:100%;padding:8px;background:#111827;border:none;border-radius:6px;color:#fff;font-size:13px;cursor:pointer;">Close</button>',
+                        '  </div>',
+                        '</div>'
+                    ].join('')).appendTo('body');
+                }
+                $('#help-text-modal-body').text(msg);
+                $modal.css('display', 'flex');
+            });
+            $(document).on('click', '#help-text-modal-close', function(e) {
+                e.stopPropagation();
+                $('#help-text-modal').fadeOut(200);
+            });
+            $(document).on('click', '#help-text-modal', function(e) {
+                if (e.target === this) $(this).fadeOut(200);
+            });
+            // ── End help text popup ───────────────────────────────────────────────
+
+            // ── Real-time validation events ────────────────────────────────────────
+            // Clear error while user is actively correcting any text/number field
+            $(document).on('input', '#activityForm input:not([type="hidden"]):not([type="file"]):not([type="radio"]):not([type="checkbox"])', function() {
+                if ($(this).hasClass('is-invalid')) validateField($(this));
+            });
+            // Select/dropdown change — validate immediately (also clears error on correction)
+            $(document).on('change', '#activityForm select', function() {
+                validateField($(this));
+            });
+            // Select2 multi-select change
+            $(document).on('select2:select select2:unselect', '#activityForm select', function() {
+                validateField($(this));
+            });
+            // ── End real-time validation events ───────────────────────────────────
+
+            // ── Auto-save: persist each answer on blur/change without waiting for full Save ──
+            var _autoSaveUrl     = "{{ route('user.activity.autosave') }}";
+            var _autoSaveCsrf    = "{{ csrf_token() }}";
+            var _autoSaveRowId   = "{{ $row_data->id ?? '' }}";
+            var _autoSaveActId   = "{{ $related_questions->first()->activity_id ?? '' }}";
+            var _autoSaveActSeq  = "{{ $activity_sequence ?? 0 }}";
+            var _autoSaveGroupId = "{{ $group_info->id ?? '' }}";
+
+            // Status indicator — one shared element shown briefly after each save
+            var $autoSaveStatus = $('<span id="autoSaveStatus" style="position:fixed;bottom:80px;left:12px;font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;z-index:2000;display:none;pointer-events:none;"></span>').appendTo('body');
+
+            function showAutoStatus(ok) {
+                $autoSaveStatus
+                    .text(ok ? '✓ Saved' : '! Save failed')
+                    .css({
+                        background: ok ? 'rgba(34,197,94,0.92)' : 'rgba(220,53,69,0.92)',
+                        color: '#fff'
+                    })
+                    .stop(true).fadeIn(150).delay(1200).fadeOut(400);
+            }
+
+            function autoSaveField($el) {
+                // Skip file inputs, hidden fields, and invalid fields
+                if ($el.is('[type="file"],[type="hidden"]')) return;
+                if (!isFieldVisible($el)) return;
+
+                // Don't auto-save if the field currently has a validation error
+                if ($el.hasClass('is-invalid')) return;
+
+                var name  = $el.attr('name') || '';
+                var val   = $el.val();
+                if (val === null || val === undefined) return;
+
+                // Extract question_id and optional pctx_parent_id from the input name
+                // Name formats: "123", "123[]", "123_pctx_456", "123_pctx_456[]"
+                var nameClean = name.replace(/\[\]$/, '');
+                var pctxMatch = nameClean.match(/^(\d+)_pctx_(\d+)$/);
+                var plainMatch = nameClean.match(/^(\d+)$/);
+                var qid, pctxId;
+                if (pctxMatch) {
+                    qid    = pctxMatch[1];
+                    pctxId = pctxMatch[2];
+                } else if (plainMatch) {
+                    qid    = plainMatch[1];
+                    pctxId = '';
+                } else {
+                    return; // Not a question field
+                }
+
+                // For multi-select, collect all selected values
+                if ($el.is('select[multiple]')) {
+                    val = $el.val() || [];
+                }
+
+                // Skip empty — full Save handles required validation
+                var isEmpty = Array.isArray(val) ? val.length === 0 : String(val).trim() === '';
+                if (isEmpty) return;
+
+                _pendingAutoSaves++;
+                $.ajax({
+                    url: _autoSaveUrl,
+                    method: 'POST',
+                    data: {
+                        _token:            _autoSaveCsrf,
+                        row_id:            _autoSaveRowId,
+                        activity_id:       _autoSaveActId,
+                        activity_sequence: _autoSaveActSeq,
+                        group_id:          _autoSaveGroupId,
+                        question_id:       qid,
+                        pctx_parent_id:    pctxId,
+                        value:             val,
+                        latitude:          $('#latitude').val() || '',
+                        longitude:         $('#longitude').val() || '',
+                    },
+                    success: function(res) {
+                        _pendingAutoSaves = Math.max(0, _pendingAutoSaves - 1);
+                        if (res.saved) showAutoStatus(true);
+                    },
+                    error: function() {
+                        _pendingAutoSaves = Math.max(0, _pendingAutoSaves - 1);
+                        showAutoStatus(false);
+                    }
+                });
+            }
+
+            // Blur on ALL inputs/selects/textareas — validate first, then autosave if valid
+            // This covers: text, number, email, tel, date, textarea, select (single + multi)
+            $(document).on('blur', '#activityForm input:not([type="hidden"]):not([type="file"]):not([type="radio"]):not([type="checkbox"]), #activityForm select, #activityForm textarea', function() {
+                var $el = $(this);
+                validateField($el);   // shows inline error and adds is-invalid if invalid
+                autoSaveField($el);   // skips save if is-invalid was just set above
+            });
+            // Radio / checkbox change — no blur-based validation needed; autosave on selection
+            $(document).on('change', '#activityForm input[type="radio"], #activityForm input[type="checkbox"]', function() {
+                autoSaveField($(this));
+            });
+            // Select2 multi-select (fires after Select2's own change; blur already covers single-select)
+            $(document).on('select2:select select2:unselect', '#activityForm select[multiple]', function() {
+                var $el = $(this);
+                validateField($el);
+                autoSaveField($el);
+            });
+            // ── End auto-save ──────────────────────────────────────────────────────
+
             @if (session()->has('error'))
                 Swal.fire({
                     icon: 'error',
@@ -2231,28 +2717,31 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                 var placeholder   = document.getElementById('instanceHeaderPlaceholder');
                 if (!fixedHeader) return;
 
+                var isMobile = window.innerWidth <= 767 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
                 function update() {
-                    // The theme gives .page-body-wrapper a margin-top equal to the
-                    // site navbar height. So the top of #formContainer (which IS the
-                    // page-body) == the site-navbar height from the viewport top.
-                    // Using this is more reliable than querying .page-header, which
-                    // is display:none on mobile in this theme.
                     var formContainer = document.getElementById('formContainer');
                     var top = 0;
                     if (formContainer) {
-                        // scrollY = 0 at page load; getBoundingClientRect().top gives
-                        // viewport-relative offset, which is what position:fixed needs.
                         top = Math.max(0, Math.round(
                             formContainer.getBoundingClientRect().top + window.scrollY
                         ));
-                        // Also align the fixed bar to the card's horizontal edges
-                        var card = formContainer.querySelector('.card');
-                        if (card) {
-                            var cr = card.getBoundingClientRect();
-                            fixedHeader.style.left         = Math.round(cr.left) + 'px';
-                            fixedHeader.style.right        = Math.round(window.innerWidth - cr.right) + 'px';
-                            fixedHeader.style.width        = 'auto';
-                            fixedHeader.style.borderRadius = '12px 12px 0 0';
+                        // On mobile/Android WebView, always stretch edge-to-edge
+                        // (card getBoundingClientRect can be unreliable in WebView)
+                        if (isMobile) {
+                            fixedHeader.style.left         = '0';
+                            fixedHeader.style.right        = '0';
+                            fixedHeader.style.width        = '100%';
+                            fixedHeader.style.borderRadius = '0';
+                        } else {
+                            var card = formContainer.querySelector('.card');
+                            if (card) {
+                                var cr = card.getBoundingClientRect();
+                                fixedHeader.style.left         = Math.round(cr.left) + 'px';
+                                fixedHeader.style.right        = Math.round(window.innerWidth - cr.right) + 'px';
+                                fixedHeader.style.width        = 'auto';
+                                fixedHeader.style.borderRadius = '12px 12px 0 0';
+                            }
                         }
                     }
 
@@ -2273,27 +2762,76 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                     }
                 }
 
-                // Run immediately, after fonts/images settle, and on resize
+                // Run immediately, after fonts/images settle, and on resize/scroll
+                // Extra 1000ms retry covers slow Android WebView layout passes
                 update();
                 setTimeout(update, 150);
                 setTimeout(update, 500);
+                setTimeout(update, 1000);
                 window.addEventListener('resize', update);
+                window.addEventListener('scroll', update, { passive: true });
             })();
 
             initParentChildVisibility();
-            disableFormInputs();
 
-            // If the user already granted location in this session, reuse it instantly
-            // without showing the overlay again (avoids re-asking on every instance nav)
-            var _cachedLat = sessionStorage.getItem('loc_lat');
-            var _cachedLng = sessionStorage.getItem('loc_lng');
-            if (_cachedLat && _cachedLng) {
-                $('#latitude').val(_cachedLat);
-                $('#longitude').val(_cachedLng);
-                enableFormInputs(); // overlay hidden, form unlocked, no GPS call
-            } else {
-                requestLocation();
-            }
+            // Check permission state BEFORE showing overlay to avoid flash
+            (async function initLocation() {
+                var _cachedLat = sessionStorage.getItem('loc_lat');
+                var _cachedLng = sessionStorage.getItem('loc_lng');
+
+                if (_cachedLat && _cachedLng) {
+                    // Already have coords from this session — use them instantly, no overlay
+                    $('#latitude').val(_cachedLat);
+                    $('#longitude').val(_cachedLng);
+                    enableFormInputs(_cachedLat, _cachedLng, true);
+                    return;
+                }
+
+                // ── React Native WebView path ──────────────────────────────────
+                // Skip the browser-permission overlay entirely. The RN app will
+                // inject coordinates via window.setRNLocation() or postMessage.
+                // Give it 3 s; if nothing arrives, fall through to WebView geolocation.
+                if (isRNWebView) {
+                    $('#locationOverlay').hide();
+                    enableFormInputs(undefined, undefined, true);
+                    // Notify RN app that the page is ready and needs location
+                    if (window.ReactNativeWebView) {
+                        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'request_location' }));
+                    }
+                    // Fallback: after 3 s try WebView geolocation directly
+                    setTimeout(function() {
+                        if (!locationObtained && navigator.geolocation) {
+                            navigator.geolocation.getCurrentPosition(function(pos) {
+                                window.setRNLocation(pos.coords.latitude, pos.coords.longitude);
+                            }, function() { /* silent fail — no overlay in WebView */ },
+                            { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+                        }
+                    }, 3000);
+                    return;
+                }
+                // ── Normal browser path ────────────────────────────────────────
+
+                const permState = await checkPermissionState();
+
+                if (permState === 'granted') {
+                    // Permission granted — fetch silently, never show overlay
+                    $('#locationOverlay').hide();
+                    enableFormInputs(undefined, undefined, true);
+                    navigator.geolocation.getCurrentPosition(function(pos) {
+                        $('#latitude').val(pos.coords.latitude);
+                        $('#longitude').val(pos.coords.longitude);
+                        sessionStorage.setItem('loc_lat', pos.coords.latitude);
+                        sessionStorage.setItem('loc_lng', pos.coords.longitude);
+                        locationObtained = true;
+                    }, function(err) {
+                        console.warn('Background location failed:', err.message);
+                    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+                } else {
+                    // Prompt or denied — show overlay and ask
+                    disableFormInputs();
+                    requestLocation();
+                }
+            })();
 
             $('#retryLocationBtn').on('click', function() {
                 requestLocation();
@@ -2547,7 +3085,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                                     statusDiv.text("&#226;&#157;&#338; Error preparing video data")
                                         .removeClass("recording").addClass("stopped");
                                     return;
-                                }
+                                } 
                                 const rawBase64 = fullDataUrl.substring(markerIndex +
                                     base64Marker.length);
                                 const cleanMime = videoBlob.type.split(';')[0];
@@ -2848,19 +3386,52 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
 
             // &#226;&#8221;&#8364;&#226;&#8221;&#8364; Multi-image: preview on select, upload on Save &#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;&#226;&#8221;&#8364;
 
-            // Show local preview thumbnail immediately when user picks a file
+            // Upload one image immediately when the user picks it.
+            // Shows a spinner on the thumbnail while uploading, turns green on success, red on failure.
             $(document).on('change', '.multi-image-file-input', function () {
                 var file = this.files[0];
                 if (!file) return;
-                var $row    = $(this).closest('.multi-img-row');
+                var $inp    = $(this);
+                var $row    = $inp.closest('.multi-img-row');
+                var $wrapper = $row.closest('.multi-image-wrapper');
+                var qid     = $wrapper.data('qid');
+                var uploadUrl = $wrapper.data('upload-url');
+                var rowId   = $wrapper.data('row-id');
                 var $box    = $row.find('.img-preview-box');
-                var reader  = new FileReader();
-                reader.onload = function (e) {
+
+                // Show local preview immediately
+                var reader = new FileReader();
+                reader.onload = function(e) {
                     $box.html('<img src="' + e.target.result + '" style="width:100%;height:100%;object-fit:cover;border-radius:4px;">');
-                    $box.css('border', '2px solid #28a745'); // green border = file selected
+                    $box.css('border', '2px solid #6B7280');
                 };
                 reader.readAsDataURL(file);
+
+                // Show spinner overlay on the preview box
+                $box.css('position', 'relative');
+                var $spinner = $('<div style="position:absolute;inset:0;background:rgba(0,0,0,0.45);border-radius:4px;display:flex;align-items:center;justify-content:center;"><div style="width:18px;height:18px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite;"></div></div>');
+                $box.append($spinner);
+
+                _pendingUploads++;
+
+                compressAndUpload(file, uploadUrl, rowId).then(function(path) {
+                    _pendingUploads--;
+                    $spinner.remove();
+                    $box.css('border', '2px solid #28a745'); // green = uploaded
+                    // Inject hidden input with server path — file input is now just a preview holder
+                    $row.find('.bg-upload-path').remove();
+                    $('<input type="hidden" class="bg-upload-path">').attr('name', 'multi_images_' + qid + '[]').val(path).appendTo($row);
+                    // Clear the file input so Save-time code doesn't try to re-upload it
+                    $inp[0].value = '';
+                }).catch(function() {
+                    _pendingUploads--;
+                    $spinner.remove();
+                    $box.css('border', '2px solid #DC2626'); // red = failed
+                    // Mark row so Save-time knows this image needs re-upload or skip
+                    $row.addClass('bg-upload-failed');
+                });
             });
+
 
             // "+" persistent button -- max 10 images total (1 initial + 9 added).
             // Never hides; disables with label when limit reached.
@@ -2907,8 +3478,8 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                     +     '<span id="icon_' + uid + '" style="font-size:14px;color:#aaa;">&#128444;</span>'
                     +   '</div>'
                     +   '<div style="display:flex;gap:5px;flex:1;min-width:0;">'
-                    +     '<button type="button" onmousedown="this.blur()" onclick="document.getElementById(\'cam_' + uid + '\').click()" style="flex:1;padding:8px 4px;border:1.5px solid #2563EB;border-radius:6px;background:#EFF6FF;color:#1D4ED8;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;min-width:0;">&#128247; Camera</button>'
-                    +     '<button type="button" onmousedown="this.blur()" onclick="document.getElementById(\'gal_' + uid + '\').click()" style="flex:1;padding:8px 4px;border:1.5px solid #059669;border-radius:6px;background:#F0FDF4;color:#065F46;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;min-width:0;">&#128247; Gallery</button>'
+                    +     '<button type="button" onmousedown="this.blur()" onclick="document.getElementById(\'cam_' + uid + '\').click()" style="flex:1;padding:8px 4px;border:1.5px solid #2563EB;border-radius:6px;background:#EFF6FF;color:#1D4ED8;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;min-width:0;">Camera</button>'
+                    +     '<button type="button" onmousedown="this.blur()" onclick="document.getElementById(\'gal_' + uid + '\').click()" style="flex:1;padding:8px 4px;border:1.5px solid #059669;border-radius:6px;background:#F0FDF4;color:#065F46;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;min-width:0;">Gallery</button>'
                     +   '</div>'
                     +   '<button type="button" class="remove-img-row-btn" data-qid="' + qid + '" onmousedown="this.blur()" style="width:32px;min-width:32px;height:40px;flex-shrink:0;border:1.5px solid #DC2626;border-radius:6px;background:#FEF2F2;color:#DC2626;font-size:17px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;">&#215;</button>'
                     + '</div>'

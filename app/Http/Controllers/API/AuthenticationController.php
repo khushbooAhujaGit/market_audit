@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\DataAssign;
+use App\Services\ForgotPasswordOtpService;
 use Illuminate\Http\Request;
 use App\Models\Question;
 use App\Models\ProjectTemplateNameValue;
@@ -12,6 +13,7 @@ use App\Models\AuditorAssignedData;
 use App\Models\AnswerActivity;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 
 class AuthenticationController extends Controller
@@ -81,6 +83,12 @@ class AuthenticationController extends Controller
             ]);
         }
     }
+    public function logout(Request $request)
+    {
+        $request->user()->currentAccessToken()->delete();
+        return response(['status' => 200, 'message' => 'Logged out successfully.']);
+    }
+
     public function fetchQuestion(Request $request)
     {
 
@@ -158,5 +166,114 @@ class AuthenticationController extends Controller
                 'message' => $th->getMessage(),
             ], 200);
         }
+    }
+
+    public function forgotPassword(Request $request)
+    {
+        $request->validate([
+            'email'  => 'nullable|email',
+            'mobile' => 'nullable|string',
+        ]);
+
+        if (!$request->filled('email') && !$request->filled('mobile')) {
+            return response()->json(['status' => 422, 'message' => 'Please provide your email or mobile number.'], 422);
+        }
+
+        if ($request->filled('email')) {
+            $user = User::where('email', $request->email)->first();
+        } else {
+            $user = User::where('mobile', $request->mobile)->first();
+        }
+
+        if (!$user) {
+            return response()->json(['status' => 404, 'message' => 'No account found with the provided email or mobile number.']);
+        }
+
+        if (empty($user->email)) {
+            return response()->json(['status' => 422, 'message' => 'No email address is associated with this account. Please contact support.']);
+        }
+
+        try {
+            $expiresAt = app(ForgotPasswordOtpService::class)->sendOtp($user->email, $user->name);
+            return response()->json([
+                'status'             => 200,
+                'message'            => 'OTP sent to your registered email. Valid for 10 minutes.',
+                'email'              => $user->email,
+                'expires_at'         => $expiresAt->toIso8601String(),
+                'expires_in_seconds' => (int) now()->diffInSeconds($expiresAt),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['status' => 500, 'message' => 'Failed to send OTP. Please try again.']);
+        }
+    }
+
+    public function verifyForgotPasswordOtp(Request $request)
+    {
+        $request->validate([
+            'email'  => 'nullable|email',
+            'mobile' => 'nullable|string',
+            'otp'    => 'required|digits:6',
+        ]);
+
+        if (!$request->filled('email') && !$request->filled('mobile')) {
+            return response()->json(['status' => 422, 'message' => 'Please provide your email or mobile number.'], 422);
+        }
+
+        $email = $this->resolveEmailFromRequest($request);
+        if (!$email) {
+            return response()->json(['status' => 404, 'message' => 'No account found with the provided email or mobile number.']);
+        }
+
+        $valid = app(ForgotPasswordOtpService::class)->verifyOtp($email, $request->otp);
+
+        if (!$valid) {
+            return response()->json(['status' => 400, 'message' => 'Invalid or expired OTP.']);
+        }
+
+        return response()->json(['status' => 200, 'message' => 'OTP verified. You may now reset your password.', 'email' => $email]);
+    }
+
+    public function resetForgotPassword(Request $request)
+    {
+        $request->validate([
+            'email'                 => 'nullable|email',
+            'mobile'                => 'nullable|string',
+            'otp'                   => 'required|digits:6',
+            'new_password'          => 'required|min:8|max:20|confirmed',
+        ]);
+
+        if (!$request->filled('email') && !$request->filled('mobile')) {
+            return response()->json(['status' => 422, 'message' => 'Please provide your email or mobile number.'], 422);
+        }
+
+        $email = $this->resolveEmailFromRequest($request);
+        if (!$email) {
+            return response()->json(['status' => 404, 'message' => 'No account found with the provided email or mobile number.']);
+        }
+
+        $user = User::where('email', $email)->first();
+
+        $consumed = app(ForgotPasswordOtpService::class)->consumeOtp($email, $request->otp);
+        if (!$consumed) {
+            return response()->json(['status' => 400, 'message' => 'Invalid or expired OTP.']);
+        }
+
+        $user->update([
+            'password'      => Hash::make($request->new_password),
+            'password_info' => $request->new_password,
+        ]);
+
+        return response()->json(['status' => 200, 'message' => 'Password reset successfully. You can now log in.']);
+    }
+
+    private function resolveEmailFromRequest(Request $request): ?string
+    {
+        if ($request->filled('email')) {
+            $user = User::where('email', $request->email)->first();
+        } else {
+            $user = User::where('mobile', $request->mobile)->first();
+        }
+
+        return $user?->email;
     }
 }
