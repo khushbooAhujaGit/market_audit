@@ -1,0 +1,124 @@
+# Work Done — Market Audit Platform (compiled from Claude session work)
+
+This lists what was actually built/fixed in this working session, grouped by
+feature area. This is based purely on the work done in this conversation — not
+reconstructed from git history.
+
+---
+
+## 1. OneDrive "Upload to My OneDrive" — shared-folder fix
+
+- Diagnosed why generated report zips weren't landing in a folder shared by
+  another user (Shivam Pandey) — Microsoft Graph's `sharedWithMe` and
+  `root/children` listings don't reliably surface a folder that was added to
+  "My files" as a shortcut.
+- Rebuilt folder discovery in `OneDrivePersonalService.php` to check both listing
+  sources and prefer a shared match over an own-drive match.
+- When that listing approach still proved unreliable, replaced it with **direct
+  resolution via a configured sharing link** (Graph's `/shares/{id}/driveItem`),
+  falling back to the original discovery logic only if that fails. Added
+  `infiltration_shared_folder_url` to `config/services.php`.
+- Diagnosed and resolved a separate **Azure AD admin-consent** problem that was
+  blocking every non-admin user from connecting their OneDrive at all — the
+  Delegated `Files.ReadWrite.All` permission had never actually been
+  admin-consented on the app registration (only the unrelated Application-type
+  permission had been).
+- Confirmed via direct Graph API network capture and JWT scope inspection at
+  each step, rather than guessing.
+
+## 2. Verifier "pending" list bug fix
+
+- Found why submitted auditor answers never showed up in the verifier's review
+  queue: the pending-verification queries only matched `status = 0`, but a
+  normal submission sets `status = 1`.
+- Fixed in `VerifierController.php`: `activity_verification_data()`,
+  `group_verification_data()`, and the approve/reject cleanup step inside
+  `activity_answer_verify()`.
+
+## 3. Digital signature capture
+
+- Added an `activity_signatures` table/model earlier groundwork was extended:
+  `uploadSignature()` now requires the activity to be fully closed before a
+  signature can be attached.
+- Added a `signature_allowed` flag to the mobile API responses (`getAllQuestion`,
+  `getAllActivity`, the submit response in `saveAnswer`, and `closeActivity`) so
+  the app knows when to prompt for a signature.
+- Verifier review page (`verify.blade.php`) now displays the captured signature
+  image.
+
+## 4. "My Project Data" performance fix
+
+- This admin page was computing full status/completion data for every row of a
+  project (slow on ~3,000-row projects) before doing pagination client-side.
+- Rewrote `userProjectMasterData()` in `TaskHandlerController.php` as a two-pass
+  design: cheaply discover which rows match, paginate the row list first, then
+  only run the expensive per-row computation for the current page's 10 rows.
+- Replaced client-side DataTables pagination with a real search box and
+  server-side pagination in `project_data.blade.php`.
+
+## 5. New question type: Barcode / QR Code / RFID scanning
+
+The largest piece of work, spanning the full pipeline end to end:
+
+- **Template/admin setup** — added three new selectable question types to the
+  Excel question template (`activityFormat.xlsx`) and the admin "Add Question"
+  panel, repurposing the existing "Options" field so an admin can define the
+  **expected header names** a scanned code should contain.
+- **Import/save logic** — `ActivityController.php` and `QuestionController.php`
+  parse those expected headers on both the Excel-upload and manual
+  "Add Question" paths.
+- **Live scanning UI** on the web auditor form
+  (`activity_questions.blade.php`) — real camera-based barcode/QR scanning via
+  the `html5-qrcode` library, and Web NFC-based RFID scanning (Chrome/Android
+  only), with a plain manual-entry text field as the fallback everywhere else.
+- Fixed a bug where a scanned value wasn't actually being saved — the page
+  auto-saves each answer on the field losing focus (`blur`), but a
+  JS-populated scan result never triggers a real blur event; fixed by
+  explicitly triggering it after a successful scan.
+- **Structured answer storage** — built a shared `ScanAnswerFormatter` service,
+  used by both the mobile API (`TaskController::saveAnswer`) and the web form's
+  auto-save endpoint (`TaskHandlerController::autoSaveAnswer`), so a scan is
+  parsed identically regardless of which client submitted it. A scanned value is
+  parsed as JSON or vCard where possible and stored as a structured record (raw
+  value, parsed fields, which expected headers matched vs. which didn't),
+  falling back to plain text for anything unparseable.
+- **Report generation** — updated `ReportController.php` (both the main
+  "Get Project Report" export and the separate "Distributor Report" export, and
+  both their single-instance and repeat-instance sheet variants) so a scanned
+  answer splits into one column/row per matched expected header, plus one more
+  combined column/row (line-broken) for anything scanned that didn't match a
+  configured header. Added wrap-text support to the custom `FastXlsxWriter`
+  Excel writer to render those combined multi-line cells correctly.
+- Extensively debugged real test data end-to-end during this work — traced
+  issues back to: a QR code with a missing closing brace (genuinely invalid
+  JSON, not a code bug), a server deployment mismatch, and stale/misconfigured
+  question headers — confirming the final pipeline with a real scan producing
+  the exact expected structured output.
+
+## 6. Minor UI fix
+
+- Made the "Select Activity" / "Select Group Activity" dropdowns on the
+  activity-mapping page (`data_activity_mapping.blade.php`) searchable
+  (Select2), matching the rest of that page — they were plain, unsearchable
+  `<select>` elements.
+
+---
+
+## Files touched this session
+
+- `app/Services/OneDrivePersonalService.php`
+- `app/Services/ScanAnswerFormatter.php` (new)
+- `app/Services/FastXlsxWriter.php`
+- `app/Http/Controllers/API/TaskController.php`
+- `app/Http/Controllers/Masters/ActivityController.php`
+- `app/Http/Controllers/Masters/QuestionController.php`
+- `app/Http/Controllers/Masters/ReportController.php`
+- `app/Http/Controllers/Masters/TaskHandlerController.php`
+- `app/Http/Controllers/Masters/VerifierController.php`
+- `config/services.php`
+- `public/assets/excel_formats/activityFormat.xlsx`
+- `resources/views/masters/activities/activity_questions.blade.php`
+- `resources/views/masters/users/activity_questions.blade.php`
+- `resources/views/masters/users/project_data.blade.php`
+- `resources/views/masters/verifiers/verify.blade.php`
+- `resources/views/masters/data_templates/data_activity_mapping.blade.php`

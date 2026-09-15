@@ -41,6 +41,13 @@ return [
         // account with an actual OneDrive license, which a mail-only sender address may
         // not have. Falls back to MS_GRAPH_SENDER_EMAIL if not set separately.
         'onedrive_target_user' => env('MS_GRAPH_ONEDRIVE_USER', env('MS_GRAPH_SENDER_EMAIL')),
+        // Direct sharing link to the "Infiltration Report" folder shared by Shivam
+        // Pandey — used by OneDrivePersonalService to resolve that exact folder via
+        // Graph's /shares/{id}/driveItem, since it doesn't reliably show up via
+        // /me/drive/root/children or /me/drive/sharedWithMe listing (a known Graph
+        // API gap for items added as a OneDrive "shortcut" rather than found by
+        // browsing). Optional — falls back to name-based discovery if unset.
+        'infiltration_shared_folder_url' => env('MS_GRAPH_INFILTRATION_SHARED_FOLDER_URL'),
     ],
 
     'infiltration_tool' => [

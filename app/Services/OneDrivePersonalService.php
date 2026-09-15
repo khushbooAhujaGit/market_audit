@@ -36,13 +36,15 @@ class OneDrivePersonalService
     protected $tenantId;
     protected $scope = 'Files.ReadWrite.All offline_access';
     protected $logFile;
+    protected $sharedFolderUrl;
 
     public function __construct()
     {
-        $this->clientId     = config('services.msgraph.client_id');
-        $this->clientSecret = config('services.msgraph.client_secret');
-        $this->tenantId     = config('services.msgraph.tenant_id');
-        $this->logFile      = public_path('infiltration_runs/onedrive_debug.log');
+        $this->clientId        = config('services.msgraph.client_id');
+        $this->clientSecret    = config('services.msgraph.client_secret');
+        $this->tenantId        = config('services.msgraph.tenant_id');
+        $this->logFile         = public_path('infiltration_runs/onedrive_debug.log');
+        $this->sharedFolderUrl = config('services.msgraph.infiltration_shared_folder_url');
     }
 
     public function isConnected(User $user): bool
@@ -160,6 +162,63 @@ class OneDrivePersonalService
         }
         $data = json_decode($decoded, true);
         return $data['scp'] ?? null;
+    }
+
+    /**
+     * Resolves $this->sharedFolderUrl (a plain OneDrive/SharePoint sharing link)
+     * directly to its driveId/itemId via Graph's /shares/{id}/driveItem — the same
+     * technique used elsewhere in this codebase for app-only OneDrive downloads.
+     * This exists because the specific "Infiltration Report" folder shared by
+     * Shivam Pandey does NOT reliably appear via /me/drive/root/children or
+     * /me/drive/sharedWithMe (confirmed empirically: absent from both listings
+     * even though it's visible in the OneDrive web UI under "My files" as a
+     * shortcut) — a known Graph API gap for shortcut-added shared items, not a
+     * bug in the listing/matching logic. Resolving the sharing link directly
+     * sidesteps that gap entirely. Returns null if no URL is configured, or if
+     * the link fails to resolve (revoked, expired, or not a folder).
+     */
+    private function resolveSharedFolderByUrl(string $accessToken): ?array
+    {
+        if (empty($this->sharedFolderUrl)) {
+            return null;
+        }
+
+        // Graph's documented scheme for resolving a share link: base64-encode the
+        // URL, then convert to unpadded base64url and prefix with "u!".
+        $base64  = base64_encode($this->sharedFolderUrl);
+        $urlSafe = rtrim(strtr($base64, '+/', '-_'), '=');
+        $shareId = 'u!' . $urlSafe;
+
+        $response = Http::withToken($accessToken)
+            ->get("https://graph.microsoft.com/v1.0/shares/{$shareId}/driveItem", [
+                '$select' => 'id,name,folder,parentReference',
+            ]);
+
+        if (!$response->successful()) {
+            $this->step($this->logFile, 'OneDrivePersonalService', 'shared folder URL resolve FAILED', [
+                'status' => $response->status(), 'body' => $response->body(),
+            ]);
+            return null;
+        }
+
+        $item = $response->json();
+        if (!isset($item['folder'])) {
+            $this->step($this->logFile, 'OneDrivePersonalService', 'shared folder URL did not resolve to a folder', [
+                'name' => $item['name'] ?? null,
+            ]);
+            return null;
+        }
+
+        $result = [
+            'driveId' => $item['parentReference']['driveId'] ?? null,
+            'itemId'  => $item['id'],
+        ];
+
+        $this->step($this->logFile, 'OneDrivePersonalService', 'shared folder resolved via direct URL', [
+            'name' => $item['name'] ?? null,
+        ] + $result);
+
+        return $result;
     }
 
     /**
@@ -335,7 +394,11 @@ class OneDrivePersonalService
             'scope' => $this->decodeTokenScope($accessToken),
         ]);
 
-        $folder = $this->findOrCreateFolder($accessToken, 'Infiltration Report');
+        // Try the direct sharing-link resolution first (deterministic, no
+        // discovery ambiguity); fall back to name-based root/sharedWithMe
+        // matching if no URL is configured or it fails to resolve.
+        $folder = $this->resolveSharedFolderByUrl($accessToken)
+            ?? $this->findOrCreateFolder($accessToken, 'Infiltration Report');
 
         $fileSize = filesize($localPath);
         $sessionUrl = "https://graph.microsoft.com/v1.0/drives/{$folder['driveId']}/items/{$folder['itemId']}:/{$fileName}:/createUploadSession";

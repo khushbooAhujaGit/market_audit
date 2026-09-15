@@ -1037,6 +1037,51 @@
                                                                                 </div>
                                                                             @break
 
+                                                                            @case('Barcode')
+                                                                            @case('QR Code')
+                                                                                <div class="scan-question-wrap" data-qid="{{ $qid }}">
+                                                                                    <div class="d-flex gap-2 align-items-center">
+                                                                                        <input type="text" class="form-control"
+                                                                                            name="{{ $mainInputName }}"
+                                                                                            id="scan_input_{{ $qid }}"
+                                                                                            value="{{ $savedAnswer }}"
+                                                                                            placeholder="Scan or type value"
+                                                                                            @if ($related_question->answer_type) required data-required="true" @endif>
+                                                                                        <button type="button"
+                                                                                            class="btn btn-sm btn-primary scan-open-btn"
+                                                                                            data-target-id="{{ $qid }}"
+                                                                                            style="white-space:nowrap;flex-shrink:0;">
+                                                                                            <i class="fa fa-camera"></i> Scan
+                                                                                        </button>
+                                                                                    </div>
+                                                                                    <div id="scan_status_{{ $qid }}" class="small text-muted mt-1"></div>
+                                                                                </div>
+                                                                            @break
+
+                                                                            @case('RFID')
+                                                                                {{-- RFID cannot be read from a standard browser page (needs
+                                                                                     dedicated reader hardware). Web NFC (NDEFReader) works ONLY
+                                                                                     on Chrome for Android over HTTPS — everywhere else (iPhone,
+                                                                                     desktop, other browsers) this is a plain manual-entry field. --}}
+                                                                                <div class="rfid-question-wrap" data-qid="{{ $qid }}">
+                                                                                    <div class="d-flex gap-2 align-items-center">
+                                                                                        <input type="text" class="form-control"
+                                                                                            name="{{ $mainInputName }}"
+                                                                                            id="scan_input_{{ $qid }}"
+                                                                                            value="{{ $savedAnswer }}"
+                                                                                            placeholder="Tap RFID/NFC tag, or type value manually"
+                                                                                            @if ($related_question->answer_type) required data-required="true" @endif>
+                                                                                        <button type="button"
+                                                                                            class="btn btn-sm btn-outline-primary rfid-scan-btn"
+                                                                                            data-target-id="{{ $qid }}"
+                                                                                            style="white-space:nowrap;flex-shrink:0;">
+                                                                                            <i class="fa fa-wifi"></i> Scan (NFC)
+                                                                                        </button>
+                                                                                    </div>
+                                                                                    <div id="rfid_status_{{ $qid }}" class="small text-muted mt-1"></div>
+                                                                                </div>
+                                                                            @break
+
                                                                             @case('Subjective')
                                                                                 @php
                                                                                     $subjectSaved =
@@ -1441,12 +1486,152 @@
             <i class="icon-arrow-left"></i> Back
         </a>
     </nav>
+
+    {{-- Shared Barcode/QR Code scan modal — one instance reused by every
+         Barcode/QR Code question's "Scan" button (see .scan-open-btn JS below) --}}
+    <div class="modal fade" id="barcodeScanModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Scan Code</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="barcode-scan-reader" style="width:100%;"></div>
+                    <div id="barcode-scan-error" class="text-danger small mt-2 d-none"></div>
+                </div>
+            </div>
+        </div>
+    </div>
 @endsection
 
 @section('scripts')
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script>
-    
+    // &#226;&#8221;&#8364;&#226;&#8221;&#8364; Barcode / QR Code camera scanner &#226;&#8221;&#8364;&#226;&#8221;&#8364;
+    // One shared modal + Html5Qrcode instance reused by every Barcode/QR Code
+    // question's "Scan" button. Decoded text fills that question's own input
+    // (matched via data-target-id -> #scan_input_{qid}) and the modal closes.
+    (function () {
+        var html5QrCode = null;
+        var currentTargetId = null;
+        var modalEl = document.getElementById('barcodeScanModal');
+        if (!modalEl) return;
+
+        function stopScanner() {
+            if (html5QrCode) {
+                html5QrCode.stop().then(function () { html5QrCode.clear(); }).catch(function () {});
+                html5QrCode = null;
+            }
+        }
+
+        document.addEventListener('click', function (e) {
+            var btn = e.target.closest('.scan-open-btn');
+            if (!btn) return;
+
+            currentTargetId = btn.getAttribute('data-target-id');
+            var errEl = document.getElementById('barcode-scan-error');
+            errEl.classList.add('d-none');
+            errEl.textContent = '';
+
+            var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+            modal.show();
+
+            html5QrCode = new Html5Qrcode('barcode-scan-reader');
+            Html5Qrcode.getCameras().then(function (devices) {
+                if (!devices || !devices.length) throw new Error('No camera found on this device.');
+                var backCam = devices.find(function (d) { return /back|rear|environment/i.test(d.label); });
+                var cameraId = backCam ? backCam.id : devices[devices.length - 1].id;
+
+                return html5QrCode.start(
+                    cameraId,
+                    { fps: 10, qrbox: { width: 250, height: 250 } },
+                    function onScanSuccess(decodedText) {
+                        var input = document.getElementById('scan_input_' + currentTargetId);
+                        if (input) {
+                            input.value = decodedText;
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                            input.dispatchEvent(new Event('input', { bubbles: true }));
+                            // This page auto-saves each answer on native `blur`, not on
+                            // change/input — the field was never actually focused during a
+                            // scan, so a real blur never happens. Trigger jQuery's delegated
+                            // blur handler directly so the scanned value actually gets
+                            // auto-saved (otherwise it looks filled in but never reaches the
+                            // server, and final submit fails with "missing" for this question).
+                            $(input).trigger('blur');
+                        }
+                        stopScanner();
+                        modal.hide();
+                    }
+                );
+            }).catch(function (err) {
+                errEl.textContent = 'Camera error: ' + (err && err.message ? err.message : err);
+                errEl.classList.remove('d-none');
+            });
+        });
+
+        modalEl.addEventListener('hidden.bs.modal', stopScanner);
+    })();
+
+    // &#226;&#8221;&#8364;&#226;&#8221;&#8364; RFID via Web NFC (Chrome for Android + HTTPS only) &#226;&#8221;&#8364;&#226;&#8221;&#8364;
+    // Everywhere else this button just reports "not supported" and the field
+    // stays a normal manual-entry text input (its default state).
+    (function () {
+        document.addEventListener('click', function (e) {
+            var btn = e.target.closest('.rfid-scan-btn');
+            if (!btn) return;
+
+            var targetId = btn.getAttribute('data-target-id');
+            var statusEl = document.getElementById('rfid_status_' + targetId);
+
+            if (!('NDEFReader' in window)) {
+                statusEl.textContent = "NFC scanning isn't supported on this browser/device — enter the value manually.";
+                statusEl.classList.add('text-danger');
+                return;
+            }
+
+            statusEl.classList.remove('text-danger');
+            statusEl.textContent = 'Hold the tag near the back of your device…';
+
+            try {
+                var reader = new NDEFReader();
+                reader.scan().then(function () {
+                    reader.onreading = function (event) {
+                        var text = '';
+                        for (var i = 0; i < event.message.records.length; i++) {
+                            var record = event.message.records[i];
+                            try {
+                                var decoder = new TextDecoder(record.encoding || 'utf-8');
+                                text += decoder.decode(record.data);
+                            } catch (e2) {
+                                text += new TextDecoder().decode(record.data);
+                            }
+                        }
+                        var input = document.getElementById('scan_input_' + targetId);
+                        if (input) {
+                            input.value = text || event.serialNumber || '';
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                            input.dispatchEvent(new Event('input', { bubbles: true }));
+                            // Same reasoning as the QR/Barcode handler: force the blur-based
+                            // auto-save to actually run for this NFC-populated field.
+                            $(input).trigger('blur');
+                        }
+                        statusEl.textContent = 'Tag read successfully.';
+                    };
+                }).catch(function (err) {
+                    statusEl.textContent = 'NFC error: ' + (err && err.message ? err.message : err);
+                    statusEl.classList.add('text-danger');
+                });
+            } catch (err) {
+                statusEl.textContent = "NFC scanning isn't supported on this browser/device — enter the value manually.";
+                statusEl.classList.add('text-danger');
+            }
+        });
+    })();
+    </script>
+    <script>
+
     // &#226;&#8221;&#8364;&#226;&#8221;&#8364; Universal mobile keyboard suppression &#226;&#8221;&#8364;&#226;&#8221;&#8364;
 // Runs on every page, only on mobile browsers
 if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {

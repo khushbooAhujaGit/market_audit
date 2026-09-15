@@ -1637,6 +1637,21 @@ class TaskController extends Controller
             ->whereIn('child_question_id', $allQuestions->pluck('id')->toArray())
             ->pluck('parent_question_id', 'child_question_id');
 
+        // Drop orphaned children entirely: is_parent=0 (flagged as someone's
+        // sub-question) but with no actual parent link anywhere — no parent_question_id
+        // and not present in the sub-question pivot either. This happens when a
+        // sub-question gets unlinked from its parent (destroySubQuestion()) without
+        // is_parent being reset, or from other stale data. Without this filter such a
+        // question wrongly surfaces as a standalone root question below, since the
+        // root/child split further down only looks at parent_question_id, not
+        // is_parent. These are excluded outright rather than shown as a root question,
+        // since is_parent=0 means it was never meant to stand alone.
+        $allQuestions = $allQuestions->reject(function ($q) use ($subQParentMap) {
+            return $q->is_parent == 0
+                && is_null($q->parent_question_id)
+                && !$subQParentMap->has($q->id);
+        })->values();
+
         // Separate root questions from conditional children (parent_question_id-based)
         $rootQuestions  = $allQuestions->whereNull('parent_question_id')->values();
         $childQuestions = $allQuestions->whereNotNull('parent_question_id');
@@ -1945,6 +1960,7 @@ class TaskController extends Controller
         ]);
     }
 
+    
     public function myProjectsDistributorOutletsData(Request $request, $rowId, $distributor_value = null)
     {
         // Route param may be URL-encoded (%20 → space); also allow passing via query string
@@ -3422,6 +3438,59 @@ class TaskController extends Controller
      * Validate a text/select answer value against the question's stored rules.
      * Returns an error string on failure, or null on success.
      */
+    /**
+     * Parses a vCard-formatted scan (the standard plain-text contact-card format
+     * many "Contact" QR generators produce — BEGIN:VCARD ... END:VCARD) into a
+     * flat head:value map, so it can be compared against a question's expected
+     * headers the same way a JSON scan is. Returns null if $raw isn't a vCard.
+     *
+     * Each line is "PROPERTY[;PARAM=X]:VALUE" — the property name becomes the
+     * key (e.g. "N", "ORG", "EMAIL"); a TYPE= parameter is appended to
+     * disambiguate repeated properties (e.g. "TEL;TYPE=CELL" and
+     * "TEL;TYPE=HOME" become distinct keys "TEL_CELL" / "TEL_HOME" rather than
+     * one overwriting the other).
+     */
+    private function parseVCardScan(string $raw): ?array
+    {
+        if (stripos(ltrim($raw), 'BEGIN:VCARD') !== 0) {
+            return null;
+        }
+
+        $result = [];
+        foreach (preg_split('/\r\n|\r|\n/', $raw) as $line) {
+            $line = trim($line);
+            if ($line === '' || stripos($line, 'BEGIN:') === 0 || stripos($line, 'END:') === 0 || stripos($line, 'VERSION:') === 0) {
+                continue;
+            }
+
+            $colonPos = strpos($line, ':');
+            if ($colonPos === false) continue;
+
+            $propPart = substr($line, 0, $colonPos);
+            $value    = substr($line, $colonPos + 1);
+            $propBits = explode(';', $propPart);
+            $key      = strtoupper(array_shift($propBits));
+
+            foreach ($propBits as $param) {
+                if (stripos($param, 'TYPE=') === 0) {
+                    $key .= '_' . strtoupper(substr($param, 5));
+                    break;
+                }
+            }
+
+            // Guard against genuine duplicate keys (same property, same/no type)
+            if (isset($result[$key])) {
+                $i = 2;
+                while (isset($result[$key . '_' . $i])) $i++;
+                $key .= '_' . $i;
+            }
+
+            $result[$key] = $value;
+        }
+
+        return empty($result) ? null : $result;
+    }
+
     private function validateAnswerValue(string $value, Question $question): ?string
     {
         $rule = strtolower(trim((string)($question->validation_rule ?? 'none')));
@@ -3885,46 +3954,112 @@ class TaskController extends Controller
                 return response()->json(['saved' => false, 'reason' => 'empty']);
             }
 
-            // Accepts: PHP array (repeated keys), JSON array string ["A","B"], or plain string
-            if (is_array($rawValue)) {
-                $userAnswer = implode(',', array_filter($rawValue, fn($v) => trim((string)$v) !== ''));
-            } else {
-                $str = trim((string) $rawValue);
-                if (str_starts_with($str, '[')) {
-                    $decoded = json_decode($str, true);
-                    $userAnswer = is_array($decoded)
-                        ? implode(',', array_filter($decoded, fn($v) => trim((string)$v) !== ''))
-                        : $str;
-                } else {
-                    $userAnswer = $str;
-                }
-            }
+            // ── Barcode / QR Code / RFID: store the scan as structured JSON ────
+            // rather than a plain string. The scanned payload's actual format is
+            // out of our control (a bare serial number, a URL, a JSON blob, or a
+            // vCard-formatted contact card — depending entirely on whoever
+            // generated the physical code) — see $question->getOptions for this
+            // question's configured "expected header" list, entered the same way
+            // as Dropdown/Multi select options but interpreted here as keys the
+            // scan's data should contain.
+            if (in_array($question->question_type, ['Barcode', 'QR Code', 'RFID'])) {
+                $rawScan = is_array($rawValue) ? json_encode($rawValue) : trim((string) $rawValue);
 
-            // Normalise by question type
-            $qtype = $question->question_type;
-            if ($qtype === 'Date') {
-                try { $userAnswer = Carbon::parse($userAnswer)->format('d/m/Y'); } catch (\Exception $e) {}
-            } elseif ($qtype === 'Date & Time') {
-                try { $userAnswer = Carbon::parse($userAnswer)->format('d/m/Y H:i'); } catch (\Exception $e) {}
-            } elseif ($qtype === 'Yes / No') {
-                $norm = strtolower($userAnswer);
-                $userAnswer = in_array($norm, ['yes','1','true','y']) ? 'Yes'
-                            : (in_array($norm, ['no','0','false','n']) ? 'No' : $userAnswer);
-            } elseif (in_array($qtype, ['Audio','Video']) && str_starts_with($userAnswer, 'data:')) {
-                // base64 media — decode and save
-                $filePath = null;
-                $decoded  = $this->decodeAndSaveMediaBase64Api($userAnswer, strtolower($qtype), $dir, $filePath);
-                if (str_starts_with((string)$decoded, 'ERROR:')) {
-                    return response()->json(['saved' => false, 'message' => substr($decoded, 6)], 422);
+                $decoded = json_decode($rawScan, true);
+                $isJsonObject = is_array($decoded) && json_last_error() === JSON_ERROR_NONE
+                    && array_keys($decoded) !== range(0, count($decoded) - 1); // associative, not a plain list
+
+                if ($isJsonObject) {
+                    $format = 'json';
+                    $parsed = $decoded;
+                } else {
+                    $vcard = $this->parseVCardScan($rawScan);
+                    if ($vcard !== null) {
+                        $format = 'vcard';
+                        $parsed = $vcard;
+                    } else {
+                        $format = 'raw_text';
+                        $parsed = null;
+                    }
                 }
-                $userAnswer = $decoded;
-                $isFile = true;
+
+                $expectedHeaders = $question->getOptions->pluck('option')->map('trim')->filter()->values()->all();
+
+                if ($parsed !== null) {
+                    $foundHeaders   = array_keys($parsed);
+                    $missingHeaders = array_values(array_diff($expectedHeaders, $foundHeaders));
+                    $extraHeaders   = array_values(array_diff($foundHeaders, $expectedHeaders));
+
+                    $scanAnswer = [
+                        'format'                => $format,
+                        'raw_value'             => $rawScan,
+                        'parsed'                => $parsed,
+                        'expected_headers'      => $expectedHeaders,
+                        'missing_headers'       => $missingHeaders,
+                        'extra_headers'         => $extraHeaders,
+                        'all_expected_present'  => empty($missingHeaders),
+                    ];
+                } else {
+                    // Not JSON, not vCard — a bare serial number/URL/etc. Nothing
+                    // to compare headers against, but if headers were expected,
+                    // none of them could be located in an unstructured string.
+                    $scanAnswer = [
+                        'format'                => 'raw_text',
+                        'raw_value'             => $rawScan,
+                        'parsed'                => null,
+                        'expected_headers'      => $expectedHeaders,
+                        'missing_headers'       => $expectedHeaders,
+                        'extra_headers'         => [],
+                        'all_expected_present'  => empty($expectedHeaders),
+                    ];
+                }
+
+                $userAnswer = json_encode($scanAnswer);
+                $valueForValidation = $rawScan; // validate the actual scanned text, not the JSON wrapper
+            } else {
+                // Accepts: PHP array (repeated keys), JSON array string ["A","B"], or plain string
+                if (is_array($rawValue)) {
+                    $userAnswer = implode(',', array_filter($rawValue, fn($v) => trim((string)$v) !== ''));
+                } else {
+                    $str = trim((string) $rawValue);
+                    if (str_starts_with($str, '[')) {
+                        $decoded = json_decode($str, true);
+                        $userAnswer = is_array($decoded)
+                            ? implode(',', array_filter($decoded, fn($v) => trim((string)$v) !== ''))
+                            : $str;
+                    } else {
+                        $userAnswer = $str;
+                    }
+                }
+
+                // Normalise by question type
+                $qtype = $question->question_type;
+                if ($qtype === 'Date') {
+                    try { $userAnswer = Carbon::parse($userAnswer)->format('d/m/Y'); } catch (\Exception $e) {}
+                } elseif ($qtype === 'Date & Time') {
+                    try { $userAnswer = Carbon::parse($userAnswer)->format('d/m/Y H:i'); } catch (\Exception $e) {}
+                } elseif ($qtype === 'Yes / No') {
+                    $norm = strtolower($userAnswer);
+                    $userAnswer = in_array($norm, ['yes','1','true','y']) ? 'Yes'
+                                : (in_array($norm, ['no','0','false','n']) ? 'No' : $userAnswer);
+                } elseif (in_array($qtype, ['Audio','Video']) && str_starts_with($userAnswer, 'data:')) {
+                    // base64 media — decode and save
+                    $filePath = null;
+                    $decoded  = $this->decodeAndSaveMediaBase64Api($userAnswer, strtolower($qtype), $dir, $filePath);
+                    if (str_starts_with((string)$decoded, 'ERROR:')) {
+                        return response()->json(['saved' => false, 'message' => substr($decoded, 6)], 422);
+                    }
+                    $userAnswer = $decoded;
+                    $isFile = true;
+                }
             }
         }
 
         // ── Question-level validation for text/select answers ────────────────
         if (!$isFile) {
-            $validationError = $this->validateAnswerValue((string)$userAnswer, $question);
+            // Barcode/QR Code/RFID validates the raw scanned text (set above), not
+            // the JSON wrapper stored as $userAnswer.
+            $validationError = $this->validateAnswerValue((string)($valueForValidation ?? $userAnswer), $question);
             if ($validationError) {
                 return response()->json(['saved' => false, 'message' => $validationError], 422);
             }

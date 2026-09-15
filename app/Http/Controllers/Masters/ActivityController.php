@@ -190,8 +190,11 @@ class ActivityController extends Controller
                 $sequenceToQuestionId[$rowIdx] = $new_question->id;
                 $questionTextToId[$questionText] = $new_question->id;
 
-                // Create dropdown/multiselect options
-                if ($optionsRaw && in_array($questionType, ['Dropdown', 'Multi select'])) {
+                // Create dropdown/multiselect options — also reused for Barcode/QR Code/RFID
+                // questions, where each "option" is an EXPECTED HEADER NAME the scanned
+                // code should contain (compared against the actual scan at answer time),
+                // not a selectable choice.
+                if ($optionsRaw && in_array($questionType, ['Dropdown', 'Multi select', 'Barcode', 'QR Code', 'RFID'])) {
                     foreach (explode('|', $optionsRaw) as $opt) {
                         $opt = trim($opt);
                         if ($opt) {
@@ -339,7 +342,7 @@ class ActivityController extends Controller
 
             // Second pass: options + sub-question links
             foreach ($indexToId as $info) {
-                if (!empty($info['options']) && in_array($info['qtype'], ['Dropdown', 'Multi select'])) {
+                if (!empty($info['options']) && in_array($info['qtype'], ['Dropdown', 'Multi select', 'Barcode', 'QR Code', 'RFID'])) {
                     foreach (array_filter(array_map('trim', explode('|', $info['options']))) as $opt) {
                         \App\Models\QuestionDropdown::create(['question_id' => $info['id'], 'option' => $opt]);
                     }
@@ -858,7 +861,7 @@ class ActivityController extends Controller
             }
 
             // Sync options: delete old, recreate from Excel
-            if (in_array($qtype, ['Multi Response', 'Multi select', 'Single select', 'Dropdown'])) {
+            if (in_array($qtype, ['Multi Response', 'Multi select', 'Single select', 'Dropdown', 'Barcode', 'QR Code', 'RFID'])) {
                 \App\Models\QuestionDropdown::where('question_id', $q->id)->delete();
                 if ($options) {
                     foreach (explode('|', $options) as $opt) {
@@ -969,7 +972,7 @@ class ActivityController extends Controller
             $qtype = $info['qtype'];
 
             // Options
-            if (!empty($info['options']) && in_array($qtype, ['Dropdown', 'Multi select'])) {
+            if (!empty($info['options']) && in_array($qtype, ['Dropdown', 'Multi select', 'Barcode', 'QR Code', 'RFID'])) {
                 foreach (array_filter(array_map('trim', explode('|', $info['options']))) as $opt) {
                     \App\Models\QuestionDropdown::create(['question_id' => $qId, 'option' => $opt]);
                 }
@@ -1122,6 +1125,7 @@ class ActivityController extends Controller
         try {
             $link = QuestionSubQuestion::findOrFail($request->id);
             $parentId = $link->parent_question_id;
+            $childId  = $link->child_question_id;
             $link->delete();
 
             // Re-sequence remaining siblings starting from 1
@@ -1135,6 +1139,18 @@ class ActivityController extends Controller
                 $newSeq = $index + 1;
                 $sibling->update(['sequence' => $newSeq]);
                 $newSequences[$sibling->id] = $newSeq;
+            }
+
+            // A sub-question can be reused under multiple parents (see subQuestions()),
+            // so only restore is_parent once nothing else still claims this question as a
+            // sub-question — otherwise it's left orphaned: is_parent=0 but not actually
+            // linked anywhere, which makes getAllQuestion() wrongly surface it as a
+            // standalone root question instead of hiding it.
+            $stillLinkedElsewhere = QuestionSubQuestion::where('child_question_id', $childId)->exists();
+            if (!$stillLinkedElsewhere) {
+                Question::where('id', $childId)
+                    ->whereNull('parent_question_id')
+                    ->update(['is_parent' => 1]);
             }
 
             return response()->json(['status' => 'Success', 'sequences' => $newSequences]);

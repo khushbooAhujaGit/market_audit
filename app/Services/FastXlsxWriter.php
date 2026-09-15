@@ -283,7 +283,10 @@ class FastXlsxWriter
     private function styleIndex($val, int $ri, int $ci, string $type, array $row): int
     {
         if ($type === 'main') {
-            return $ri === 0 ? 14 : 13; // bold no-border header on row 1, plain no-border elsewhere
+            if ($ri === 0) return 14; // bold no-border header row
+            // Multi-line scan-answer "extra" cells get wrap text so each key:value pair
+            // actually shows on its own line instead of running together.
+            return str_contains((string)$val, "\n") ? 15 : 13;
         }
 
         // Extra sheet
@@ -299,9 +302,13 @@ class FastXlsxWriter
         if (str_starts_with($first, 'Outlet:'))   return $ci === 0 ? 6 : 7;
         if ($first === 'Activity Name')            return $ci === 0 ? 6 : 7;
         if ($ri === 5)                             return 6;  // Sr. No/Particular/Remark — purple bold
-        // Data + footer rows: col B gets border+wrap (long question text), others get border only.
+        // Data + footer rows: col B gets border+wrap (long question text), others get border only,
+        // EXCEPT any cell whose value itself contains a line break (multi-line scan-answer "extra"
+        // cells) — those get wrap text regardless of column so each key:value pair shows on its own
+        // line instead of running together.
         // ALL cells in A-C are written (even empty) matching the sample file.
         // D+ cells are never written → lighter default Excel grid lines (expected by user).
+        if (str_contains((string)$val, "\n")) return 12;
         return $ci === 1 ? 12 : 0;
     }
 
@@ -488,7 +495,7 @@ class FastXlsxWriter
             . '</cellStyleXfs>';
 
         // All cellXfs MUST declare applyFont/applyFill/applyAlignment when they differ from base
-        $cellXfs = '<cellXfs count="15">'
+        $cellXfs = '<cellXfs count="16">'
             // 0: normal + border
             . '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/>'
             // 1: header — bold white text, dark-blue fill, centered, wrap + border
@@ -525,6 +532,10 @@ class FastXlsxWriter
             // 14: bold, no fill, no border — main sheet header row (plain, not boxed like the
             //     styled instance sheets)
             . '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+            // 15: like 13 (no fill, no border) but with wrap text — for main-sheet cells holding
+            //     multiple "key:value" lines (unmatched Barcode/QR Code/RFID header data)
+            . '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1">'
+            . '<alignment wrapText="1" vertical="top"/></xf>'
             . '</cellXfs>';
 
         $cellStyles = '<cellStyles count="1">'

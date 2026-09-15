@@ -277,6 +277,11 @@
 </div> <hr>`;
                     $(".mapping_con").append(templateHtml);
 
+                    // Select Activity / Select Group Activity are long lists (all activities /
+                    // all activity groups) with no search box by default — enable Select2 so
+                    // they're searchable, matching Select Project and the OTP/add-on selects.
+                    $(`#activity_id${template.id}`).select2({ width: '100%' });
+                    $(`#group_project_id_${template.id}`).select2({ width: '100%' });
 
                     //khushboo 05-04-2025
                     $(`.otp-activity-select${template.id}`).select2();
@@ -292,7 +297,7 @@
 
                     if (actType == 0 && preVal !== "") {
                         // console.log(preVal);
-                        $(`#activity_id${template.id}`).val(preVal);
+                        $(`#activity_id${template.id}`).val(preVal).trigger('change');
                         $(`#activity_otp_id${template.id}`).val(preVal).trigger('change');
                     } else if (actType == 1 && preVal !== "") {
                         $(`#group_project_id_${template.id}`).val(preVal).trigger('change');

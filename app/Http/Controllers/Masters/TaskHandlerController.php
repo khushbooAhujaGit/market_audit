@@ -97,6 +97,16 @@ class TaskHandlerController extends Controller
         $activitySequence = 0;
 
         $isOutletAssigned = false;
+
+        // ── PASS 1: cheap discovery ──────────────────────────────────────────
+        // Walks the exact same template/head/row matching logic as before to find
+        // every row_id this user can see, but WITHOUT running the expensive
+        // per-row status computation (required questions, submitted counts,
+        // outlet-completeness cross-check, etc.) below — that's deferred to
+        // Pass 2 and run ONLY for the rows on the current page, since running
+        // it for all ~3k rows on every request is what made this page slow.
+        $rowContext = []; // row_id => ['data_item' => ..., 'tempData' => ..., 'activities' => ...]
+
         foreach ($project_template_details as $tempKey => $tempData) {
 
             $getDataAssignIds = DataAssign::where('project_id', $project->id)
@@ -230,290 +240,327 @@ class TaskHandlerController extends Controller
                         //                        dd($projectData);
                         if (!in_array($projectData['row_id'], $row_renderred_arr)) {
                             $row_renderred_arr[] = $projectData['row_id'];
-                            // $check_if_answered = TempUserActivityAnswersData::where('row_id', $projectData['row_id'])
-                            //     ->whereIn('activity_id', $activities)
-                            //     ->exists();
-                            // Get all required question IDs
-                            $activityRequiredQuestions = Question::whereIn('activity_id', $activities)
-                                // ->where('answer_type', 1)
-                                ->pluck('id')
-                                ->toArray();
-
-                            // Count how many required questions were submitted
-                            $submittedcount = TempUserActivityAnswersData::where('row_id', $projectData['row_id'])
-                                ->whereIn('activity_id', $activities)
-                                ->whereIn('question_id', $activityRequiredQuestions)
-                                ->where('user_id', Auth::user()->id)
-                                ->distinct('question_id')
-                                ->count('question_id');
-
-                            // Check if any answer exists at all
-                            $is_answered = $submittedcount > 0;
-
-                            // Check if subjective question exists
-                            $subjectiveExists = Question::whereIn('activity_id', $activities)
-                                ->where('answer_type', 1)
-                                ->where('question_type', 'Subjective')
-                                ->exists();
-
-                            // Total required questions count
-                            $requiredCount = DB::table('questions')->whereIn('activity_id', $activities)
-                                ->where('answer_type', 1)
-                                ->pluck('id')
-                                ->count();
-
-                            // Final check
-                            if (!$is_answered) {
-                                $check_if_answered = false;
-                            } else {
-                                // Special rule: If subjective exists → allow >= OR == (business logic?)
-                                if ($subjectiveExists) {
-                                    // If subjective exists, allow ANY submitted as long as count meets requirement
-                                    $check_if_answered = ($submittedcount >= $requiredCount);
-                                } else {
-                                    // Normal: submitted must be equal or greater
-                                    $check_if_answered = ($submittedcount >= $requiredCount);
-                                }
-                            }
-
-                            // --- Sendback check ---
-                            $isSentBack = false;
-                            if ($check_if_answered) {
-                                $latestAnswer = TempUserActivityAnswersData::where('row_id', $projectData['row_id'])
-                                    ->whereIn('activity_id', $activities)
-                                    ->where('user_id', Auth::user()->id)
-                                    ->orderBy('id', 'desc')
-                                    ->first();
-                                if ($latestAnswer && $latestAnswer->status == 3) {
-                                    $isSentBack = true;
-                                }
-                            }
-
-                            // --- Repeat/Close check: if any activity allows repeat, require fully closed ---
-                            $hasRepeatActivity = false;
-                            $allRepeatsClosed = true;
-                            foreach ($activities as $actId) {
-                                $addOnIds = json_decode($tempData->activity_add_on_activity_ids ?? '[]', true);
-                                $allowRepeat = $tempData->activity_add_on == 1 &&
-                                    (empty($addOnIds) || in_array((int)$actId, array_map('intval', $addOnIds)));
-                                if ($allowRepeat) {
-                                    $hasRepeatActivity = true;
-                                    $closeRecord = ActivityInstanceClose::where('row_id', $projectData['row_id'])
-                                        ->where('activity_id', $actId)
-                                        ->where('user_id', Auth::user()->id)
-                                        ->exists();
-                                    if (!$closeRecord) {
-                                        $allRepeatsClosed = false;
-                                    } else {
-                                        $sentBackExists = TempUserActivityAnswersData::where('row_id', $projectData['row_id'])
-                                            ->where('activity_id', $actId)
-                                            ->where('user_id', Auth::user()->id)
-                                            ->where('status', 3)->exists();
-                                        if ($sentBackExists) {
-                                            $allRepeatsClosed = false;
-                                        }
-                                    }
-                                }
-                            }
-                            // Only fully closed when there ARE repeat activities AND all of them have close records
-                            $isFullyClosed = $hasRepeatActivity && $allRepeatsClosed;
-
-                            $rowStatus = $isSentBack ? 'pending'
-                                : ($check_if_answered && (!$hasRepeatActivity || $isFullyClosed) ? 'completed' : 'pending');
-
-                            // dd($submittedcount, $requiredCount);
-                            $otpVerificationDone = false;
-                            if ($project->is_otp_required == 1) {
-
-                                $activityAllQuestions = Question::whereIn('activity_id', $activities)
-                                    ->pluck('id')
-                                    ->toArray();
-
-                                $lastQuestionAnswered = TempUserActivityAnswersData::where('row_id', $projectData['row_id'])
-                                    ->whereIn('activity_id', $activities)
-                                    ->whereIn('question_id', $activityAllQuestions)
-                                    ->where('user_id', Auth::user()->id)
-                                    ->orderBy('id', 'desc')
-                                    ->first();
-                                // dd($lastQuestionAnswered, $activityRequiredQuestions, $activities);
-                                if (!empty($lastQuestionAnswered->mobile_otp) && $lastQuestionAnswered->otp_verified_status == 1) {
-                                    $otpVerificationDone = true;
-                                }
-                            }
-
-                            // dd($check_if_answered, $submittedcount, $activityRequiredQuestions);
-
-                            $get_row_main_header_value = DB::table('project_template_name_values_new')
-                                ->where('id', $projectData['row_id'])
-                                ->select(DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$main_header_id}\"')) as value"))
-                                ->value('value'); // Get the single column value directly
-
-                            $get_row_sub_header_value = DB::table('project_template_name_values_new')
-                                ->where('id', $projectData['row_id'])
-                                ->select(DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$sub_header_id}\"')) as value"))
-                                ->value('value'); // Get the single column value directly
-
-                            $main_header = null;
-                            if ($get_row_main_header_value) {
-                                //                                $main_header = $get_row_header->value;
-                                $main_header = $get_row_main_header_value;
-                            }
-
-                            $sub_header = null;
-                            if ($get_row_sub_header_value) {
-                                //                                $sub_header = $get_row_sub_header->value;
-                                $sub_header = $get_row_sub_header_value;
-                            }
-                            // dd($projectData);
-
-                            $templateJson = DB::table('project_template_name_values_new')->where('id', $projectData['row_id'])->value('template_data_json');
-
-                            $templateData = json_decode($templateJson, true); // associative array
-
-                            $result = $projectTemplateHeaders->map(function ($header) use ($templateData) {
-                                return [
-                                    'head_id' => $header->id,
-                                    'head_name' => $header->template_head_name,
-                                    'value' => $templateData[$header->id] ?? null,
-                                ];
-                            });
-
-                            // dd($result);
-
-                            //khushboo 09-03-2026
-                            //check if all outlets are complete or not
-                            $existingoutletcompletestatus = 0;
-                            $outletexist = false;
-                            $outletexistcount = 0;
-                            $data_add_on = 0;
-                            $outlet_templates = DB::table('project_templates')->where('project_id', $project->id)->where('is_master', 0)->get();
-                            foreach ($outlet_templates as $outletTemplate) {
-                                if ($outletTemplate->data_add_on == 1) {
-                                    $data_add_on++;
-                                }
-                                $outlet_template_datas = DB::table('project_template_name_values_new')->where('project_template_id', $outletTemplate->id)->get();
-                                foreach ($outlet_template_datas as $outletTemplateData) {
-
-                                    $mastertemplate = DB::table('project_template_name_values_new')->where('id', $projectData['row_id'])->first();
-                                    $masterjsondata = json_decode($mastertemplate->template_data_json);
-                                    $outletjsondata = json_decode($outletTemplateData->template_data_json);
-                                    $masterheader = $outletTemplate->master_head_id;
-                                    $outletheader = $outletTemplate->own_reference_head_id;
-                                    $mastervalue = $masterjsondata->$masterheader ?? '';
-                                    $outletvalue = $outletjsondata->$outletheader ?? '';
-
-                                    if ($mastervalue == $outletvalue) {
-
-                                        $outletexistcount++;
-                                        $outletexist = true;
-                                        //check if answer submitted
-                                        // Get all required question IDs
-                                        $outletactivities = [];
-
-                                        if ($outletTemplate->activityType == 0) {
-                                            $outletactivities[] = $outletTemplate->activity_group_name_id_or_activity_id;
-                                        } elseif ($outletTemplate->activityType == 1) {
-                                            $outletactivities = array_merge(
-                                                $outletactivities,
-                                                DB::table('activity_group_pivots')->where('activity_group_id', $outletTemplate->activity_group_name_id_or_activity_id)
-                                                    ->pluck('activity_id')
-                                                    ->toArray()
-                                            );
-                                        }
-                                        $outletactivityRequiredQuestions = Question::whereIn('activity_id', $outletactivities)
-                                            ->where('answer_type', 1)
-                                            ->pluck('id')
-                                            ->toArray();
-
-                                        // Count how many required questions were submitted
-                                        $outletsubmittedcount = TempUserActivityAnswersData::where('row_id', $outletTemplateData->id)
-                                            ->whereIn('activity_id', $outletactivities)
-                                            ->whereIn('question_id', $outletactivityRequiredQuestions)
-                                            ->where('user_id', Auth::user()->id)
-                                            ->distinct('question_id')
-                                            ->count('question_id');
-
-                                        // Check if any answer exists at all
-                                        $is_outlet_answered = $submittedcount > 0;
-
-                                        // Check if subjective question exists
-                                        $subjectiveOutletExists = Question::whereIn('activity_id', $outletactivities)
-                                            ->where('answer_type', 1)
-                                            ->where('question_type', 'Subjective')
-                                            ->exists();
-
-                                        // Total required questions count
-                                        $requiredOutanswerCount = count($outletactivityRequiredQuestions);
-
-                                        // Final check
-                                        if (!$is_outlet_answered) {
-                                            $check_if_outlet_answered = false;
-                                        } else {
-                                            // Special rule: If subjective exists → allow >= OR == (business logic?)
-                                            if ($subjectiveOutletExists) {
-                                                // If subjective exists, allow ANY submitted as long as count meets requirement
-                                                $check_if_outlet_answered = ($outletsubmittedcount >= $requiredOutanswerCount);
-                                            } else {
-                                                // Normal: submitted must be equal or greater
-                                                $check_if_outlet_answered = ($outletsubmittedcount >= $requiredOutanswerCount);
-                                            }
-                                        }
-
-                                        $outletotpVerificationDone = false;
-                                        if ($project->is_otp_required == 1) {
-
-                                            $activityOutletAllQuestions = Question::whereIn('activity_id', $outletactivities)
-                                                ->pluck('id')
-                                                ->toArray();
-
-                                            $lastOutletQuestionAnswered = TempUserActivityAnswersData::where('row_id', $outletTemplateData->id)
-                                                ->whereIn('activity_id', $outletactivities)
-                                                ->whereIn('question_id', $activityOutletAllQuestions)
-                                                ->where('user_id', Auth::user()->id)
-                                                ->orderBy('id', 'desc')
-                                                ->first();
-                                            //                                          dd($lastQuestionAnswered);
-                                            if (!empty($lastOutletQuestionAnswered->mobile_otp) && $lastOutletQuestionAnswered->otp_verified_status == 1) {
-                                                $outletotpVerificationDone = true;
-                                                $existingoutletcompletestatus++;
-                                            }
-                                        } else {
-                                            $existingoutletcompletestatus++;
-                                        }
-                                    }
-                                }
-
-                                // dd($existingoutletcompletestatus, $outletexist);
-                            }
-
-                            //khushboo 09-03-2026
-
-                            // dd($projectData);
-                            $project_data_arr[] = [
-                                'data_item' => $projectData,
-                                'status' => $rowStatus,
-                                // 'is_sent_back' => $isSentBack, 
-                                'main_header' => $main_header,
-                                'sub_header' => $sub_header,
-                                'can_edit_data' => $project_temp_info->can_edit_data,
-                                'otpVerificationDone' => $otpVerificationDone,
-                                'header_data' => $result,
-                                'outletexist' => $outletexist,
-                                'isOtpRequired' => $project->is_otp_required,
-                                'existingoutletcompletestatus' => $outletexistcount == $existingoutletcompletestatus ? true : false,
-                                'outlet_data_add_on' => $data_add_on ?? 0
+                            $rowContext[$projectData['row_id']] = [
+                                'data_item'  => $projectData,
+                                'tempData'   => $tempData,
+                                'activities' => $activities,
                             ];
                         }
                     }
                 }
-                // dd($project_data_arr);
             }
         }
-        //        dd('ghgh');
-        // if (empty($project_data_arr)) {
-        //     abort(404);
-        // }
-        //   dd($project_data_arr);
+
+        // ── Search + pagination over the discovered row_ids ─────────────────
+        // Batch-fetch main_header for every discovered row in a single query
+        // (instead of one query per row) so search/pagination can happen
+        // before running the expensive per-row block below.
+        $searchTerm = trim((string) request('search', ''));
+        $mainHeaderByRowId = [];
+        if (!empty($row_renderred_arr)) {
+            $mainHeaderByRowId = DB::table('project_template_name_values_new')
+                ->whereIn('id', $row_renderred_arr)
+                ->select('id', DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$main_header_id}\"')) as main_header"))
+                ->pluck('main_header', 'id')
+                ->toArray();
+        }
+
+        $filteredRowIds = $row_renderred_arr;
+        if ($searchTerm !== '') {
+            $filteredRowIds = array_values(array_filter($filteredRowIds, function ($rid) use ($mainHeaderByRowId, $searchTerm) {
+                return stripos((string) ($mainHeaderByRowId[$rid] ?? ''), $searchTerm) !== false;
+            }));
+        }
+
+        $perPage = 10;
+        $currentPage = LengthAwarePaginator::resolveCurrentPage();
+        $pageRowIds = array_slice($filteredRowIds, ($currentPage - 1) * $perPage, $perPage);
+
+        // ── PASS 2: expensive per-row status computation — ONLY for the current page ──
+        foreach ($pageRowIds as $__rowId) {
+            $projectData = $rowContext[$__rowId]['data_item'];
+            $tempData    = $rowContext[$__rowId]['tempData'];
+            $activities  = $rowContext[$__rowId]['activities'];
+
+            // Get all required question IDs
+            $activityRequiredQuestions = Question::whereIn('activity_id', $activities)
+                // ->where('answer_type', 1)
+                ->pluck('id')
+                ->toArray();
+
+            // Count how many required questions were submitted
+            $submittedcount = TempUserActivityAnswersData::where('row_id', $projectData['row_id'])
+                ->whereIn('activity_id', $activities)
+                ->whereIn('question_id', $activityRequiredQuestions)
+                ->where('user_id', Auth::user()->id)
+                ->distinct('question_id')
+                ->count('question_id');
+
+            // Check if any answer exists at all
+            $is_answered = $submittedcount > 0;
+
+            // Check if subjective question exists
+            $subjectiveExists = Question::whereIn('activity_id', $activities)
+                ->where('answer_type', 1)
+                ->where('question_type', 'Subjective')
+                ->exists();
+
+            // Total required questions count
+            $requiredCount = DB::table('questions')->whereIn('activity_id', $activities)
+                ->where('answer_type', 1)
+                ->pluck('id')
+                ->count();
+
+            // Final check
+            if (!$is_answered) {
+                $check_if_answered = false;
+            } else {
+                // Special rule: If subjective exists → allow >= OR == (business logic?)
+                if ($subjectiveExists) {
+                    // If subjective exists, allow ANY submitted as long as count meets requirement
+                    $check_if_answered = ($submittedcount >= $requiredCount);
+                } else {
+                    // Normal: submitted must be equal or greater
+                    $check_if_answered = ($submittedcount >= $requiredCount);
+                }
+            }
+
+            // --- Sendback check ---
+            $isSentBack = false;
+            if ($check_if_answered) {
+                $latestAnswer = TempUserActivityAnswersData::where('row_id', $projectData['row_id'])
+                    ->whereIn('activity_id', $activities)
+                    ->where('user_id', Auth::user()->id)
+                    ->orderBy('id', 'desc')
+                    ->first();
+                if ($latestAnswer && $latestAnswer->status == 3) {
+                    $isSentBack = true;
+                }
+            }
+
+            // --- Repeat/Close check: if any activity allows repeat, require fully closed ---
+            $hasRepeatActivity = false;
+            $allRepeatsClosed = true;
+            foreach ($activities as $actId) {
+                $addOnIds = json_decode($tempData->activity_add_on_activity_ids ?? '[]', true);
+                $allowRepeat = $tempData->activity_add_on == 1 &&
+                    (empty($addOnIds) || in_array((int)$actId, array_map('intval', $addOnIds)));
+                if ($allowRepeat) {
+                    $hasRepeatActivity = true;
+                    $closeRecord = ActivityInstanceClose::where('row_id', $projectData['row_id'])
+                        ->where('activity_id', $actId)
+                        ->where('user_id', Auth::user()->id)
+                        ->exists();
+                    if (!$closeRecord) {
+                        $allRepeatsClosed = false;
+                    } else {
+                        $sentBackExists = TempUserActivityAnswersData::where('row_id', $projectData['row_id'])
+                            ->where('activity_id', $actId)
+                            ->where('user_id', Auth::user()->id)
+                            ->where('status', 3)->exists();
+                        if ($sentBackExists) {
+                            $allRepeatsClosed = false;
+                        }
+                    }
+                }
+            }
+            // Only fully closed when there ARE repeat activities AND all of them have close records
+            $isFullyClosed = $hasRepeatActivity && $allRepeatsClosed;
+
+            $rowStatus = $isSentBack ? 'pending'
+                : ($check_if_answered && (!$hasRepeatActivity || $isFullyClosed) ? 'completed' : 'pending');
+
+            // dd($submittedcount, $requiredCount);
+            $otpVerificationDone = false;
+            if ($project->is_otp_required == 1) {
+
+                $activityAllQuestions = Question::whereIn('activity_id', $activities)
+                    ->pluck('id')
+                    ->toArray();
+
+                $lastQuestionAnswered = TempUserActivityAnswersData::where('row_id', $projectData['row_id'])
+                    ->whereIn('activity_id', $activities)
+                    ->whereIn('question_id', $activityAllQuestions)
+                    ->where('user_id', Auth::user()->id)
+                    ->orderBy('id', 'desc')
+                    ->first();
+                // dd($lastQuestionAnswered, $activityRequiredQuestions, $activities);
+                if (!empty($lastQuestionAnswered->mobile_otp) && $lastQuestionAnswered->otp_verified_status == 1) {
+                    $otpVerificationDone = true;
+                }
+            }
+
+            // dd($check_if_answered, $submittedcount, $activityRequiredQuestions);
+
+            $get_row_main_header_value = DB::table('project_template_name_values_new')
+                ->where('id', $projectData['row_id'])
+                ->select(DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$main_header_id}\"')) as value"))
+                ->value('value'); // Get the single column value directly
+
+            $get_row_sub_header_value = DB::table('project_template_name_values_new')
+                ->where('id', $projectData['row_id'])
+                ->select(DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$sub_header_id}\"')) as value"))
+                ->value('value'); // Get the single column value directly
+
+            $main_header = null;
+            if ($get_row_main_header_value) {
+                //                                $main_header = $get_row_header->value;
+                $main_header = $get_row_main_header_value;
+            }
+
+            $sub_header = null;
+            if ($get_row_sub_header_value) {
+                //                                $sub_header = $get_row_sub_header->value;
+                $sub_header = $get_row_sub_header_value;
+            }
+            // dd($projectData);
+
+            $templateJson = DB::table('project_template_name_values_new')->where('id', $projectData['row_id'])->value('template_data_json');
+
+            $templateData = json_decode($templateJson, true); // associative array
+
+            $result = $projectTemplateHeaders->map(function ($header) use ($templateData) {
+                return [
+                    'head_id' => $header->id,
+                    'head_name' => $header->template_head_name,
+                    'value' => $templateData[$header->id] ?? null,
+                ];
+            });
+
+            // dd($result);
+
+            //khushboo 09-03-2026
+            //check if all outlets are complete or not
+            $existingoutletcompletestatus = 0;
+            $outletexist = false;
+            $outletexistcount = 0;
+            $data_add_on = 0;
+            $outlet_templates = DB::table('project_templates')->where('project_id', $project->id)->where('is_master', 0)->get();
+            foreach ($outlet_templates as $outletTemplate) {
+                if ($outletTemplate->data_add_on == 1) {
+                    $data_add_on++;
+                }
+                $outlet_template_datas = DB::table('project_template_name_values_new')->where('project_template_id', $outletTemplate->id)->get();
+                foreach ($outlet_template_datas as $outletTemplateData) {
+
+                    $mastertemplate = DB::table('project_template_name_values_new')->where('id', $projectData['row_id'])->first();
+                    $masterjsondata = json_decode($mastertemplate->template_data_json);
+                    $outletjsondata = json_decode($outletTemplateData->template_data_json);
+                    $masterheader = $outletTemplate->master_head_id;
+                    $outletheader = $outletTemplate->own_reference_head_id;
+                    $mastervalue = $masterjsondata->$masterheader ?? '';
+                    $outletvalue = $outletjsondata->$outletheader ?? '';
+
+                    if ($mastervalue == $outletvalue) {
+
+                        $outletexistcount++;
+                        $outletexist = true;
+                        //check if answer submitted
+                        // Get all required question IDs
+                        $outletactivities = [];
+
+                        if ($outletTemplate->activityType == 0) {
+                            $outletactivities[] = $outletTemplate->activity_group_name_id_or_activity_id;
+                        } elseif ($outletTemplate->activityType == 1) {
+                            $outletactivities = array_merge(
+                                $outletactivities,
+                                DB::table('activity_group_pivots')->where('activity_group_id', $outletTemplate->activity_group_name_id_or_activity_id)
+                                    ->pluck('activity_id')
+                                    ->toArray()
+                            );
+                        }
+                        $outletactivityRequiredQuestions = Question::whereIn('activity_id', $outletactivities)
+                            ->where('answer_type', 1)
+                            ->pluck('id')
+                            ->toArray();
+
+                        // Count how many required questions were submitted
+                        $outletsubmittedcount = TempUserActivityAnswersData::where('row_id', $outletTemplateData->id)
+                            ->whereIn('activity_id', $outletactivities)
+                            ->whereIn('question_id', $outletactivityRequiredQuestions)
+                            ->where('user_id', Auth::user()->id)
+                            ->distinct('question_id')
+                            ->count('question_id');
+
+                        // Check if any answer exists at all
+                        $is_outlet_answered = $submittedcount > 0;
+
+                        // Check if subjective question exists
+                        $subjectiveOutletExists = Question::whereIn('activity_id', $outletactivities)
+                            ->where('answer_type', 1)
+                            ->where('question_type', 'Subjective')
+                            ->exists();
+
+                        // Total required questions count
+                        $requiredOutanswerCount = count($outletactivityRequiredQuestions);
+
+                        // Final check
+                        if (!$is_outlet_answered) {
+                            $check_if_outlet_answered = false;
+                        } else {
+                            // Special rule: If subjective exists → allow >= OR == (business logic?)
+                            if ($subjectiveOutletExists) {
+                                // If subjective exists, allow ANY submitted as long as count meets requirement
+                                $check_if_outlet_answered = ($outletsubmittedcount >= $requiredOutanswerCount);
+                            } else {
+                                // Normal: submitted must be equal or greater
+                                $check_if_outlet_answered = ($outletsubmittedcount >= $requiredOutanswerCount);
+                            }
+                        }
+
+                        $outletotpVerificationDone = false;
+                        if ($project->is_otp_required == 1) {
+
+                            $activityOutletAllQuestions = Question::whereIn('activity_id', $outletactivities)
+                                ->pluck('id')
+                                ->toArray();
+
+                            $lastOutletQuestionAnswered = TempUserActivityAnswersData::where('row_id', $outletTemplateData->id)
+                                ->whereIn('activity_id', $outletactivities)
+                                ->whereIn('question_id', $activityOutletAllQuestions)
+                                ->where('user_id', Auth::user()->id)
+                                ->orderBy('id', 'desc')
+                                ->first();
+                            //                                          dd($lastQuestionAnswered);
+                            if (!empty($lastOutletQuestionAnswered->mobile_otp) && $lastOutletQuestionAnswered->otp_verified_status == 1) {
+                                $outletotpVerificationDone = true;
+                                $existingoutletcompletestatus++;
+                            }
+                        } else {
+                            $existingoutletcompletestatus++;
+                        }
+                    }
+                }
+
+                // dd($existingoutletcompletestatus, $outletexist);
+            }
+
+            //khushboo 09-03-2026
+
+            // dd($projectData);
+            $project_data_arr[] = [
+                'data_item' => $projectData,
+                'status' => $rowStatus,
+                // 'is_sent_back' => $isSentBack,
+                'main_header' => $main_header,
+                'sub_header' => $sub_header,
+                'can_edit_data' => $project_temp_info->can_edit_data,
+                'otpVerificationDone' => $otpVerificationDone,
+                'header_data' => $result,
+                'outletexist' => $outletexist,
+                'isOtpRequired' => $project->is_otp_required,
+                'existingoutletcompletestatus' => $outletexistcount == $existingoutletcompletestatus ? true : false,
+                'outlet_data_add_on' => $data_add_on ?? 0
+            ];
+        }
+
+        $paginator = new LengthAwarePaginator(
+            $project_data_arr,
+            count($filteredRowIds),
+            $perPage,
+            $currentPage,
+            ['path' => request()->url(), 'query' => request()->query()]
+        );
 
         Session::put('project_dist_activity', ['project' => $project->id]);
         if (Session::has('project_outlet_activity')) {
@@ -526,7 +573,7 @@ class TaskHandlerController extends Controller
         $currentUserRole = $currentUser->getROleNames()->first();
         // dd($isOutletAssigned);
 
-        return view('masters.users.project_data', compact('project_data_arr', 'isParent', 'isOutletAssigned', 'project_data_completed_arr', 'project', 'project_temp_info', 'projectTemplateInfoDetails', 'projectTemplateHeaders', 'add_project_data_title', 'currentUserRole'));
+        return view('masters.users.project_data', compact('project_data_arr', 'paginator', 'searchTerm', 'isParent', 'isOutletAssigned', 'project_data_completed_arr', 'project', 'project_temp_info', 'projectTemplateInfoDetails', 'projectTemplateHeaders', 'add_project_data_title', 'currentUserRole'));
     }
 
 
@@ -1362,7 +1409,7 @@ class TaskHandlerController extends Controller
             }
         }
 
-        // Repeat instances
+        // Repeat instances 
         $repeatInstances = ActivityRepeatInstance::where('row_id', $row_id)
             ->where('activity_id', $activityId)->orderBy('activity_sequence')->get();
 
@@ -2402,6 +2449,12 @@ class TaskHandlerController extends Controller
             $value = $norm === 'yes' ? 'Yes' : ($norm === 'no' ? 'No' : $value);
         } elseif ($question->question_type === 'Multi select' && is_array($value)) {
             $value = implode(',', array_filter($value));
+        } elseif (in_array($question->question_type, ['Barcode', 'QR Code', 'RFID'])) {
+            // Store the same structured JSON shape the mobile API's saveAnswer()
+            // produces, so report generation can parse either source identically —
+            // see App\Services\ScanAnswerFormatter.
+            $expectedHeaders = $question->getOptions->pluck('option')->map('trim')->filter()->values()->all();
+            $value = \App\Services\ScanAnswerFormatter::buildAnswerJson((string) $value, $expectedHeaders);
         }
 
         // Match the same unique lookup used by full-save:

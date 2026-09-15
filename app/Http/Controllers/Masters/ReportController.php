@@ -417,6 +417,7 @@ class ReportController extends Controller
         $allQuestionIds = [];
         $questionSets        = []; // question IDs per activity set
         $questionDisplayNames = []; // display names per activity set (same order as $questionSets)
+        $scanExpectedHeaders  = []; // question_id => configured expected headers, for Barcode/QR Code/RFID
 
         // Preload DataAssign rows for all activities in one query
         $dataAssignMap = DataAssign::where('project_template_id', $projectTemplate->id)
@@ -509,6 +510,30 @@ class ReportController extends Controller
                                 $questionDisplayNames,
                                 $allQuestionIds
                             );
+                        } elseif (in_array($question['question_type'], ['Barcode', 'QR Code', 'RFID'])) {
+                            // Scan-type question: one column per configured expected header
+                            // (matched scan data) + one "extra" column for anything scanned
+                            // that doesn't match a configured header. Compound keys
+                            // "{qid}|scanhead|{header}" / "{qid}|scanextra" are resolved
+                            // against the actual answer during row-building below.
+                            $scanHeaders = \App\Models\QuestionDropdown::where('question_id', $question['id'])
+                                ->pluck('option')->map('trim')->filter()->values()->all();
+                            $scanExpectedHeaders[$question['id']] = $scanHeaders;
+
+                            foreach ($scanHeaders as $scanHeader) {
+                                $scanKey = $question['id'] . '|scanhead|' . $scanHeader;
+                                $displayName = $question['question'] . ' → ' . $scanHeader;
+                                $projectTemplateHeads[] = $displayName;
+                                $allQuestionIds[] = $question['id'];
+                                $questionSets[$activityIndex][] = $scanKey;
+                                $questionDisplayNames[$activityIndex][$scanKey] = $displayName;
+                            }
+
+                            $extraKey = $question['id'] . '|scanextra';
+                            $projectTemplateHeads[] = $question['question'];
+                            $allQuestionIds[] = $question['id'];
+                            $questionSets[$activityIndex][] = $extraKey;
+                            $questionDisplayNames[$activityIndex][$extraKey] = $question['question'];
                         } else {
                             // Normal parent question
                             $projectTemplateHeads[] = $question['question'];
@@ -853,6 +878,21 @@ class ReportController extends Controller
                 }
 
                 foreach ($questionSet as $questionId) {
+                    if (str_contains((string)$questionId, '|scanhead|')) {
+                        [, , $scanHeaderName] = explode('|', (string)$questionId, 3);
+                        $scanAnswer = $setAnswers[$questionId] ?? null;
+                        $rowData[] = $scanAnswer ? $this->scanAnswerHeaderValue($scanAnswer->user_answer, $scanHeaderName) : '';
+                        continue;
+                    }
+                    if (str_ends_with((string)$questionId, '|scanextra')) {
+                        $scanQid    = (int)$questionId;
+                        $scanAnswer = $setAnswers[$questionId] ?? null;
+                        $rowData[] = $scanAnswer
+                            ? $this->scanAnswerExtraValue($scanAnswer->user_answer, $scanExpectedHeaders[$scanQid] ?? [])
+                            : '';
+                        continue;
+                    }
+
                     if (str_contains((string)$questionId, '|pctx|')) {
                         [$childId, , $parentCtx] = explode('|', $questionId);
                         $cId  = (int)$childId;
@@ -1012,10 +1052,17 @@ class ReportController extends Controller
                                 $instVerifDT = $ans->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i');
                             }
 
-                            $qType = $questionTypeMap[(int)$ans->question_id] ?? '';
-                            $instRow[] = in_array($qType, ['Image', 'File Upload', 'Audio'])
-                                ? $this->imageAnswerUrl($ans)
-                                : $this->formatAnswerValue($ans->user_answer, $qType);
+                            if (str_contains((string)$qId, '|scanhead|')) {
+                                [, , $scanHeaderName] = explode('|', (string)$qId, 3);
+                                $instRow[] = $this->scanAnswerHeaderValue($ans->user_answer, $scanHeaderName);
+                            } elseif (str_ends_with((string)$qId, '|scanextra')) {
+                                $instRow[] = $this->scanAnswerExtraValue($ans->user_answer, $scanExpectedHeaders[(int)$qId] ?? []);
+                            } else {
+                                $qType = $questionTypeMap[(int)$ans->question_id] ?? '';
+                                $instRow[] = in_array($qType, ['Image', 'File Upload', 'Audio'])
+                                    ? $this->imageAnswerUrl($ans)
+                                    : $this->formatAnswerValue($ans->user_answer, $qType);
+                            }
                         } else {
                             $instRow[] = '';
                         }
@@ -1436,6 +1483,52 @@ class ReportController extends Controller
         }
 
         return $answer;
+    }
+
+    /**
+     * Extracts one expected-header value from a Barcode/QR Code/RFID answer for the
+     * report's "{question} → {header}" column. $rawAnswer is the JSON wrapper written
+     * by TaskController::saveAnswer() ({format, raw_value, parsed, expected_headers,...}).
+     * Returns '' if the answer isn't that JSON shape, has no "parsed" data (raw_text
+     * scans have none), or simply didn't contain this particular header.
+     */
+    private function scanAnswerHeaderValue(?string $rawAnswer, string $headerName): string
+    {
+        if (!$rawAnswer) return '';
+        $decoded = json_decode($rawAnswer, true);
+        if (!is_array($decoded) || !is_array($decoded['parsed'] ?? null)) return '';
+        return (string) ($decoded['parsed'][$headerName] ?? '');
+    }
+
+    /**
+     * Builds the combined "extra" cell for a Barcode/QR Code/RFID answer — every
+     * key:value pair from the scan that does NOT match one of the question's
+     * currently-configured expected headers, one per line (line breaks render because
+     * FastXlsxWriter wraps any main-sheet cell whose value contains "\n" — see
+     * FastXlsxWriter::styleIndex()). Uses the live $currentExpectedHeaders (not
+     * whatever was recorded on the answer at submit time) so this stays correct even
+     * if the question's configured headers changed since. Falls back to the raw
+     * scanned text for a non-JSON/vCard (raw_text) scan, and to the literal answer
+     * string if it isn't the JSON wrapper at all (e.g. legacy data).
+     */
+    private function scanAnswerExtraValue(?string $rawAnswer, array $currentExpectedHeaders): string
+    {
+        if (!$rawAnswer) return '';
+        $decoded = json_decode($rawAnswer, true);
+        if (!is_array($decoded)) return $rawAnswer;
+
+        $parsed = $decoded['parsed'] ?? null;
+        if (!is_array($parsed)) {
+            return (string) ($decoded['raw_value'] ?? $rawAnswer);
+        }
+
+        $lines = [];
+        foreach ($parsed as $key => $value) {
+            if (!in_array($key, $currentExpectedHeaders, true)) {
+                $lines[] = $key . ':' . $value;
+            }
+        }
+        return implode("\n", $lines);
     }
 
 
@@ -2271,9 +2364,31 @@ class ReportController extends Controller
                                     $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion, $this->imageAnswerUrl($user_answer)], $extraCols);
                                 } elseif ($activity_question->question_type == 'Location' && empty($user_answer->user_answer) && $user_answer->latitude && $user_answer->longitude) {
                                     $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion, $user_answer->latitude . ', ' . $user_answer->longitude], $extraCols);
+                                } elseif (in_array($activity_question->question_type, ['Barcode', 'QR Code', 'RFID'])) {
+                                    // One row per configured expected header (matched scan data), plus
+                                    // one more row for anything scanned that doesn't match a header —
+                                    // same split as the main project report, adapted to this sheet's
+                                    // vertical (one-row-per-question) layout instead of columns.
+                                    $scanHeaders = $activity_question->getOptions->pluck('option')->map('trim')->filter()->values()->all();
+                                    foreach ($scanHeaders as $scanHeader) {
+                                        $activitySheetData[] = array_merge(
+                                            [$rowCounter++, $displayQuestion . ' → ' . $scanHeader, $this->scanAnswerHeaderValue($user_answer->user_answer, $scanHeader)],
+                                            $extraCols
+                                        );
+                                    }
+                                    $activitySheetData[] = array_merge(
+                                        [$rowCounter++, $displayQuestion, $this->scanAnswerExtraValue($user_answer->user_answer, $scanHeaders)],
+                                        $extraCols
+                                    );
                                 } else {
                                     $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion, $user_answer->user_answer], $extraCols);
                                 }
+                            } elseif (in_array($activity_question->question_type, ['Barcode', 'QR Code', 'RFID'])) {
+                                $scanHeaders = $activity_question->getOptions->pluck('option')->map('trim')->filter()->values()->all();
+                                foreach ($scanHeaders as $scanHeader) {
+                                    $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion . ' → ' . $scanHeader, null], $extraCols);
+                                }
+                                $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion, null], $extraCols);
                             } else {
                                 $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion, null], $extraCols);
                             }
@@ -2290,7 +2405,15 @@ class ReportController extends Controller
                             $activitySheetData[] = [$rowCounter++, '— ' . $outletLabel . ' —', ''];
                         } else {
                             $displayQuestion = $qItem['prefix'] ? $qItem['prefix'] . ' → ' . $activity_question->question : $activity_question->question;
-                            $activitySheetData[] = [$rowCounter++, $displayQuestion, null];
+                            if (in_array($activity_question->question_type, ['Barcode', 'QR Code', 'RFID'])) {
+                                $scanHeaders = $activity_question->getOptions->pluck('option')->map('trim')->filter()->values()->all();
+                                foreach ($scanHeaders as $scanHeader) {
+                                    $activitySheetData[] = [$rowCounter++, $displayQuestion . ' → ' . $scanHeader, null];
+                                }
+                                $activitySheetData[] = [$rowCounter++, $displayQuestion, null];
+                            } else {
+                                $activitySheetData[] = [$rowCounter++, $displayQuestion, null];
+                            }
                         }
                     }
                 }
@@ -2486,9 +2609,21 @@ class ReportController extends Controller
                                     $instanceSheetData[] = [$instRowCounter++, $displayQ, $this->imageAnswerUrl($ia)];
                                 } elseif ($aq->question_type == "Location" && empty($ia->user_answer) && $ia->latitude && $ia->longitude) {
                                     $instanceSheetData[] = [$instRowCounter++, $displayQ, $ia->latitude . ', ' . $ia->longitude];
+                                } elseif (in_array($aq->question_type, ['Barcode', 'QR Code', 'RFID'])) {
+                                    $scanHeaders = $aq->getOptions->pluck('option')->map('trim')->filter()->values()->all();
+                                    foreach ($scanHeaders as $scanHeader) {
+                                        $instanceSheetData[] = [$instRowCounter++, $displayQ . ' → ' . $scanHeader, $this->scanAnswerHeaderValue($ia->user_answer, $scanHeader)];
+                                    }
+                                    $instanceSheetData[] = [$instRowCounter++, $displayQ, $this->scanAnswerExtraValue($ia->user_answer, $scanHeaders)];
                                 } else {
                                     $instanceSheetData[] = [$instRowCounter++, $displayQ, $ia->user_answer];
                                 }
+                            } elseif (in_array($aq->question_type, ['Barcode', 'QR Code', 'RFID'])) {
+                                $scanHeaders = $aq->getOptions->pluck('option')->map('trim')->filter()->values()->all();
+                                foreach ($scanHeaders as $scanHeader) {
+                                    $instanceSheetData[] = [$instRowCounter++, $displayQ . ' → ' . $scanHeader, null];
+                                }
+                                $instanceSheetData[] = [$instRowCounter++, $displayQ, null];
                             } else {
                                 $instanceSheetData[] = [$instRowCounter++, $displayQ, null];
                             }

@@ -33,6 +33,7 @@
                         ['File Upload','#1D4ED8','#EFF6FF'],['Location','#DC2626','#FEF2F2'],
                         ['Audio','#6D28D9','#F5F3FF'],['Subjective','#6B7280','#F9FAFB'],
                         ['Multi Response','#1E3A5F','#DBEAFE'],
+                        ['Barcode','#0369A1','#F0F9FF'],['QR Code','#047857','#ECFDF5'],['RFID','#B91C1C','#FEF2F2'],
                     ];
                     @endphp
                     @foreach($qTypes as $qt)
@@ -92,9 +93,10 @@
             {{-- OPTIONS section (Dropdown / Multi select) --}}
             <div id="sec_options" style="display:none;margin-bottom:18px;">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-                    <label style="font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:.5px;">Answer Options <span style="color:#DC2626;">*</span></label>
+                    <label id="aq_opt_label" style="font-size:11px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:.5px;">Answer Options <span id="aq_opt_required_mark" style="color:#DC2626;">*</span></label>
                     <span id="optCount" style="font-size:11.5px;color:#9CA3AF;">0 option(s)</span>
                 </div>
+                <div id="aq_opt_hint" style="font-size:11.5px;color:#9CA3AF;margin-bottom:8px;"></div>
                 {{-- Multi-select toggle --}}
                 <div id="ms_extras" style="display:none;padding:9px 11px;background:#F8F8FC;border:1px solid #EBEBF4;border-radius:6px;margin-bottom:10px;">
                     <label style="display:flex;align-items:center;gap:7px;cursor:pointer;">
@@ -366,6 +368,9 @@
                 'Subjective'    => ['#6B7280','#F9FAFB'],
                 'Multi Response'=> ['#1E3A5F','#DBEAFE'],
                 'Number'        => ['#D97706','#FFFBEB'],
+                'Barcode'       => ['#0369A1','#F0F9FF'],
+                'QR Code'       => ['#047857','#ECFDF5'],
+                'RFID'          => ['#B91C1C','#FEF2F2'],
             ];
         @endphp
 
@@ -1898,14 +1903,30 @@
     }
 
     function showSections(type) {
-        const isOpts        = ['Dropdown','Multi select'].includes(type);
+        // Options section is reused for Barcode/QR Code/RFID too — there each pipe-
+        // separated entry is an EXPECTED HEADER NAME the scanned code should contain,
+        // not a selectable choice (see aq_opt_hint below, toggled per type).
+        const isOpts        = ['Dropdown','Multi select','Barcode','QR Code','RFID'].includes(type);
         const isFile        = ['Image','File Upload'].includes(type);
         const isDate        = ['Date','Date & Time'].includes(type);
         const isValid       = ['Free Text','Yes / No','Dropdown','Multi select','Subjective'].includes(type);
         // Conditional logic: visible for any type that can be a conditional child
-        // (everything except Multi Response which is a section header, not a question)
-        const isConditional = type !== '' && type !== 'Multi Response';
+        // (everything except Multi Response, which is a section header not a question,
+        // and Barcode/QR Code/RFID, which are always answered by a direct scan rather
+        // than shown/hidden based on another question's answer)
+        const isConditional = type !== '' && !['Multi Response','Barcode','QR Code','RFID'].includes(type);
         const isMultiResp   = type === 'Multi Response';
+        const isScanType    = ['Barcode','QR Code','RFID'].includes(type);
+        const optHintEl = document.getElementById('aq_opt_hint');
+        if (optHintEl) {
+            optHintEl.textContent = isScanType
+                ? 'Expected header names the scanned code\'s data should contain (optional) — e.g. cooler_id|serial_number|plant_code'
+                : '';
+        }
+        const optRequiredMark = document.getElementById('aq_opt_required_mark');
+        if (optRequiredMark) {
+            optRequiredMark.style.display = isScanType ? 'none' : 'inline';
+        }
 
         document.getElementById('sec_options').style.display            = isOpts        ? 'block' : 'none';
         document.getElementById('ms_extras').style.display              = type === 'Multi select' ? 'block' : 'none';

@@ -7,7 +7,7 @@
             margin-bottom: 0;
         }
 
-        #projectDataTable thead {
+        #projectDataTable thead { 
             display: none;
             /* Hide header on mobile */
         }
@@ -237,9 +237,22 @@
                         </h4>
                     </div>
                     <div class="card-body">
+                        {{-- Server-side search — filters by Outlet Details (main header) and
+                             reloads the page; pairs with the server-side pagination below.
+                             Real-time client-side DataTables search was dropped because it
+                             required rendering every row (up to ~3k) on every request. --}}
+                        <form method="GET" class="d-flex align-items-center gap-2 mb-3"
+                            style="max-width:320px; margin-top:20px;">
+                            <input type="text" name="search" value="{{ $searchTerm ?? '' }}"
+                                placeholder="Search Outlet Details..." class="form-control form-control-sm">
+                            <button type="submit" class="btn btn-primary btn-sm">Search</button>
+                            @if (!empty($searchTerm))
+                                <a href="{{ url()->current() }}" class="btn btn-outline-secondary btn-sm">Clear</a>
+                            @endif
+                        </form>
                         <!-- Table with Card-like Layout -->
                         <!-- Mobile-friendly Responsive Table -->
-                        <div class="table-responsive" style="margin-top:90px !important;">
+                        <div class="table-responsive" style="margin-top:20px !important;">
                             <table class="table table-hover" id="projectDataTable">
                                 <thead>
                                     <tr>
@@ -512,6 +525,15 @@
                                     </tbody>
                                 </table>
                             </div>
+                            @if (!empty($paginator) && $paginator->total() > 0)
+                                <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-3">
+                                    <div class="text-muted small">
+                                        Showing {{ $paginator->firstItem() }} to {{ $paginator->lastItem() }}
+                                        of {{ $paginator->total() }} entries
+                                    </div>
+                                    {{ $paginator->onEachSide(1)->links() }}
+                                </div>
+                            @endif
                         </div>
                     </div>
                 </div>
@@ -965,72 +987,16 @@
 
             $(document).ready(function() {
 
-                // &#9472;&#9472; DataTable &#8212; delayed to run after layout auto-init &#9472;&#9472;
+                // &#9472;&#9472; This table is now paginated/searched server-side (Laravel pagination
+                // + the search form above), since rendering all rows client-side for
+                // DataTables to paginate was the slow part on large projects (~3k rows).
+                // Just undo any generic DataTable auto-init the layout framework applies
+                // to `.table` elements globally, so it stays a plain table here. &#9472;&#9472;
                 setTimeout(function() {
-
-                    // Destroy whatever the layout may have auto-inited
-                    if ($.fn.DataTable.isDataTable('#projectDataTable')) {
+                    if ($.fn.DataTable && $.fn.DataTable.isDataTable('#projectDataTable')) {
                         $('#projectDataTable').DataTable().destroy();
                     }
-
-                    var $table = $('#projectDataTable');
-
-                    // Only init if real data rows exist
-                    // (excludes the "No Data Found" colspan row)
-                    var hasRealRows = $table.find('tbody tr td:not([colspan])').length > 0;
-
-                    if ($table.length && hasRealRows) {
-
-                        if (window.innerWidth <= 767) {
-                            if (!$.fn.dataTable.ext.pager.mobile_3) {
-                                $.fn.dataTable.ext.pager.mobile_3 = function(page, pages) {
-                                    var buttons = ['previous'];
-                                    var start = Math.max(0, Math.min(page - 1, pages - 3));
-                                    var end = Math.min(start + 3, pages);
-                                    for (var i = start; i < end; i++) {
-                                        buttons.push(i);
-                                    }
-                                    buttons.push('next');
-                                    return buttons;
-                                };
-                            }
-                        }
-
-                        $table.DataTable({
-                            pagingType: window.innerWidth <= 767 ? 'mobile_3' : 'simple_numbers',
-                            language: {
-                                paginate: {
-                                    previous: '&#8249;',
-                                    next: '&#8250;'
-                                }
-                            },
-                            initComplete: function() {
-                                if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(
-                                        navigator.userAgent)) {
-                                    $('#projectDataTable_wrapper input[type="search"]')
-                                        .attr('readonly', true)
-                                        .css('font-size', '16px')
-                                        .on('click focus touchstart', function() {
-                                            $(this).removeAttr('readonly');
-                                        });
-                                }
-                            }
-                        });
-
-                        if (window.innerWidth <= 767) {
-                            setTimeout(function() {
-                                var $wrapper = $('#projectDataTable_wrapper');
-                                var $filter = $wrapper.find('.dataTables_filter').detach();
-                                var $length = $wrapper.find('.dataTables_length').detach();
-                                $('#dt-sticky-controls').remove();
-                                $('<div id="dt-sticky-controls"></div>')
-                                    .append($filter).append($length)
-                                    .insertAfter($('.card > .card-header').first());
-                            }, 50);
-                        }
-                    }
-
-                }, 300); // delay so layout auto-init fires first, then we take over
+                }, 300); // delay so layout auto-init fires first, then we undo it
 
                 // &#9472;&#9472; Session flash &#9472;&#9472;
                 @if (session()->has('message'))

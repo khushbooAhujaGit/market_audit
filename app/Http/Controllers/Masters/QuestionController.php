@@ -70,8 +70,10 @@ class QuestionController extends Controller
             'allow_multiple_images' => $allowMultiple,
         ]);
 
-        // Create Dropdown / Multi select options
-        if (!empty($data['options']) && in_array($data['question_type'], ['Dropdown', 'Multi select'])) {
+        // Create Dropdown / Multi select options — also reused for Barcode/QR Code/RFID
+        // questions, where each "option" is an expected header name to validate the
+        // scanned code's data against at answer time, not a selectable choice.
+        if (!empty($data['options']) && in_array($data['question_type'], ['Dropdown', 'Multi select', 'Barcode', 'QR Code', 'RFID'])) {
             foreach (explode('|', $data['options']) as $opt) {
                 $opt = trim($opt);
                 if ($opt !== '') {
@@ -204,7 +206,7 @@ class QuestionController extends Controller
         // Sync dropdown / multi-select options.
         // Also propagate to all questions in the same activity that share the same
         // question text + type — these are reused sub-questions across Multi Response parents.
-        if (in_array($form_data['question_type'] ?? '', ['Dropdown', 'Multi select'])) {
+        if (in_array($form_data['question_type'] ?? '', ['Dropdown', 'Multi select', 'Barcode', 'QR Code', 'RFID'])) {
             $rawOptions = $form_data['options'] ?? '';
             $parsedOpts = [];
             if ($rawOptions !== '' && $rawOptions !== null) {
