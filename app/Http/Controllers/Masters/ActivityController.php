@@ -30,6 +30,74 @@ class ActivityController extends Controller
         return view('masters.activities.add');
     }
 
+    /**
+     * Validates parent/child references across the WHOLE uploaded sheet before any
+     * row gets stored. Catches two specific mistakes that previously imported
+     * silently as broken/misattached data:
+     *  1. parent_group_question (Multi Response sub-question) or
+     *     depends_on_question (conditional child) pointing at a question of the
+     *     wrong type — e.g. bound to a "Multi select" question instead of an
+     *     actual "Multi Response" one, or a conditional child depending on
+     *     something other than a "Yes / No" / "Dropdown" question.
+     *  2. Either of those columns referencing question text that doesn't match
+     *     any question actually present in this file (typo, or the intended
+     *     parent was simply never added to the sheet).
+     * Returns an array of human-readable error strings; empty array = no errors.
+     */
+    private function validateExcelQuestionRows(array $dataArray, \Closure $col): array
+    {
+        $errors = [];
+
+        // Build question_text => type for every row in the file (first occurrence
+        // wins — matches how duplicate detection elsewhere in this import already
+        // treats question_text as the natural key).
+        $textToType = [];
+        foreach ($dataArray as $row) {
+            $text = trim((string)($col($row, 'question_text') ?? ''));
+            $type = trim((string)($col($row, 'type') ?? ''));
+            if ($text !== '' && !isset($textToType[$text])) {
+                $textToType[$text] = $type;
+            }
+        }
+
+        $dataRowNumber = 0;
+        foreach ($dataArray as $row) {
+            $text = trim((string)($col($row, 'question_text') ?? ''));
+            if ($text === '') continue; // blank/spacer rows — skipped the same way the import itself skips them
+            $dataRowNumber++;
+
+            $rowLabel = "Data row {$dataRowNumber} (\"{$text}\")";
+
+            $parentGroupText = trim((string)($col($row, 'parent_group_question') ?? ''));
+            $dependsOnQ      = trim((string)($col($row, 'depends_on_question')   ?? ''));
+            $dependsOnA      = trim((string)($col($row, 'depends_on_answer')     ?? ''));
+
+            if ($parentGroupText !== '') {
+                if ($parentGroupText === $text) {
+                    $errors[] = "{$rowLabel}: parent_group_question refers to itself.";
+                } elseif (!isset($textToType[$parentGroupText])) {
+                    $errors[] = "{$rowLabel}: parent_group_question \"{$parentGroupText}\" does not match any question in this file.";
+                } elseif ($textToType[$parentGroupText] !== 'Multi Response') {
+                    $errors[] = "{$rowLabel}: parent_group_question \"{$parentGroupText}\" must be a \"Multi Response\" question, but it is type \"{$textToType[$parentGroupText]}\".";
+                }
+            }
+
+            if ($dependsOnQ !== '') {
+                if ($dependsOnQ === $text) {
+                    $errors[] = "{$rowLabel}: depends_on_question refers to itself.";
+                } elseif (!isset($textToType[$dependsOnQ])) {
+                    $errors[] = "{$rowLabel}: depends_on_question \"{$dependsOnQ}\" does not match any question in this file.";
+                } elseif (!in_array($textToType[$dependsOnQ], ['Yes / No', 'Dropdown'])) {
+                    $errors[] = "{$rowLabel}: depends_on_question \"{$dependsOnQ}\" must be a \"Yes / No\" or \"Dropdown\" question, but it is type \"{$textToType[$dependsOnQ]}\".";
+                }
+            } elseif ($dependsOnA !== '') {
+                $errors[] = "{$rowLabel}: depends_on_answer (\"{$dependsOnA}\") is set but depends_on_question is empty.";
+            }
+        }
+
+        return $errors;
+    }
+
     public function store(Request $request)
     {
         $validated = $request->validate([
@@ -41,10 +109,8 @@ class ActivityController extends Controller
             ],
         ]);
 
-        $acitivity = Activity::create([
-            'activity_name' => $request->activity_name
-        ]);
-        $sequence_counter = 1;
+        $dataArray = null;
+        $col       = null;
 
         // Check if file is present in the request
         if ($request->hasFile('questions_excel')) {
@@ -84,6 +150,28 @@ class ActivityController extends Controller
                 return $row[$colMap[$name]] ?? $default;
             };
 
+            // ── Validate the WHOLE sheet's parent/child references before storing
+            // anything — catches a parent_group_question bound to the wrong question
+            // type (e.g. "Multi select" instead of "Multi Response"), and any
+            // parent_group_question/depends_on_question that doesn't match any
+            // question actually present in this file. Rejects the whole upload (no
+            // activity or questions get created) if anything is wrong, rather than
+            // silently importing broken/misattached sub-questions.
+            $validationErrors = $this->validateExcelQuestionRows($dataArray, $col);
+            if (!empty($validationErrors)) {
+                return response()->json([
+                    'message' => 'The uploaded Excel file has errors. Please fix them and re-upload.',
+                    'errors'  => $validationErrors,
+                ], 422);
+            }
+        }
+
+        $acitivity = Activity::create([
+            'activity_name' => $request->activity_name
+        ]);
+        $sequence_counter = 1;
+
+        if ($dataArray !== null) {
             $sequenceToQuestionId = [];
             $questionTextToId     = [];
 

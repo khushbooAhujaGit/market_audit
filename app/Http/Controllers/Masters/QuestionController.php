@@ -165,11 +165,31 @@ class QuestionController extends Controller
                             : null;
                     }
                 } else {
-                    // Multi Response or other parent: create question_sub_questions entry
-                    QuestionSubQuestion::updateOrCreate(
-                        ['parent_question_id' => $parentId, 'child_question_id' => $question_info->id],
-                        ['sequence' => $idx + 1, 'trigger_value' => $triggerValue]
-                    );
+                    // Multi Response or other parent: create/update question_sub_questions entry.
+                    // IMPORTANT: never derive sequence from $idx here — $parentTriggers mixes
+                    // old-style conditional links and new-style MR links together, so its
+                    // array position has nothing to do with this sub-question's real order
+                    // among its MR siblings (this previously caused an unrelated field edit,
+                    // e.g. toggling required/optional, to silently reshuffle sub-question
+                    // order — see "Manage Sub Questions" for the actual reorder UI, which
+                    // updates sequence correctly via updateSubQuestionSequence()).
+                    // Preserve the existing sequence on update; only assign one (append to
+                    // end of this parent's children) when the link is genuinely new.
+                    $existingLink = QuestionSubQuestion::where('parent_question_id', $parentId)
+                        ->where('child_question_id', $question_info->id)
+                        ->first();
+
+                    if ($existingLink) {
+                        $existingLink->update(['trigger_value' => $triggerValue]);
+                    } else {
+                        $nextSequence = (int) QuestionSubQuestion::where('parent_question_id', $parentId)->max('sequence') + 1;
+                        QuestionSubQuestion::create([
+                            'parent_question_id' => $parentId,
+                            'child_question_id'  => $question_info->id,
+                            'sequence'           => $nextSequence,
+                            'trigger_value'      => $triggerValue,
+                        ]);
+                    }
                 }
             }
         }
