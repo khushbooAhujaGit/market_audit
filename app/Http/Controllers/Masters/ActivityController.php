@@ -42,11 +42,15 @@ class ActivityController extends Controller
      *  2. Either of those columns referencing question text that doesn't match
      *     any question actually present in this file (typo, or the intended
      *     parent was simply never added to the sheet).
-     * Returns an array of human-readable error strings; empty array = no errors.
+     * Returns ['errors' => flat list of human-readable strings (for a summary
+     * message), 'rowErrors' => [dataArray row index => [message, ...]]] so the
+     * caller can annotate the offending row in a downloadable copy of the sheet.
+     * Both empty = no errors.
      */
     private function validateExcelQuestionRows(array $dataArray, \Closure $col): array
     {
-        $errors = [];
+        $errors    = [];
+        $rowErrors = [];
 
         // Build question_text => type for every row in the file (first occurrence
         // wins — matches how duplicate detection elsewhere in this import already
@@ -61,12 +65,16 @@ class ActivityController extends Controller
         }
 
         $dataRowNumber = 0;
-        foreach ($dataArray as $row) {
+        foreach ($dataArray as $rowIdx => $row) {
             $text = trim((string)($col($row, 'question_text') ?? ''));
             if ($text === '') continue; // blank/spacer rows — skipped the same way the import itself skips them
             $dataRowNumber++;
 
             $rowLabel = "Data row {$dataRowNumber} (\"{$text}\")";
+            $add = function (string $message) use (&$errors, &$rowErrors, $rowIdx, $rowLabel) {
+                $errors[] = "{$rowLabel}: {$message}";
+                $rowErrors[$rowIdx][] = $message;
+            };
 
             $parentGroupText = trim((string)($col($row, 'parent_group_question') ?? ''));
             $dependsOnQ      = trim((string)($col($row, 'depends_on_question')   ?? ''));
@@ -74,28 +82,78 @@ class ActivityController extends Controller
 
             if ($parentGroupText !== '') {
                 if ($parentGroupText === $text) {
-                    $errors[] = "{$rowLabel}: parent_group_question refers to itself.";
+                    $add("parent_group_question refers to itself.");
                 } elseif (!isset($textToType[$parentGroupText])) {
-                    $errors[] = "{$rowLabel}: parent_group_question \"{$parentGroupText}\" does not match any question in this file.";
+                    $add("parent_group_question \"{$parentGroupText}\" does not match any question in this file.");
                 } elseif ($textToType[$parentGroupText] !== 'Multi Response') {
-                    $errors[] = "{$rowLabel}: parent_group_question \"{$parentGroupText}\" must be a \"Multi Response\" question, but it is type \"{$textToType[$parentGroupText]}\".";
+                    $add("parent_group_question \"{$parentGroupText}\" must be a \"Multi Response\" question, but it is type \"{$textToType[$parentGroupText]}\".");
                 }
             }
 
             if ($dependsOnQ !== '') {
                 if ($dependsOnQ === $text) {
-                    $errors[] = "{$rowLabel}: depends_on_question refers to itself.";
+                    $add("depends_on_question refers to itself.");
                 } elseif (!isset($textToType[$dependsOnQ])) {
-                    $errors[] = "{$rowLabel}: depends_on_question \"{$dependsOnQ}\" does not match any question in this file.";
+                    $add("depends_on_question \"{$dependsOnQ}\" does not match any question in this file.");
                 } elseif (!in_array($textToType[$dependsOnQ], ['Yes / No', 'Dropdown'])) {
-                    $errors[] = "{$rowLabel}: depends_on_question \"{$dependsOnQ}\" must be a \"Yes / No\" or \"Dropdown\" question, but it is type \"{$textToType[$dependsOnQ]}\".";
+                    $add("depends_on_question \"{$dependsOnQ}\" must be a \"Yes / No\" or \"Dropdown\" question, but it is type \"{$textToType[$dependsOnQ]}\".");
                 }
             } elseif ($dependsOnA !== '') {
-                $errors[] = "{$rowLabel}: depends_on_answer (\"{$dependsOnA}\") is set but depends_on_question is empty.";
+                $add("depends_on_answer (\"{$dependsOnA}\") is set but depends_on_question is empty.");
             }
         }
 
-        return $errors;
+        return ['errors' => $errors, 'rowErrors' => $rowErrors];
+    }
+
+    /**
+     * Builds a downloadable copy of the uploaded sheet with an extra
+     * "Validation Errors" column filled in for every offending row (and that
+     * row highlighted), so the user can see exactly what to fix without
+     * cross-referencing a separate error list.
+     */
+    private function buildExcelErrorDownload(array $headerRow, array $dataArray, array $rowErrors)
+    {
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Errors');
+
+        $errorColIndex = count($headerRow); // 0-based — appended after existing columns
+        $headerOut = $headerRow;
+        $headerOut[] = 'Validation Errors';
+        $sheet->fromArray($headerOut, null, 'A1');
+        $sheet->getStyle('A1:' . \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($errorColIndex + 1) . '1')
+            ->getFont()->setBold(true);
+
+        $outRow = 2;
+        foreach ($dataArray as $idx => $row) {
+            $rowOut = $row;
+            $messages = $rowErrors[$idx] ?? [];
+            $rowOut[$errorColIndex] = implode(' | ', $messages);
+            $sheet->fromArray($rowOut, null, 'A' . $outRow);
+
+            if (!empty($messages)) {
+                $lastCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($errorColIndex + 1);
+                $sheet->getStyle('A' . $outRow . ':' . $lastCol . $outRow)
+                    ->getFill()
+                    ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                    ->getStartColor()->setRGB('FFC7CE');
+            }
+            $outRow++;
+        }
+
+        $lastColLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($errorColIndex + 1);
+        $sheet->getColumnDimension($lastColLetter)->setWidth(70);
+        $sheet->getStyle($lastColLetter)->getAlignment()->setWrapText(true);
+
+        $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+        $filename = 'activity_upload_errors_' . date('Ymd_His') . '.xlsx';
+
+        return response()->streamDownload(function () use ($writer) {
+            $writer->save('php://output');
+        }, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
     }
 
     public function store(Request $request)
@@ -157,12 +215,9 @@ class ActivityController extends Controller
             // question actually present in this file. Rejects the whole upload (no
             // activity or questions get created) if anything is wrong, rather than
             // silently importing broken/misattached sub-questions.
-            $validationErrors = $this->validateExcelQuestionRows($dataArray, $col);
-            if (!empty($validationErrors)) {
-                return response()->json([
-                    'message' => 'The uploaded Excel file has errors. Please fix them and re-upload.',
-                    'errors'  => $validationErrors,
-                ], 422);
+            $validation = $this->validateExcelQuestionRows($dataArray, $col);
+            if (!empty($validation['errors'])) {
+                return $this->buildExcelErrorDownload($headerRow, $dataArray, $validation['rowErrors']);
             }
         }
 

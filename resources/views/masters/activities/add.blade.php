@@ -304,6 +304,9 @@
                         .xlsx
                     </div>
                 </a>
+
+                {{-- Excel validation errors render here instead of a raw JSON page --}}
+                <div id="excelErrorBox" style="display:none;margin-top:14px;padding:14px 16px;background:#FEF2F2;border:1.5px solid #FCA5A5;border-radius:8px;color:#991B1B;font-size:13px;"></div>
             </div>
 
             {{-- Manual section: just create the activity, redirect to questions page --}}
@@ -934,34 +937,134 @@ function resetPanel() {
 }
 
 // ─── Form submit: inject hidden inputs ────────────────────────────────────
-document.getElementById('createActivityForm').addEventListener('submit', function() {
+document.getElementById('createActivityForm').addEventListener('submit', function(e) {
     var isManual = document.getElementById('sec_manual').style.display !== 'none';
-    if (!isManual) return; // Excel mode — nothing to inject
+    if (isManual) {
+        var container = document.getElementById('hiddenInputsContainer');
+        container.innerHTML = '';
+        _localQuestions.forEach(function(q, i) {
+            function hi(name, val) {
+                var inp = document.createElement('input');
+                inp.type = 'hidden';
+                inp.name = 'questions[' + i + '][' + name + ']';
+                inp.value = val || '';
+                container.appendChild(inp);
+            }
+            hi('question',              q.question);
+            hi('question_type',         q.question_type);
+            hi('answer_type',           q.answer_type);
+            hi('options',               q.options);
+            hi('help_text',             q.help_text);
+            hi('allow_multiple_images', q.allow_multiple_images);
+            hi('parent_group_id',       q.parent_group_id);
+            hi('cond_parent_idx',       q.cond_parent_idx || '');
+            hi('cond_trigger',          q.cond_trigger || '');
+            hi('validation_rule',       q.validation_rule || 'none');
+            hi('validation_min',        q.validation_min || '');
+            hi('validation_max',        q.validation_max || '');
+            hi('validation_regex',      q.validation_regex || '');
+        });
+        return; // let the browser submit normally
+    }
 
-    var container = document.getElementById('hiddenInputsContainer');
-    container.innerHTML = '';
-    _localQuestions.forEach(function(q, i) {
-        function hi(name, val) {
-            var inp = document.createElement('input');
-            inp.type = 'hidden';
-            inp.name = 'questions[' + i + '][' + name + ']';
-            inp.value = val || '';
-            container.appendChild(inp);
+    // Excel mode — submit via fetch instead of a plain form POST. A row-mapping
+    // failure comes back as a downloadable annotated copy of the sheet (auto-
+    // downloaded here); any other validation failure (e.g. duplicate activity
+    // name) still comes back as JSON and is rendered inline.
+    e.preventDefault();
+    var form = this;
+    var errBox = document.getElementById('excelErrorBox');
+    var submitBtn = document.getElementById('submitBtn');
+    var label = document.getElementById('sec_excel_label');
+    var originalLabel = label.textContent;
+
+    errBox.style.display = 'none';
+    errBox.innerHTML = '';
+    submitBtn.disabled = true;
+    label.textContent = 'Uploading...';
+
+    fetch(form.action, {
+        method: 'POST',
+        body: new FormData(form),
+        headers: { 'Accept': 'application/json' }
+    }).then(function(res) {
+        if (res.redirected) {
+            window.location = res.url;
+            return null;
         }
-        hi('question',              q.question);
-        hi('question_type',         q.question_type);
-        hi('answer_type',           q.answer_type);
-        hi('options',               q.options);
-        hi('help_text',             q.help_text);
-        hi('allow_multiple_images', q.allow_multiple_images);
-        hi('parent_group_id',       q.parent_group_id);
-        hi('cond_parent_idx',       q.cond_parent_idx || '');
-        hi('cond_trigger',          q.cond_trigger || '');
-        hi('validation_rule',       q.validation_rule || 'none');
-        hi('validation_min',        q.validation_min || '');
-        hi('validation_max',        q.validation_max || '');
-        hi('validation_regex',      q.validation_regex || '');
+        var ct = res.headers.get('Content-Type') || '';
+        if (ct.indexOf('spreadsheetml') !== -1 || ct.indexOf('ms-excel') !== -1) {
+            var filename = getFilenameFromResponse(res) || 'activity_upload_errors.xlsx';
+            return res.blob().then(function(blob) { return { type: 'file', blob: blob, filename: filename }; });
+        }
+        return res.json().then(function(data) { return { type: 'json', data: data }; });
+    }).then(function(result) {
+        if (!result) return; // navigating away after success
+        submitBtn.disabled = false;
+        label.textContent = originalLabel;
+        if (result.type === 'file') {
+            downloadBlob(result.blob, result.filename);
+            errBox.style.display = '';
+            errBox.innerHTML = '<strong>The uploaded Excel file has errors.</strong> '
+                + 'An annotated copy has been downloaded (<em>' + escapeHtml(result.filename) + '</em>) with a '
+                + '"Validation Errors" column added and the affected rows highlighted — fix those rows and re-upload.';
+        } else {
+            renderExcelErrors(result.data);
+        }
+    }).catch(function() {
+        submitBtn.disabled = false;
+        label.textContent = originalLabel;
+        errBox.style.display = '';
+        errBox.innerHTML = '<strong>Upload failed.</strong> Please check your connection and try again.';
     });
 });
+
+function escapeHtml(s) {
+    var div = document.createElement('div');
+    div.textContent = String(s);
+    return div.innerHTML;
+}
+
+function getFilenameFromResponse(res) {
+    var cd = res.headers.get('Content-Disposition') || '';
+    var m = /filename="?([^"]+)"?/.exec(cd);
+    return m ? m[1] : null;
+}
+
+function downloadBlob(blob, filename) {
+    var url = window.URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function() { window.URL.revokeObjectURL(url); }, 1000);
+}
+
+function renderExcelErrors(data) {
+    var errBox = document.getElementById('excelErrorBox');
+    var message = data.message || 'The uploaded Excel file has errors.';
+    var errors = data.errors;
+    var list = [];
+
+    if (Array.isArray(errors)) {
+        list = errors;
+    } else if (errors && typeof errors === 'object') {
+        Object.keys(errors).forEach(function(k) {
+            (errors[k] || []).forEach(function(m) { list.push(m); });
+        });
+    }
+
+    var html = '<div style="font-weight:700;margin-bottom:8px;">' + escapeHtml(message) + '</div>';
+    if (list.length) {
+        html += '<ul style="margin:0;padding-left:18px;max-height:340px;overflow-y:auto;">'
+            + list.map(function(e) { return '<li style="margin-bottom:5px;">' + escapeHtml(e) + '</li>'; }).join('')
+            + '</ul>';
+    }
+    errBox.innerHTML = html;
+    errBox.style.display = '';
+    errBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
 </script>
 @endsection
