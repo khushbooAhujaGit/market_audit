@@ -8,12 +8,13 @@
             <div class="row">
                 <div class="col-sm-12">
                     <div class="card">
-                        <div class="card-header">
-                            <h4>Get Project Report
+                        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+                            <h4 class="mb-0">Get Project Report
                                 {{--                                <a href="{{route('auditorAssigned.list')}}"> --}}
                                 {{--                                    <button class="btn btn-primary float-end">View Assigned Data</button> --}}
                                 {{--                                </a> --}}
                             </h4>
+                            @include('masters.reports.partials.completed_toggle', ['routeName' => 'view-report'])
                         </div>
                         <div class="card-body">
                             <div class="horizontal-wizard-wrapper">
@@ -37,9 +38,10 @@
                                                             </option>
                                                             @foreach ($projects as $project)
                                                                 <option value="{{ $project->id }}">
-                                                                    {{ $project->project_name }}</option>
+                                                                    {{ $project->project_name }}@if ($project->is_completed) (Completed)@endif</option>
                                                             @endforeach
                                                         </select>
+                                                        @include('masters.reports.partials.completed_toggle', ['routeName' => 'view-report', 'part' => 'hint'])
                                                         @error('project_id')
                                                             <p class="text-red-500 text-xs mt-1">
                                                                 {{ $message }}

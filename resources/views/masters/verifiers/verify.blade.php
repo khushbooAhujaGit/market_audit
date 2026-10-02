@@ -862,6 +862,20 @@
                                                                                 @endif
                                                                             @break
 
+                                                                            @case('Barcode')
+                                                                            @case('QR Code')
+                                                                            @case('RFID')
+                                                                                @if ($parentAnswer)
+                                                                                    @include('masters.verifiers.partials.scan_answer_verify', [
+                                                                                        'question' => $parentQuestion,
+                                                                                        'answer'   => $parentAnswer,
+                                                                                    ])
+                                                                                @else
+                                                                                    <span class="text-muted small">No answer
+                                                                                        recorded</span>
+                                                                                @endif
+                                                                            @break
+
                                                                             @default
                                                                                 <input type="text" value="{{ $parentAnswer }}"
                                                                                     class="form-control"
@@ -1351,6 +1365,15 @@
                                                                                                         </select>
                                                                                                     </div>
                                                                                                 @endforeach
+                                                                                            @break
+
+                                                                                            @case('Barcode')
+                                                                                            @case('QR Code')
+                                                                                            @case('RFID')
+                                                                                                @include('masters.verifiers.partials.scan_answer_verify', [
+                                                                                                    'question' => $childQuestion,
+                                                                                                    'answer'   => $childAnswer,
+                                                                                                ])
                                                                                             @break
 
                                                                                             @default

@@ -61,6 +61,7 @@ class TaskController extends Controller
 
             $userProjects = DB::table('projects')
                 ->whereIn('id', $projectIds)
+                ->where('is_completed', 0) // completed (closed by admin) projects are hidden from auditors
                 ->select('id', 'project_name')
                 ->when($request->keyword, fn($q) => $q->where('project_name', 'like', "%{$request->keyword}%"))
                 ->paginate(10);

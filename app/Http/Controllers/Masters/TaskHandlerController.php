@@ -58,7 +58,7 @@ class TaskHandlerController extends Controller
             ->pluck('data_assign_id')->toArray();
         $uniqueUserProjects = DataAssign::whereIn('id', $dataAssignIds)->distinct('project_id')->pluck('project_id')->toArray();
         //khushboo 05-07-25
-        $userProjects = Project::whereIn('id', $uniqueUserProjects)->get();
+        $userProjects = Project::whereIn('id', $uniqueUserProjects)->open()->get();
         return view('masters.users.user_projects', compact('userProjects'));
     }
 

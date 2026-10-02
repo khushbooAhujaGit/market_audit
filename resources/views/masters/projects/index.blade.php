@@ -53,6 +53,33 @@
             border-color: #000;
         }
 
+        /* Complete / Reopen toggle — scoped tightly because the theme styles everything inside ul.action li */
+        ul.action li .toggle-complete {
+            display: inline-block;
+            min-width: 78px;
+            padding: 3px 10px;
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1.4;
+            border-radius: 4px;
+            cursor: pointer;
+            color: #dc3545 !important;
+            background: #fff !important;
+            border: 1px solid #dc3545 !important;
+        }
+        ul.action li .toggle-complete:hover {
+            color: #fff !important;
+            background: #dc3545 !important;
+        }
+        ul.action li .toggle-complete.is-completed {
+            color: #198754 !important;
+            border-color: #198754 !important;
+        }
+        ul.action li .toggle-complete.is-completed:hover {
+            color: #fff !important;
+            background: #198754 !important;
+        }
+
         /* Disabled (prev/next) */
         .pagination .disabled .page-link {
             background-color: #e0e0e0;
@@ -118,6 +145,7 @@
                                         <th>Unit</th>
                                         <th>Project</th>
                                         <th>Project Type</th>
+                                        <th>Status</th>
                                         <th>Action</th>
                                     </tr>
                                     </thead>
@@ -130,15 +158,8 @@
                                             <td>{{ $project->getUnit->unit_name }}</td>
                                             <td>{{ $project->project_name }}</td>
                                             <td>{{ optional($project->getProjectType)->project_type_name }}</td>
-                                            <td>
-                                                <ul class="action">
-                                                    <li class="edit"><a
-                                                            href="{{ route('project.edit', ['id' => $project->id]) }}"><i
-                                                                class="icon-pencil-alt"></i></a></li>
-                                                    <li class="delete" data-id="{{ $project->id }}"><i
-                                                            class="icon-trash"></i></li>
-                                                </ul>
-                                            </td>
+                                            <td class="project-status">{!! \App\Http\Controllers\Masters\ProjectController::projectStatusHtml($project) !!}</td>
+                                            <td>{!! \App\Http\Controllers\Masters\ProjectController::projectActionsHtml($project) !!}</td>
                                         </tr>
                                     @endforeach
                                     </tbody>
@@ -262,6 +283,47 @@
                 timer: 1500
             });
             @endif
+            // Mark completed / reopen. Completed projects are hidden from auditors (APK + web)
+            // and the verifier queue, but stay available in reports.
+            $("#projects_table").on("click", ".toggle-complete", function () {
+                const btn = $(this);
+                const completing = btn.data('completed') == 0;
+                Swal.fire({
+                    title: completing ? 'Mark project as completed?' : 'Reopen this project?',
+                    text: completing
+                        ? 'Auditors and verifiers will no longer see this project. Reports remain available. You can reopen it anytime.'
+                        : 'The project will be visible again to assigned auditors and verifiers.',
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonColor: '#3085d6',
+                    cancelButtonColor: '#d33',
+                    confirmButtonText: completing ? 'Yes, mark completed' : 'Yes, reopen'
+                }).then((result) => {
+                    if (!result.isConfirmed) return;
+                    $.ajax({
+                        url: '{{ route('project.toggle_complete') }}',
+                        type: "POST",
+                        data: {"_token": "{{ csrf_token() }}", "id": btn.data('id')},
+                        success: function (res) {
+                            const row = btn.closest('tr');
+                            if (res.is_completed) {
+                                row.find('.project-status').html('<span class="badge bg-secondary">Completed</span>');
+                                btn.data('completed', 1).attr('title', 'Reopen project').text('Reopen')
+                                    .addClass('is-completed');
+                            } else {
+                                row.find('.project-status').html('<span class="badge bg-success">Open</span>');
+                                btn.data('completed', 0).attr('title', 'Mark project as completed').text('Complete')
+                                    .removeClass('is-completed');
+                            }
+                            Swal.fire({icon: 'success', title: res.message, showConfirmButton: false, timer: 1500});
+                        },
+                        error: function (xhr) {
+                            Swal.fire('Not allowed', (xhr.responseJSON && xhr.responseJSON.message) || 'Something went wrong.', 'warning');
+                        }
+                    });
+                });
+            });
+
             $("#projects_table").on("click", ".delete", function (event) {
                 const project_id = $(this).data('id');
                 const tar_row = $(this).closest('tr');

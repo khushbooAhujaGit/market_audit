@@ -92,6 +92,10 @@
                     timer: 1500
                 });
             @endif
+
+            @if (session()->has('project_completed'))
+                Swal.fire({icon: "info", title: "Project completed", text: @json(session('project_completed'))});
+            @endif
             $("#projects_table").on("click", ".delete", function(event) {
                 const project_id = $(this).data('id');
                 const tar_row = $(this).closest('tr');

@@ -103,6 +103,10 @@
                 });
             @endif
 
+            @if (session()->has('project_completed'))
+                Swal.fire({icon: "info", title: "Project completed", text: @json(session('project_completed'))});
+            @endif
+
 
 
             $("#units_table").on("click", ".delete", function(event) {

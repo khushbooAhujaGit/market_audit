@@ -40,51 +40,51 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('getAllProject', [TaskController::class, 'getAllProject']);
 
     // 2. Distributor / master data for a project
-    Route::get('projectDistributorData', [TaskController::class, 'projectDistributorData']);
+    Route::get('projectDistributorData', [TaskController::class, 'projectDistributorData'])->middleware('project.active');
 
     // 3. Outlet data (child rows)
-    Route::get('projectOutletData', [TaskController::class, 'projectOutletData']);
+    Route::get('projectOutletData', [TaskController::class, 'projectOutletData'])->middleware('project.active');
 
     // 4. Activities for a row — user_id now comes from auth token
-    Route::get('getAllActivity/{id}/{status?}', [TaskController::class, 'getAllActivity']);
+    Route::get('getAllActivity/{id}/{status?}', [TaskController::class, 'getAllActivity'])->middleware('project.active:id');
 
     // 5. Questions for an activity row
-    Route::get('getAllQuestion', [TaskController::class, 'getAllQuestion']);
+    Route::get('getAllQuestion', [TaskController::class, 'getAllQuestion'])->middleware('project.active');
 
     // 6. Answer submission
-    Route::post('answerSubmit', [TaskController::class, 'row_activity_answers']);   // bulk submit
-    Route::post('saveAnswer', [TaskController::class, 'saveAnswer']);               // one answer at a time
-    Route::post('finalizeAnswers', [TaskController::class, 'finalizeAnswers']);     // validate + finalize
-    Route::post('uploadActivityImage', [TaskController::class, 'uploadActivityImage']); // pre-upload for multi-image
-    Route::post('uploadSignature', [TaskController::class, 'uploadSignature']);         // one signature per row_id+activity_id+user_id
+    Route::post('answerSubmit', [TaskController::class, 'row_activity_answers'])->middleware('project.active');   // bulk submit
+    Route::post('saveAnswer', [TaskController::class, 'saveAnswer'])->middleware('project.active');               // one answer at a time
+    Route::post('finalizeAnswers', [TaskController::class, 'finalizeAnswers'])->middleware('project.active');     // validate + finalize
+    Route::post('uploadActivityImage', [TaskController::class, 'uploadActivityImage'])->middleware('project.active'); // pre-upload for multi-image
+    Route::post('uploadSignature', [TaskController::class, 'uploadSignature'])->middleware('project.active');         // one signature per row_id+activity_id+user_id
 
     // 7. Question answer (alternative endpoint)
-    Route::post('questionAnswer', [TaskController::class, 'questionAnswer']);
+    Route::post('questionAnswer', [TaskController::class, 'questionAnswer'])->middleware('project.active');
 
     // 8. Subjective dropdown options
     Route::get('getSubjectiveDropdown', [TaskController::class, 'getSubjectiveDropdown']);
 
     // 9. Distributor outlets for a row
-    Route::get('myProjectsDistributorOutletsData/{row_id}/{distributor_value}', [TaskController::class, 'myProjectsDistributorOutletsData'])->where('distributor_value', '[^/]+');
+    Route::get('myProjectsDistributorOutletsData/{row_id}/{distributor_value}', [TaskController::class, 'myProjectsDistributorOutletsData'])->where('distributor_value', '[^/]+')->middleware('project.active');
 
     // 10. OTP flow
-    Route::post('sendActivityOtp', [TaskController::class, 'sendActivityOtp']);
-    Route::post('verifyOtp', [TaskController::class, 'verifyOtp']);
+    Route::post('sendActivityOtp', [TaskController::class, 'sendActivityOtp'])->middleware('project.active');
+    Route::post('verifyOtp', [TaskController::class, 'verifyOtp'])->middleware('project.active');
 
     // 11. Audit close
-    Route::post('close_audit_data', [TaskController::class, 'auditCloseSubmit']);
+    Route::post('close_audit_data', [TaskController::class, 'auditCloseSubmit'])->middleware('project.active');
 
     // 12. Add / get / update distributor / template data
-    Route::get('getTemplateData/{project}/{template}', [TaskController::class, 'getTemplateHeaders']);
-    Route::post('storeTemplateData', [TaskController::class, 'storeTemplateHeaderValues']);
-    Route::get('getTemplateRowData/{row_id}', [TaskController::class, 'getTemplateRowData']);
-    Route::post('updateTemplateRowData', [TaskController::class, 'updateTemplateRowData']);
+    Route::get('getTemplateData/{project}/{template}', [TaskController::class, 'getTemplateHeaders'])->middleware('project.active');
+    Route::post('storeTemplateData', [TaskController::class, 'storeTemplateHeaderValues'])->middleware('project.active');
+    Route::get('getTemplateRowData/{row_id}', [TaskController::class, 'getTemplateRowData'])->middleware('project.active');
+    Route::post('updateTemplateRowData', [TaskController::class, 'updateTemplateRowData'])->middleware('project.active');
 
     // 13. Repeat activity instances
-    Route::post('activityInstances', [TaskController::class, 'activityInstances']);
-    Route::post('addInstance', [TaskController::class, 'addInstance']);
-    Route::post('deleteInstance', [TaskController::class, 'deleteInstance']);
-    Route::post('closeActivity', [TaskController::class, 'closeActivity']);
+    Route::post('activityInstances', [TaskController::class, 'activityInstances'])->middleware('project.active');
+    Route::post('addInstance', [TaskController::class, 'addInstance'])->middleware('project.active');
+    Route::post('deleteInstance', [TaskController::class, 'deleteInstance'])->middleware('project.active');
+    Route::post('closeActivity', [TaskController::class, 'closeActivity'])->middleware('project.active');
 
     // 14. Password update
     Route::post('updatePassword', [TaskController::class, 'updatePassword']);

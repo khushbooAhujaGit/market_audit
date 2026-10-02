@@ -38,7 +38,9 @@ class DashboardController extends Controller
 
             $assignid = UserActivityDataAssign::where('user_id', $user_id)->distinct('data_assign_id')->pluck('data_assign_id');
 
-            $data = DataAssign::whereIn('id', $assignid)->get();
+            $data = DataAssign::whereIn('id', $assignid)
+                ->whereIn('project_id', Project::open()->select('id')) // skip completed projects
+                ->get();
 
             $pending = $data->where('status', 0)->unique('project_id')->count();
             $complete = $data->where('status', 2)->unique('project_id')->count();
@@ -211,7 +213,9 @@ class DashboardController extends Controller
 
 
 
-            $projectids = AuditorAssignedData::where('user_id', $user)->get();
+            $projectids = AuditorAssignedData::where('user_id', $user)
+                ->whereIn('project_id', Project::open()->select('id')) // skip completed projects
+                ->get();
             $uniqueProjects = $projectids->unique('project_id');
             $dataids = $uniqueProjects->pluck('id');
 
