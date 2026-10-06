@@ -36,7 +36,19 @@ class ReportController extends Controller
         return $this->middleware("auth")->except(['downloadImagesZip']);
     }
     
-    public function index()
+    /**
+     * Report pages show open projects by default; ?view=completed switches the project
+     * dropdown to projects the admin marked completed (projects.is_completed). Applies to
+     * every role, Super Admin included.
+     */
+    private function completionView(Request $request): array
+    {
+        $view = \App\Services\ProjectCompletion::reportView($request);
+
+        return [$view, fn($query) => $view === 'completed' ? $query->completed() : $query->open()];
+    }
+
+    public function index(Request $request)
     {
         // $projects = Project::all();
         // $template_names = TemplateName::all();
@@ -47,6 +59,7 @@ class ReportController extends Controller
         //khushboo 02-04-2025
         $currentuser = User::find(Auth::user()->id);
         $currentUserRole = $currentuser->getRoleNames()->first();
+        [$view, $applyCompletionFilter] = $this->completionView($request);
 
         if (Auth::user()->is_agency_user == 1 || $currentUserRole == 'Agency') {
             // $projects = Project::where('is_agency_required', 1)->orWhere('agency_id', Auth::user()->agency_user_id)->get();
@@ -56,11 +69,12 @@ class ReportController extends Controller
             $project_templates_ids = Verifier::where('user_id', $currentuser->id)
                 ->distinct('project_template_name_id')->pluck('project_template_name_id')->toArray();
             $projectsIds = ProjectTemplate::whereIn('id', $project_templates_ids)->pluck('project_id')->toArray();
-            $projects = Project::whereIn('id', $projectsIds)->where('is_agency_required', 1)->orWhere('agency_id', Auth::user()->agency_user_id)->get();
+            $projects = Project::where(fn($q) => $q->whereIn('id', $projectsIds)->where('is_agency_required', 1)->orWhere('agency_id', Auth::user()->agency_user_id))
+                ->tap($applyCompletionFilter)->get();
             $template_names = TemplateName::whereIn('id', $project_templates_ids)->get();
         } else if ($currentUserRole == "Super Admin") {
             $template_names = TemplateName::all();
-            $projects = Project::all();
+            $projects = Project::query()->tap($applyCompletionFilter)->get();
         } else if ($currentuser->getRoleNames()->first() == 'Company User') {
             $companies = [];
             $projects = Project::with(['getZone', 'getUnit', 'getCompanyInfo'])
@@ -68,6 +82,7 @@ class ReportController extends Controller
                 ->whereHas('dataAssigns', function ($query) use ($currentuser) {
                     $query->where('company_user_id', $currentuser->id);
                 })
+                ->tap($applyCompletionFilter)
                 ->orderBy('id', 'DESC')
                 ->get();
             $project_templates_ids = Verifier::where('user_id', $currentuser->id)
@@ -82,16 +97,17 @@ class ReportController extends Controller
                 ->distinct('project_template_name_id')->pluck('project_template_name_id')->toArray();
             // dd($project_templates_ids);
             $projectsIds = ProjectTemplate::whereIn('id', $project_templates_ids)->pluck('project_id')->toArray();
-            $projects = Project::whereIn('id', $projectsIds)->where('is_agency_required', 1)->orWhere('agency_id', Auth::user()->agency_user_id)->get();
+            $projects = Project::where(fn($q) => $q->whereIn('id', $projectsIds)->where('is_agency_required', 1)->orWhere('agency_id', Auth::user()->agency_user_id))
+                ->tap($applyCompletionFilter)->get();
             $template_names = TemplateName::whereIn('id', $project_templates_ids)->get();
         }
         // dd($projects);
         //khushboo 02-04-2025
 
-        return view('masters.reports.index', compact('projects', 'template_names', 'companies', 'activities', 'activity_groups'));
+        return view('masters.reports.index', compact('projects', 'template_names', 'companies', 'activities', 'activity_groups', 'view', 'currentUserRole'));
     }
 
-    public function project_report()
+    public function project_report(Request $request)
     {
         // $projects = Project::all();
         // $template_names = TemplateName::all();
@@ -102,6 +118,7 @@ class ReportController extends Controller
         //khushboo 03-04-2025
         $currentuser = User::find(Auth::user()->id);
         $currentUserRole = $currentuser->getRoleNames()->first();
+        [$view, $applyCompletionFilter] = $this->completionView($request);
         // dd($currentUserRole);
 
         if ($currentuser->is_agency_user == 1 || $currentuser->getRoleNames()->first() == 'Agency') {
@@ -128,14 +145,15 @@ class ReportController extends Controller
             $project_templates_ids = Verifier::where('user_id', $currentuser->id)
                 ->distinct('project_template_name_id')->pluck('project_template_name_id')->toArray();
             $projectsIds = ProjectTemplate::whereIn('id', $project_templates_ids)->pluck('project_id')->toArray();
-            $projects = Project::whereIn('id', $projectsIds)->where('is_agency_required', 1)->orWhere('agency_id', Auth::user()->agency_user_id)->get();
+            $projects = Project::where(fn($q) => $q->whereIn('id', $projectsIds)->where('is_agency_required', 1)->orWhere('agency_id', Auth::user()->agency_user_id))
+                ->tap($applyCompletionFilter)->get();
 
             $template_names = TemplateName::whereIn('id', $project_templates_ids)->get();
 
         } else if ($currentUserRole == "Super Admin") {
             // dd('ghg');
             $template_names = TemplateName::all();
-            $projects = Project::all();
+            $projects = Project::query()->tap($applyCompletionFilter)->get();
         } else if ($currentuser->getRoleNames()->first() == 'Company User') {
             $companies = [];
             $projects = Project::with(['getZone', 'getUnit', 'getCompanyInfo'])
@@ -143,6 +161,7 @@ class ReportController extends Controller
                 ->whereHas('dataAssigns', function ($query) use ($currentuser) {
                     $query->where('company_user_id', $currentuser->id);
                 })
+                ->tap($applyCompletionFilter)
                 ->orderBy('id', 'DESC')
                 ->get();
             $project_templates_ids = Verifier::where('user_id', $currentuser->id)
@@ -156,14 +175,15 @@ class ReportController extends Controller
                 ->distinct('project_template_name_id')->pluck('project_template_name_id')->toArray();
             // dd($project_templates_ids);
             $projectsIds = ProjectTemplate::whereIn('id', $project_templates_ids)->pluck('project_id')->toArray();
-            $projects = Project::whereIn('id', $projectsIds)->where('is_agency_required', 1)->orWhere('agency_id', Auth::user()->agency_user_id)->get();
+            $projects = Project::where(fn($q) => $q->whereIn('id', $projectsIds)->where('is_agency_required', 1)->orWhere('agency_id', Auth::user()->agency_user_id))
+                ->tap($applyCompletionFilter)->get();
             $template_names = TemplateName::whereIn('id', $project_templates_ids)->get();
         }
         // dd($projects);
         //khushboo 03-04-2025
         // dd($projects, Auth::user()->id, $currentuser->getRoleNames()->first());
 
-        return view('masters.reports.project_report', compact('projects', 'template_names', 'companies', 'activities', 'activity_groups'));
+        return view('masters.reports.project_report', compact('projects', 'template_names', 'companies', 'activities', 'activity_groups', 'view', 'currentUserRole'));
     }
 
 

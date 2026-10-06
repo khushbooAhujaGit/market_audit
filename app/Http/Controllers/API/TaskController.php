@@ -61,6 +61,7 @@ class TaskController extends Controller
 
             $userProjects = DB::table('projects')
                 ->whereIn('id', $projectIds)
+                ->where('is_completed', 0) // completed (closed by admin) projects are hidden from auditors
                 ->select('id', 'project_name')
                 ->when($request->keyword, fn($q) => $q->where('project_name', 'like', "%{$request->keyword}%"))
                 ->paginate(10);
@@ -1727,8 +1728,27 @@ class TaskController extends Controller
             // so they appear inside sub_questions.child_question when serialised
             if ($_rq->question_type === 'Multi Response') {
                 $_rq->answer_type = 0; // MR parent is a section header, never directly answered
+
+                // A sub-question that is conditional on a sibling sub-question (its own
+                // parent_question_id + parent_value point at that sibling) is sent inside the
+                // sibling's conditional_questions — same shape as root-level conditional
+                // questions — instead of as an always-visible member of the group.
+                $groupLinks    = collect($subLinksByParent[$_rq->id] ?? []);
+                $groupChildIds = $groupLinks->pluck('child_question_id')->all();
+                $visibleLinks  = $groupLinks
+                    ->reject(function ($_sl) use ($_rq, $groupChildIds) {
+                        $child = $_sl->childQuestion ?? null;
+                        return $child
+                            && !is_null($child->parent_question_id)
+                            && $child->parent_question_id != $_rq->id
+                            && in_array($child->parent_question_id, $groupChildIds);
+                    })
+                    ->sortBy('sequence')
+                    ->values();
+                $_rq->setRelation('subQuestions', $visibleLinks);
+
                 $alpha = 0;
-                foreach (collect($subLinksByParent[$_rq->id] ?? [])->sortBy('sequence') as $_sl) {
+                foreach ($visibleLinks as $_sl) {
                     $child = $_sl->childQuestion ?? null;
                     if (!$child) continue;
                     $alpha++;
@@ -1738,6 +1758,18 @@ class TaskController extends Controller
                     $child->display_sequence     = $displaySeq + $alpha;
                     $child->parent_question_id   = $_rq->id;
                     $child->parent_question_name = $_rq->question;
+
+                    $condChildren = $childrenByParent->get($child->id, collect());
+                    $child->on_click = $condChildren->contains('parent_value', '__non_empty__');
+                    // Same shape as root-level conditional_questions
+                    $conditional = [];
+                    foreach ($condChildren as $condChild) {
+                        $condArr = $condChild->toArray();
+                        $condArr['trigger_value']        = $condChild->parent_value; // specific value, or '__non_empty__'
+                        $condArr['parent_question_name'] = $child->question;
+                        $conditional[] = $condArr;
+                    }
+                    $child->conditional_questions = $conditional;
                 }
             }
 
@@ -3322,7 +3354,7 @@ class TaskController extends Controller
                 }
 
                 // Insert single row with JSON data
-                DB::table('project_template_name_values_new')->insert([
+                $newRowId = DB::table('project_template_name_values_new')->insertGetId([
                     'project_template_id' => $projectTemplateInfo->id,
                     'template_data_json'  => json_encode($templateDataJson),
                     'created_at'          => now(),
@@ -3403,6 +3435,10 @@ class TaskController extends Controller
                         $rowIds
                     );
                 }
+
+                \App\Services\VerifierAssignment::assignAuditorCreatedRow(
+                    $request->user()->id, $projectTemplateInfo->id, $activityIdsArr, $newRowId
+                );
             }
 
             return response()->json(['status' => 200, 'message' => 'Distributor Added Successfully']);

@@ -279,6 +279,7 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
         Route::get('projects/edit/{id}',                     'edit')->name('project.edit');
         Route::put('/projects/update/{id}',                  'update')->name('project.update');
         Route::post('/projects/destroy',                     'destroy')->name('project.destroy');
+        Route::post('/projects/toggle-complete',             'toggleComplete')->name('project.toggle_complete');
         Route::get('/upload/data',                           'upload_data_view')->name('projectData.upload');
         Route::post('projectData/store',                     'upload_project_template_data')->name('projectData.store');
         Route::post('projectData/add',                       'add_project_template_data')->name('projectData.add');
@@ -326,10 +327,10 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     // ── Verifiers ─────────────────────────────────────────────────────────────
     Route::prefix('Verifier')->controller(VerifierController::class)->group(function () {
         Route::get('/my_verifications',                                     'user_verification')->name('user.verification.list');
-        Route::get('/verifiy/group_activity/{pt}/{g}/{s}/{a}',              'group_verification_data')->name('activityGroup.verification.view');
-        Route::get('/verifiy/activity/{pt}/{a}',                            'activity_verification_data')->name('activity.verification.view');
-        Route::get('/data_to_verify/{r}/{a}/{g?}/{seq?}',                   'data_to_verify')->name('data_to_verify');
-        Route::post('auditor_activity_question_verification',               'activity_answer_verify')->name('verifier.activityQuestionAnswers');
+        Route::get('/verifiy/group_activity/{pt}/{g}/{s}/{a}',              'group_verification_data')->middleware('project.active')->name('activityGroup.verification.view');
+        Route::get('/verifiy/activity/{pt}/{a}',                            'activity_verification_data')->middleware('project.active')->name('activity.verification.view');
+        Route::get('/data_to_verify/{r}/{a}/{g?}/{seq?}',                   'data_to_verify')->middleware('project.active')->name('data_to_verify');
+        Route::post('auditor_activity_question_verification',               'activity_answer_verify')->middleware('project.active')->name('verifier.activityQuestionAnswers');
         Route::get('verify_template/{r}/{a}/{g?}',                          'viewTemplateFile')->name('verify_template');
         Route::get('report_page',                                           'reportPage')->name('report_page');
         Route::post('download_pdf',                                         'downloadPdfTemplate')->name('pdf_template');
@@ -380,25 +381,25 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     // ── Auditor / Task Handler (mobile app web routes) ────────────────────────
     Route::controller(TaskHandlerController::class)->group(function () {
         Route::get('my_projects',                                                         'userProjects')->name('user.projects');
-        Route::get('my_project_distributor_data/{project}',                               'userProjectMasterData')->name('user.project_master.data');
-        Route::get('my_project_outlet_data/{type}/{project}/{template?}/{activity?}/{group_info?}', 'userProjectChildData')->name('user.project_child.data');
-        Route::get('my_project_activities/{row_id}/{status?}',                            'userProjectActivities')->name('user.project.assigned_activities');
-        Route::get('my_project_activity_instances/{row_id}/{activity}/{group_info?}',     'userActivityInstancesList')->name('user.activity.instances_list');
-        Route::get('my_project_row_activity/{row_id}/{activity}/{group_info?}',           'row_data_activity')->name('user.project.row_id.activity');
-        Route::post('my_project_row_activity_answer/{activity_sequence?}',                'row_activity_answers')->name('user.rowId.activity.answers');
-        Route::post('my_project_autosave_answer',                                         'autoSaveAnswer')->name('user.activity.autosave');
-        Route::post('upload-activity-image-temp',                                         'upload_activity_image_temp')->name('upload.activity.image.temp');
-        Route::post('my_project_activity_add_instance',                                   'add_activity_instance')->name('user.activity.add_instance');
-        Route::post('my_project_activity_close_instances',                                'closeActivityInstances')->name('user.activity.close_instances');
-        Route::post('my_project_activity_delete_instance',                                'delete_activity_instance')->name('user.activity.delete_instance');
-        Route::get('my_projects_distributor_outlets_data/{row_id}/{distributor_value}',   'userProjectActivityDistributorOutletData')->name('user.project.distributor.outlets');
-        Route::post('close_audit',                                                        'closeAuditData')->name('closeAuditData');
-        Route::post('getTemplateHeadData',                                                'getTemplateHeadData')->name('getTemplateHeadData');
-        Route::post('edit_project_data_template',                                         'edit_project_data_template')->name('edit_project_data_template');
-        Route::get('otp_verification_page/{row_id}/{activity}/{project_id}',              'otp_verification_page')->name('otp_verification_page');
-        Route::post('verify_otp',                                                         'verify_otp')->name('verify_otp');
-        Route::post('resend_otp',                                                         'resend_otp')->name('resend_otp');
-        Route::post('send_otp',                                                           'send_otp')->name('send_otp');
+        Route::get('my_project_distributor_data/{project}',                               'userProjectMasterData')->middleware('project.active')->name('user.project_master.data');
+        Route::get('my_project_outlet_data/{type}/{project}/{template?}/{activity?}/{group_info?}', 'userProjectChildData')->middleware('project.active')->name('user.project_child.data');
+        Route::get('my_project_activities/{row_id}/{status?}',                            'userProjectActivities')->middleware('project.active')->name('user.project.assigned_activities');
+        Route::get('my_project_activity_instances/{row_id}/{activity}/{group_info?}',     'userActivityInstancesList')->middleware('project.active')->name('user.activity.instances_list');
+        Route::get('my_project_row_activity/{row_id}/{activity}/{group_info?}',           'row_data_activity')->middleware('project.active')->name('user.project.row_id.activity');
+        Route::post('my_project_row_activity_answer/{activity_sequence?}',                'row_activity_answers')->middleware('project.active')->name('user.rowId.activity.answers');
+        Route::post('my_project_autosave_answer',                                         'autoSaveAnswer')->middleware('project.active')->name('user.activity.autosave');
+        Route::post('upload-activity-image-temp',                                         'upload_activity_image_temp')->middleware('project.active')->name('upload.activity.image.temp');
+        Route::post('my_project_activity_add_instance',                                   'add_activity_instance')->middleware('project.active')->name('user.activity.add_instance');
+        Route::post('my_project_activity_close_instances',                                'closeActivityInstances')->middleware('project.active')->name('user.activity.close_instances');
+        Route::post('my_project_activity_delete_instance',                                'delete_activity_instance')->middleware('project.active')->name('user.activity.delete_instance');
+        Route::get('my_projects_distributor_outlets_data/{row_id}/{distributor_value}',   'userProjectActivityDistributorOutletData')->middleware('project.active')->name('user.project.distributor.outlets');
+        Route::post('close_audit',                                                        'closeAuditData')->middleware('project.active')->name('closeAuditData');
+        Route::post('getTemplateHeadData',                                                'getTemplateHeadData')->middleware('project.active')->name('getTemplateHeadData');
+        Route::post('edit_project_data_template',                                         'edit_project_data_template')->middleware('project.active')->name('edit_project_data_template');
+        Route::get('otp_verification_page/{row_id}/{activity}/{project_id}',              'otp_verification_page')->middleware('project.active')->name('otp_verification_page');
+        Route::post('verify_otp',                                                         'verify_otp')->middleware('project.active')->name('verify_otp');
+        Route::post('resend_otp',                                                         'resend_otp')->middleware('project.active')->name('resend_otp');
+        Route::post('send_otp',                                                           'send_otp')->middleware('project.active')->name('send_otp');
     });
 
 }); // end middleware('auth')

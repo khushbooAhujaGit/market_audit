@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Models\UserActivityDataAssign;
 use App\Models\UserAuditAssigns;
 use App\Models\Verifier;
+use App\Services\VerifierAssignment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -347,6 +348,10 @@ class UserController extends Controller
         $companyUserId = $request->has('company_user') ? $request->company_user : null;
         $agencyId = $request->has('agency_list') ? $request->agency_list : null;
 
+        // Verifiers get the same rows as the auditors assigned in this submission, and are
+        // linked to those auditors for rows the auditors create later.
+        $verifierIds = array_values(array_filter(array_map('intval', (array) $request->verify_users_names)));
+
         foreach ($request->activity_id as $selected_activities) {
             // Use a transaction + pessimistic lock to prevent duplicate data_assigns
             // when the form is submitted concurrently (e.g. double-click).
@@ -398,7 +403,8 @@ class UserController extends Controller
                                     $project_template_id->id,
                                     $selected_activities,
                                     $act_group_id,
-                                    $masterRowIds
+                                    $masterRowIds,
+                                    verifierIds: $verifierIds
                                 );
                                 // Now get child template id
                                 $childProjectTemplate = DB::table('project_templates')
@@ -447,12 +453,13 @@ class UserController extends Controller
                                                     $childProject->id,
                                                     $childProject->activity_group_name_id_or_activity_id,
                                                     $act_group_id,
-                                                    $childRowIds
+                                                    $childRowIds,
+                                                    verifierIds: $verifierIds
                                                 );
                                             }
                                             else if($childProject->with_data == 0){
                                                 // dd('dgdf');
-                                                $this->AssignDataWithoutTemplateData($dataAssign->id, $auditor_id, $childProject->id, $childProject->activity_group_name_id_or_activity_id,  $act_group_id);
+                                                $this->AssignDataWithoutTemplateData($dataAssign->id, $auditor_id, $childProject->id, $childProject->activity_group_name_id_or_activity_id,  $act_group_id, verifierIds: $verifierIds);
                                             }
 
                                         } else if ($childProject->activityType == 1) {
@@ -488,11 +495,15 @@ class UserController extends Controller
                                                         $childProject->id,
                                                         $childActivityId,
                                                         $childProject->activity_group_name_id_or_activity_id,
-                                                        $childRowIds
+                                                        $childRowIds,
+                                                        verifierIds: $verifierIds
                                                     );
                                                 }
                                                 else if($childProject->with_data == 0){
                                                     $this->AssignDataWithoutTemplateData($dataAssign->id, $auditor_id, $childProject->id, $childProject->activity_group_name_id_or_activity_id, $act_group_id);
+                                                    // The call above records the group id as the activity; verifier links
+                                                    // need the real activity id that rows and the queue use.
+                                                    VerifierAssignment::linkAuditor($verifierIds, (int) $auditor_id, (int) $childProject->id, (int) $childActivityId, true);
                                                 }
                                             }
                                         }
@@ -514,7 +525,8 @@ class UserController extends Controller
                                     $project_template_id->id,
                                     $selected_activities,
                                     $act_group_id,
-                                    $rowIds
+                                    $rowIds,
+                                    verifierIds: $verifierIds
                                 );
                             }
                         }
@@ -525,7 +537,7 @@ class UserController extends Controller
                 //if template data not uploaded
                 if (!empty($request->auditor_names)) {
                     foreach ($request->auditor_names as $auditor_id) {
-                        $this->AssignDataWithoutTemplateData($dataAssign->id, $auditor_id,$project_template_id->id, $selected_activities,  $act_group_id);
+                        $this->AssignDataWithoutTemplateData($dataAssign->id, $auditor_id,$project_template_id->id, $selected_activities,  $act_group_id, verifierIds: $verifierIds);
                         if ($is_outlet_assinged == 1) {
                             $childProjectTemplate = DB::table('project_templates')
                                 ->where('project_id', $project_template_id->project_id)
@@ -534,13 +546,13 @@ class UserController extends Controller
                             if (!empty($childProjectTemplate)) {
                                 foreach ($childProjectTemplate as $childProject) {
                                     if ($childProject->activityType == 0) {
-                                        $this->AssignDataWithoutTemplateData($dataAssign->id, $auditor_id, $childProject->id, $childProject->activity_group_name_id_or_activity_id, $childProject->id, $act_group_id);
+                                        $this->AssignDataWithoutTemplateData($dataAssign->id, $auditor_id, $childProject->id, $childProject->activity_group_name_id_or_activity_id, $childProject->id, $act_group_id, verifierIds: $verifierIds);
                                     } else if ($childProject->activityType == 1) {
                                         $getActivityIds = ActivityGroupPivot::where('activity_group_id', $childProject->activity_group_name_id_or_activity_id)
                                             ->pluck('activity_id')->toArray();
                                         foreach ($getActivityIds as $childActivityId) {
                                             // Assign child template rows (same logic, different template)
-                                            $this->AssignDataWithoutTemplateData($dataAssign->id, $auditor_id, $childProject->id, $childActivityId,  $childProject->activity_group_name_id_or_activity_id);
+                                            $this->AssignDataWithoutTemplateData($dataAssign->id, $auditor_id, $childProject->id, $childActivityId,  $childProject->activity_group_name_id_or_activity_id, verifierIds: $verifierIds);
                                         }
                                     }
                                 }
@@ -822,9 +834,12 @@ class UserController extends Controller
 
 
 
-    private function assignUserActivityAndAuditRows($dataAssignId, $userId, $templateId, $activityId, $activityGroupId, $rowIds)
+    private function assignUserActivityAndAuditRows($dataAssignId, $userId, $templateId, $activityId, $activityGroupId, $rowIds, array $verifierIds = [])
     {
         if (empty($rowIds)) return null;
+
+        VerifierAssignment::assignRows($verifierIds, (int) $templateId, (int) $activityId, $rowIds);
+        VerifierAssignment::linkAuditor($verifierIds, (int) $userId, (int) $templateId, (int) $activityId, false);
 
         // 1. Check if common_id already exists for this user+template+activity
         $commonId = UserActivityDataAssign::where([
@@ -875,10 +890,14 @@ class UserController extends Controller
     }
 
 
-    private function AssignDataWithoutTemplateData($dataAssignId, $userId, $templateId, $activityId, $activityGroupId, $rowIds=null)
+    private function AssignDataWithoutTemplateData($dataAssignId, $userId, $templateId, $activityId, $activityGroupId, $rowIds=null, array $verifierIds = [])
     {
         // dd('dgfdg');
         // if (empty($rowIds)) return null;
+
+        // No uploaded rows: link the auditor so each row they create reaches these
+        // verifiers, and hand over rows they already created here.
+        VerifierAssignment::linkAuditor($verifierIds, (int) $userId, (int) $templateId, (int) $activityId, true);
 
         // 1. Check if common_id already exists for this user+template+activity
         $commonId = UserActivityDataAssign::where([

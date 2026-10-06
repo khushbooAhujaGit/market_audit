@@ -9,7 +9,7 @@ use App\Traits\HasEncryptedId;
 class Project extends Model
 {
     use HasFactory, HasEncryptedId;
-    protected $fillable = ['project_name', 'project_type_id', 'company_id', 'zone_id', 'unit_id', 'with_data', 'is_application_applicable', 'recurring', 'data_add_on', 'activity_group_name_id_or_activity_id', 'activityType', 'is_agency_required', 'agency_id', 'is_otp_required', 'required_otp', 'isComplianceApplicable', 'isCompanyApplicable', 'companyVerificationRequired', 'is_otp_duplication_allowed', 'complianceRepeationStartDate', 'complianceRepeationEndDate', 'is_infiltration_report_applicable'];
+    protected $fillable = ['project_name', 'project_type_id', 'company_id', 'zone_id', 'unit_id', 'with_data', 'is_application_applicable', 'recurring', 'data_add_on', 'activity_group_name_id_or_activity_id', 'activityType', 'is_agency_required', 'agency_id', 'is_otp_required', 'required_otp', 'isComplianceApplicable', 'isCompanyApplicable', 'companyVerificationRequired', 'is_otp_duplication_allowed', 'complianceRepeationStartDate', 'complianceRepeationEndDate', 'is_infiltration_report_applicable', 'is_completed', 'completed_at', 'completed_by'];
 
     protected $casts = [
         'id'             => 'integer',
@@ -25,7 +25,20 @@ class Project extends Model
         'agency_id'      => 'integer',
         'is_otp_required'=> 'integer',
         'is_infiltration_report_applicable' => 'integer',
+        'is_completed'   => 'integer',
+        'completed_at'   => 'datetime',
     ];
+
+    // Projects still open for auditing/verification (not marked completed by admin)
+    public function scopeOpen($query)
+    {
+        return $query->where('projects.is_completed', 0);
+    }
+
+    public function scopeCompleted($query)
+    {
+        return $query->where('projects.is_completed', 1);
+    }
 
     public function getUnit()
     {

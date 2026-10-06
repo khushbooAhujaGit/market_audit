@@ -51,8 +51,9 @@
             <!-- Zero Configuration  Starts-->
             <div class="col-sm-12">
                 <div class="card">
-                    <div class="card-header">
-                        <h4>PDF Report Page </h4>
+                    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <h4 class="mb-0">PDF Report Page</h4>
+                        @include('masters.reports.partials.completed_toggle', ['routeName' => 'report_page'])
                     </div>
                     <div class="card-body">
                         <div class="horizontal-wizard-wrapper">
@@ -73,10 +74,11 @@
                                                         @if (!empty($projects))
                                                             @foreach ($projects as $data)
                                                                 <option value="{{ $data->id }}">
-                                                                    {{ $data->project_name }}</option>
+                                                                    {{ $data->project_name }}@if ($data->is_completed) (Completed)@endif</option>
                                                             @endforeach
                                                         @endif
                                                     </select>
+                                                    @include('masters.reports.partials.completed_toggle', ['routeName' => 'report_page', 'part' => 'hint'])
                                                     @error('project_id')
                                                     <p class="text-red-500 text-xs mt-1">
                                                         {{ $message }}

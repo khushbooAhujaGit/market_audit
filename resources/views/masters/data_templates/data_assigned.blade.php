@@ -29,6 +29,7 @@
                                                         <tr>
                                                             <th>Sn</th>
                                                             <th id="user_type"></th>
+                                                            <th>Activity</th>
                                                             <th>Verifier Name</th>
                                                             <th>Assigned Value</th>
                                                             <th>Action</th>
@@ -72,6 +73,21 @@
                             </div>
                         </div>
 
+                        <div class="modal fade" id="activities_modal" tabindex="-1" aria-hidden="true">
+                            <div class="modal-dialog modal-lg">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <h5 class="modal-title" id="activities_modal_title">Assigned Activities</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal" data-dismiss="modal" aria-label="Close"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        {{-- A list, not a .table: the layout turns every .table into a DataTable --}}
+                                        <ul class="list-group" id="activities_modal_list"></ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="card-body">
                             <div class="table-responsive theme-scrollbar">
                                 <table class="display" id="templates_table">
@@ -82,7 +98,7 @@
                                             <th>Zone</th>
                                             <th>Unit</th>
                                             <th>Project</th>
-                                            <th>Activity Name</th>
+                                            <th>Activities</th>
                                             <th>Template Name</th>
                                             <th>Template Head</th>
                                             <th>Auditors</th>
@@ -91,40 +107,43 @@
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        @foreach ($data_assigned_values as $data_assigned_value)
+                                        {{-- One row per assigned project template; its activities open in a popup --}}
+                                        @foreach ($data_assigned_values as $group)
+                                            @php
+                                                $assign  = $group->assign;
+                                                $project = $assign?->getProjectTemplate?->getProject;
+                                                $activityCount = $group->activities->count();
+                                            @endphp
                                             <tr>
-                                                <td>{{ $loop->iteration }}</td>
-                                                <td>{{ $data_assigned_value->getProjectTemplate->getProject->getUnit->getZone->getCompany->company_name }}
+                                                <td>{{ ($data_assigned_values->firstItem() ?? 1) + $loop->index }}</td>
+                                                <td>{{ $project?->getUnit?->getZone?->getCompany?->company_name }}</td>
+                                                <td>{{ $project?->getUnit?->getZone?->zone_name }}</td>
+                                                <td>{{ $project?->getUnit?->unit_name }}</td>
+                                                <td>{{ $project?->project_name }}</td>
+                                                <td>
+                                                    <button type="button" class="btn btn-sm btn-outline-primary view_activities"
+                                                        data-activities="{{ json_encode($group->activities) }}"
+                                                        data-project-template-id="{{ $group->project_template_id }}"
+                                                        data-template-name="{{ $assign?->templateName?->template_name }}"
+                                                        data-project-name="{{ $project?->project_name }}">
+                                                        {{ $activityCount }} {{ \Illuminate\Support\Str::plural('Activity', $activityCount) }}
+                                                    </button>
                                                 </td>
-                                                <td>{{ $data_assigned_value->getProjectTemplate->getProject->getUnit->getZone->zone_name }}
-                                                </td>
-                                                <td>{{ $data_assigned_value->getProjectTemplate->getProject->getUnit->unit_name }}
-                                                </td>
-                                                <td>{{ $data_assigned_value->getProjectTemplate->getProject->project_name }}
-                                                </td>
-                                                <td>{{ !empty($data_assigned_value->activityName) ? $data_assigned_value->activityName->activity_name : '' }}
-                                                </td>
-                                                <td>{{ isset($data_assigned_value->TemplateName) ? $data_assigned_value->TemplateName->template_name : '' }}
-                                                </td>
-                                                <td>{{ isset($data_assigned_value->TemplateHeadName) ? $data_assigned_value->TemplateHeadName->template_head_name : '' }}
-                                                </td>
+                                                <td>{{ $assign?->templateName?->template_name }}</td>
+                                                <td>{{ $assign?->TemplateHeadName?->template_head_name }}</td>
                                                 <td class="view_auditors text-decoration-underline"
-                                                    data-id="{{ $data_assigned_value->id }}"
-                                                    data-activity-id="{{ $data_assigned_value->activity_id }}"
-                                                    data-project-template-id="{{ $data_assigned_value->project_template_id }}"
+                                                    data-id="{{ $group->first_id }}"
+                                                    data-project-template-id="{{ $group->project_template_id }}"
                                                     style="cursor:pointer;">
-                                                    {{ $data_assigned_value->getAutiors() }}
+                                                    {{ $group->auditor_count }}
                                                 </td>
                                                 <td></td>
                                                 <td>
                                                     <ul class="action">
-                                                        {{--                                                        <li class="edit"><a --}}
-                                                        {{--                                                                href="{{ route('data_assign.edit', $data_assigned_value->id) }}"><i --}}
-                                                        {{--                                                                    class="icon-pencil-alt"></i></a> --}}
-                                                        {{--                                                        </li> --}}
-                                                        <li class="delete" data-id="{{ $data_assigned_value->id }}"
-                                                            data-activity-id="{{ $data_assigned_value->activity_id }}"
-                                                            data-project-template-id="{{ $data_assigned_value->project_template_id }}" ><i
+                                                        <li class="delete"
+                                                            data-activity-ids="{{ json_encode($group->activities->pluck('id')) }}"
+                                                            data-project-template-id="{{ $group->project_template_id }}"
+                                                            title="Delete assignment for all activities of this template"><i
                                                                 class="icon-trash"></i>
                                                         </li>
                                                     </ul>
@@ -279,9 +298,15 @@
                 $("#user_assigned_model").modal('show')
             }
 
-            function render_assigned_user(userassignedvalues, verifierNames) {
+            function escapeHtml(value) {
+                return $('<div>').text(value ?? '').html();
+            }
 
-                window.auditData = userassignedvalues;
+            // One line per auditor + verifier (row-wise verifier assignment); rows with no
+            // verifier are shown on a line with "—".
+            function render_assigned_user(lines) {
+
+                window.auditData = lines;
 
                 $("#model_title").html(`<strong class="txt-danger"></strong>Auditors List`);
                 $("#user_type").text("Auditor Name");
@@ -289,31 +314,35 @@
                 const dt = $("#user_render_table").DataTable();
                 dt.clear();
 
-                const verifierDisplay = (verifierNames && verifierNames.length)
-                    ? verifierNames.join(', ')
-                    : '—';
-
-                let index = 1;
-
-                userassignedvalues.forEach(user => {
+                lines.forEach((line, i) => {
 
                     const combinedHeadValues = [...new Set(
-                        (user.audits || [])
+                        (line.audits || [])
                         .map(v => v.head_value?.trim())
                         .filter(v => v)
                     )].join(', ');
 
-                    const deleteBtn = `
-                        <a class="text-danger open-delete-modal"
-                           data-user-id="${user.user_id}">
-                            <i class="icon-trash"></i>
-                        </a>`;
+                    // Removes the auditor's assignment for this line's rows
+                    const deleteBtn = (line.audits || []).length
+                        ? `<a class="text-danger open-delete-modal" data-line="${i}">
+                               <i class="icon-trash"></i>
+                           </a>`
+                        : '';
+
+                    const verifierCell = !line.verifier_name
+                        ? '—'
+                        : escapeHtml(line.verifier_name) + (line.template_wise
+                            ? '<br><small class="text-muted">(template-wise assignment)</small>'
+                            : '');
+
+                    const activityCell = (line.activity_names || []).map(escapeHtml).join(', ');
 
                     dt.row.add([
-                        index++,
-                        user.user_name,
-                        verifierDisplay,
-                        combinedHeadValues,
+                        i + 1,
+                        escapeHtml(line.user_name),
+                        activityCell,
+                        verifierCell,
+                        combinedHeadValues ? escapeHtml(combinedHeadValues) : (line.verifier_name ? '<span class="text-muted">No rows yet</span>' : ''),
                         deleteBtn
                     ]);
 
@@ -326,13 +355,11 @@
 
             $(document).on("click", ".open-delete-modal", function() {
 
-                const userId = $(this).data("user-id");
+                const line = (window.auditData || [])[$(this).data("line")] || {};
 
-                $("#delete_user_id").val(userId);
+                $("#delete_user_id").val(line.user_id);
 
-                const user = window.auditData.find(u => u.user_id == userId);
-
-                const userAudits = user?.audits || [];
+                const userAudits = line.audits || [];
 
                 let options = '';
 
@@ -404,67 +431,80 @@
                 });
             @endif
 
-            $("#templates_table").on("click", ".delete", function(event) {
-                const data_assigned_id = $(this).data('id');
-                const activity_id = $(this).data('activity-id');
-                const project_template_id = $(this).data('project-template-id');
-                const tar_row = $(this).closest('tr');
+            // Deletes the assignment for every activity of the template, then reloads the list.
+            function deleteAssignment(payload, confirmText) {
                 Swal.fire({
                     title: 'Are you sure?',
-                    text: "You won't be able to revert this!",
+                    text: confirmText,
                     icon: 'warning',
                     showCancelButton: true,
                     confirmButtonColor: '#3085d6',
                     cancelButtonColor: '#d33',
                     confirmButtonText: 'Yes, delete it!'
                 }).then((result) => {
-                    if (result.isConfirmed) {
-                        $.ajax({
-                            url: '{{ route('assigned_data.destroy') }}',
-                            type: "POST",
-                            data: {
-                                "_token": "{{ csrf_token() }}", // Add the CSRF token to the data
-                                "id": data_assigned_id,
-                                "activity_id": activity_id,
-                                "project_template_id": project_template_id
-                            },
-                            success: function(response) {
-                                console.log(response);
-                                if (response == "Success") {
-                                    templates_table.row(tar_row).remove().draw();
-                                    Swal.fire(
-                                        'Deleted!',
-                                        'Record has been deleted.',
-                                        'success'
-                                    )
-                                }
+                    if (!result.isConfirmed) return;
+                    $.ajax({
+                        url: '{{ route('assigned_data.destroy') }}',
+                        type: "POST",
+                        data: Object.assign({ "_token": "{{ csrf_token() }}" }, payload),
+                        success: function(response) {
+                            if (response && response.message === "Success") {
+                                Swal.fire('Deleted!', 'Assignment has been deleted.', 'success')
+                                    .then(() => location.reload());
+                            } else {
+                                Swal.fire('Not deleted', (response && response.message) || 'Please try again.', 'error');
                             }
-                        })
-                    }
-                })
-            })
+                        },
+                        error: function(xhr) {
+                            Swal.fire('Not deleted', (xhr.responseJSON && xhr.responseJSON.message) || 'Please try again.', 'error');
+                        }
+                    });
+                });
+            }
+
+            $("#templates_table").on("click", ".delete", function() {
+                const activityIds = $(this).data('activity-ids') || [];
+                deleteAssignment(
+                    { "project_template_id": $(this).data('project-template-id'), "activity_ids": activityIds },
+                    `This deletes the assignment for all ${activityIds.length} activit${activityIds.length === 1 ? 'y' : 'ies'} of this template. You won't be able to revert this!`
+                );
+            });
+
+            $("#templates_table").on("click", ".view_activities", function() {
+                const activities = $(this).data('activities') || [];
+                const title = [$(this).data('project-name'), $(this).data('template-name')].filter(Boolean).join(' — ');
+
+                $("#activities_modal_title").text(title ? `Assigned Activities: ${title}` : 'Assigned Activities');
+                const $list = $("#activities_modal_list").empty();
+                activities.forEach((activity, i) => {
+                    $('<li class="list-group-item d-flex gap-3">')
+                        .append($('<span class="text-muted">').text(`${i + 1}.`))
+                        .append($('<span>').text(activity.name))
+                        .appendTo($list);
+                });
+                $("#activities_modal").modal('show');
+            });
 
 
             $("#templates_table").on("click", ".view_auditors", function(event) {
                 const data_assigned_id = $(this).data('id');
-                const activity_id = $(this).data('activity-id');
                 const project_template_id = $(this).data('project-template-id');
                 $("#user_assigned_model").modal('show')
 
+                // No activity_id: auditors across every activity of this template
                 $.ajax({
                     url: '{{ route('auditors.show') }}',
                     type: "POST",
                     data: {
                         "_token": "{{ csrf_token() }}",
                         "data_assigned_id": data_assigned_id,
-                        "activity_id": activity_id,
                         "project_template_id": project_template_id,
                         "user_type": "auditors"
                     },
                     success: function(response) {
                         console.log(response);
                         if (response.message == "Success") {
-                            render_assigned_user(response.assignedValues, response.verifierNames);
+                            render_assigned_user(response.assignedValues);
                         }
                     }
                 })

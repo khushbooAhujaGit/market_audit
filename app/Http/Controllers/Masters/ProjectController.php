@@ -40,6 +40,7 @@ use App\Models\User;
 use App\Models\UserActivityDataAssign;
 use App\Models\UserAuditAssigns;
 use App\Models\Zone;
+use App\Services\ProjectCompletion;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -60,6 +61,55 @@ class ProjectController extends Controller
     {
         $projects = Project::with('getUnit.getZone.getCompany')->orderBy('id', 'DESC')->paginate(10);
         return view('masters.projects.index', compact('projects'));
+    }
+
+    /**
+     * Mark a project completed (hidden from auditors + verifier queue, still reportable)
+     * or reopen it. Can be toggled any number of times; no data is changed besides the flag.
+     */
+    public function toggleComplete(Request $request)
+    {
+        $project = Project::findOrFail($request->id);
+
+        if (!$project->is_completed && !ProjectCompletion::hasAssignedAuditors($project->id)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This project is not assigned to any auditor yet, so it cannot be marked as completed.',
+            ], 422);
+        }
+
+        $completing = !$project->is_completed;
+        $project->update([
+            'is_completed' => $completing ? 1 : 0,
+            'completed_at' => $completing ? now() : null,
+            'completed_by' => $completing ? Auth::id() : null,
+        ]);
+
+        return response()->json([
+            'success'      => true,
+            'is_completed' => $project->is_completed,
+            'message'      => $completing ? 'Project marked as completed.' : 'Project reopened.',
+        ]);
+    }
+
+    /** Action-column HTML for the project list (shared by index view and AJAX search). */
+    public static function projectActionsHtml(Project $project): string
+    {
+        $toggle = $project->is_completed
+            ? '<li class="me-2"><button type="button" class="toggle-complete is-completed" data-id="' . $project->id . '" data-completed="1" title="Reopen project">Reopen</button></li>'
+            : '<li class="me-2"><button type="button" class="toggle-complete" data-id="' . $project->id . '" data-completed="0" title="Mark project as completed">Complete</button></li>';
+
+        return '<ul class="action">' . $toggle . '
+                <li class="edit"><a href="' . route('project.edit', ['id' => $project->id]) . '"><i class="icon-pencil-alt"></i></a></li>
+                <li class="delete" data-id="' . $project->id . '"><i class="icon-trash"></i></li>
+            </ul>';
+    }
+
+    public static function projectStatusHtml(Project $project): string
+    {
+        return $project->is_completed
+            ? '<span class="badge bg-secondary">Completed</span>'
+            : '<span class="badge bg-success">Open</span>';
     }
 
     public function searchProjects(Request $request)
@@ -91,18 +141,8 @@ class ProjectController extends Controller
             $html .= '<td>' . e($project->getUnit->unit_name ?? '') . '</td>';
             $html .= '<td>' . e($project->project_name) . '</td>';
             $html .= '<td>' . e(optional($project->getProjectType)->project_type_name) . '</td>';
-            $html .= '<td>
-            <ul class="action">
-                <li class="edit">
-                    <a href="' . route('project.edit', $project->id) . '">
-                        <i class="icon-pencil-alt"></i>
-                    </a>
-                </li>
-                <li class="delete" data-id="' . $project->id . '">
-                    <i class="icon-trash"></i>
-                </li>
-            </ul>
-        </td>';
+            $html .= '<td class="project-status">' . self::projectStatusHtml($project) . '</td>';
+            $html .= '<td>' . self::projectActionsHtml($project) . '</td>';
             $html .= '</tr>';
         }
 
@@ -1409,6 +1449,10 @@ class ProjectController extends Controller
                     }
                 }
             }
+
+            \App\Services\VerifierAssignment::assignAuditorCreatedRow(
+                auth()->id(), $projectTemplateInfo->id, $activityIdsArr, $projectTemplateNameValues->id
+            );
 
             $redirectUrl = route('user.project.row_id.activity', [
                 'row_id' => $max_row_id,

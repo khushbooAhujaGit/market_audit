@@ -55,6 +55,12 @@
             {{-- Multi Response = section header, no answer stored --}}
         @elseif(!$sqValue)
             <span class="text-muted fst-italic">&#8212; No answer &#8212;</span>
+        @elseif(in_array($subQuestion->question_type, ['Barcode', 'QR Code', 'RFID']))
+            {{-- Must come before the JSON-image check below: a scan answer is a JSON object too --}}
+            @include('masters.verifiers.partials.scan_answer_verify', [
+                'question' => $subQuestion,
+                'answer'   => $sqValue,
+            ])
         @else
             @php
                 // Check for JSON array (multi-image stored as JSON) FIRST,
@@ -196,6 +202,11 @@
             <td class="col-md-6">
                 @if(!$ccValue)
                     <span class="text-muted fst-italic">&#8212; No answer &#8212;</span>
+                @elseif(in_array($condChild->question_type, ['Barcode', 'QR Code', 'RFID']))
+                    @include('masters.verifiers.partials.scan_answer_verify', [
+                        'question' => $condChild,
+                        'answer'   => $ccValue,
+                    ])
                 @else
                     @php
                         $ccExt    = strtolower(pathinfo($ccValue, PATHINFO_EXTENSION));

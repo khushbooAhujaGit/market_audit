@@ -33,6 +33,8 @@ class VerifierController extends Controller
     {
         $userId = Auth::id();
         $my_verifications = Verifier::where('user_id', $userId)
+            // completed (closed by admin) projects drop out of the verification queue
+            ->whereHas('projectTemplateInfo.getProject', fn($q) => $q->open())
             ->with('projectTemplateInfo')->orderBy('id', 'DESC')->get();
         // {{ $my_verifications->links() }}
         //     $my_verifications = Verifier::where('user_id', $userId)
@@ -55,6 +57,7 @@ class VerifierController extends Controller
 
         $uniqueRowIds = $projectTemplateInfo->projectTemplateValues()
             ->select('id')->distinct()->get()->pluck('id');
+        $uniqueRowIds = \App\Services\VerifierAssignment::filterRowIds(Auth::user(), $projectTemplateInfo->id, $activity_info->id, $uniqueRowIds);
 
         // For activity_add_on: only show rows where auditor has fully closed all instances
         $isActivityAddOn = $projectTemplateInfo->activity_add_on == 1;
@@ -128,6 +131,7 @@ class VerifierController extends Controller
             ->distinct()
             ->get()
             ->pluck('id');
+        $uniqueRowIds = \App\Services\VerifierAssignment::filterRowIds(Auth::user(), $projectTemplateInfo->id, $activity_info->id, $uniqueRowIds);
 
         // For activity_add_on activities, only show rows where the auditor has
         // finally submitted (closed) all instances via the Submit button.
@@ -1621,11 +1625,16 @@ class VerifierController extends Controller
     }
 
 
-    public function reportPage()
+    public function reportPage(Request $request)
     {
 
         $currentUser = User::find(Auth::user()->id);
         $currentUserRole = $currentUser->getRoleNames()->first();
+
+        // Every role (Super Admin included) sees open projects by default; the "Completed
+        // Projects" switch (?view=completed) shows only projects the admin marked completed.
+        $view = \App\Services\ProjectCompletion::reportView($request);
+        $applyCompletionFilter = fn($query) => $view === 'completed' ? $query->completed() : $query->open();
 
         if ($currentUser->getRoleNames()->first() == 'Verifier') {
             $companies = [];
@@ -1640,6 +1649,7 @@ class VerifierController extends Controller
             $projects = Project::whereHas('getProjectTemplates', function ($query) use ($templateIds) {
                 $query->whereIn('id', $templateIds);
             })
+                ->tap($applyCompletionFilter)
                 ->orderBy('id', 'DESC')->get();
 
             //            dd($projects);
@@ -1652,13 +1662,14 @@ class VerifierController extends Controller
                 ->whereHas('dataAssigns', function ($query) use ($currentUser) {
                     $query->where('company_user_id', $currentUser->id);
                 })
+                ->tap($applyCompletionFilter)
                 ->orderBy('id', 'DESC')
                 ->get();
         }
 
         if ($currentUser->getRoleNames()->first() == 'Super Admin') {
             $companies = [];
-            $projects = Project::orderBy('id', 'DESC')->get();
+            $projects = Project::query()->tap($applyCompletionFilter)->orderBy('id', 'DESC')->get();
         }
 
         if ($currentUser->getRoleNames()->first() == 'Agency') {
@@ -1668,12 +1679,13 @@ class VerifierController extends Controller
                 ->whereHas('dataAssigns', function ($query) use ($currentUser) {
                     $query->where('agency_id', $currentUser->id);
                 })
+                ->tap($applyCompletionFilter)
                 ->orderBy('id', 'DESC')
                 ->get();
         }
 
         //        dd($projects);
-        return view('masters.companies.pdf_report_page', compact('companies', 'currentUser', 'projects', 'currentUserRole'));
+        return view('masters.companies.pdf_report_page', compact('companies', 'currentUser', 'projects', 'currentUserRole', 'view'));
     }
 
 
