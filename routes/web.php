@@ -7,6 +7,7 @@ use App\Http\Controllers\Masters\InfiltrationReportController;
 use App\Http\Controllers\Masters\ActivityController;
 use App\Http\Controllers\Masters\ActivityGroupController;
 use App\Http\Controllers\Masters\AuditorAssignedDataController;
+use App\Http\Controllers\Masters\BulkAssignController;
 use App\Http\Controllers\Masters\CompanyController;
 use App\Http\Controllers\Masters\CompanyTypeController;
 use App\Http\Controllers\Masters\DropdownController;
@@ -71,7 +72,7 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
         if (Auth::user()->hasRole('Auditor')) {
             return redirect()->route('user.projects');
         }
-        return view('dashboard');
+        return redirect()->route('dashboard');
     });
 
     Route::get('/home',      [App\Http\Controllers\HomeController::class, 'index'])->name('home');
@@ -95,9 +96,19 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
         Route::post('user/delete',                            [UserController::class, 'destroy'])->name('user.destroy');
         Route::get('user/upload_user',                        [UserController::class, 'view_user_upload'])->name('users.upload.view');
         Route::post('user/bluk_data_upload',                  [UserController::class, 'userUpload'])->name('user.blukUpload');
+        Route::get('user/upload_errors/{token}',              [UserController::class, 'downloadUserUploadErrors'])->name('users.uploadErrors');
         Route::get('/user_export',                            [UserController::class, 'export'])->name('users.export');
     });
     Route::post('user/assign_data', [UserController::class, 'assignDataToUsers'])->name('assignToUsers.data');
+
+    // ── Bulk Assign (Excel) ───────────────────────────────────────────────────
+    Route::prefix('bulk_assign')->controller(BulkAssignController::class)->group(function () {
+        Route::get('/',           'index')->name('bulk_assign.index');
+        Route::post('/templates', 'templates')->name('bulk_assign.templates');
+        Route::get('/download',   'download')->name('bulk_assign.download');
+        Route::post('/upload',    'upload')->name('bulk_assign.upload');
+        Route::post('/process',   'process')->name('bulk_assign.process');
+    });
 
     // ── Auditor Assigned Data ─────────────────────────────────────────────────
     Route::prefix('auditorAssigned')->controller(AuditorAssignedDataController::class)->group(function () {

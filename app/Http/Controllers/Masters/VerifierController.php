@@ -17,6 +17,7 @@ use App\Models\TempUserActivityAnswersData;
 use App\Models\ActivityInstanceClose;
 use App\Models\User;
 use App\Models\Verifier;
+use App\Models\VerifierAnswerEdit;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -315,7 +316,22 @@ class VerifierController extends Controller
             ->where('user_id', $user_responses[0]->user_id)
             ->first();
 
-        return view('masters.verifiers.verify', compact('auditDateTime', 'agencyData', 'auditorData', 'related_values', 'activity_check', 'related_questions', 'sub_question_child_ids', 'user_responses', 'activity_group_info', 'remarks', 'userLatLongData', 'activity_sequence', 'instance_label', 'activitySignature'));
+        // Answers changed by a verifier, per question: the auditor's original answer (first edit)
+        // and who changed it last.
+        $answerEdits = VerifierAnswerEdit::with('editor:id,name')
+            ->where('row_id', $r)
+            ->where('activity_id', $activity_check->id)
+            ->where('activity_sequence', $activity_sequence)
+            ->orderBy('id')
+            ->get()
+            ->groupBy('question_id')
+            ->map(fn($edits) => (object) [
+                'original'  => $edits->first()->old_answer,
+                'edited_by' => optional($edits->last()->editor)->name,
+                'edited_at' => $edits->last()->created_at,
+            ]);
+
+        return view('masters.verifiers.verify', compact('auditDateTime', 'agencyData', 'auditorData', 'related_values', 'activity_check', 'related_questions', 'sub_question_child_ids', 'user_responses', 'activity_group_info', 'remarks', 'userLatLongData', 'activity_sequence', 'instance_label', 'activitySignature', 'answerEdits'));
         // }
         // else{
         //     return redirect()->back()->with('message', 'OTP Verification is pending for this audit');
@@ -468,24 +484,58 @@ class VerifierController extends Controller
 
         //khushboo 07-05-26
 
+        // Answer values edited on the verify page (Edit button) are saved only on Approve;
+        // Reject only records the decision. Every real change keeps the auditor's original
+        // answer in verifier_answer_edits.
+        $isApprove = $request->has('approve');
+        $answerScope = function ($query) use ($row_id, $a_id, $seqFilter, $g_id) {
+            $query->where("row_id", $row_id)
+                ->where("activity_id", $a_id)
+                ->where($seqFilter)
+                ->where(function ($query) use ($g_id) {
+                    if ($g_id == 0) {
+                        $query->whereNull('activity_group_name_id')
+                            ->orWhere('activity_group_name_id', 0);
+                    } else {
+                        $query->where('activity_group_name_id', $g_id);
+                    }
+                });
+        };
+
         $parameters = $request->except(['activity_id', 'activity_group_id', 'row_id', '_token', 'reject', 'approve', 'activity_group_name_id', 'sequence', 'remark', 'activity_sequence', 'other_remark']);
         foreach ($parameters as $key => $value) {
-            if (!is_object($value)) {
-                if (!empty($value)) {
-                    $user_answer_get = TempUserActivityAnswersData::where("row_id", $row_id)
-                        ->where("activity_id", $a_id)
-                        ->where($seqFilter)
-                        ->where(function ($query) use ($g_id) {
-                            if ($g_id == 0) {
-                                $query->whereNull('activity_group_name_id')
-                                    ->orWhere('activity_group_name_id', 0);
-                            } else {
-                                $query->where('activity_group_name_id', $g_id);
-                            }
-                        })
-                        ->where('question_id', $key)->first();
-
+            if (!is_object($value) && is_numeric($key)) {
+                if (is_array($value)) {
+                    $value = array_values(array_filter($value, fn($v) => trim((string) $v) !== ''));
+                }
+                if ($value !== null && $value !== '' && $value !== []) {
                     $check_questionType = Question::find($key);
+                    $rawValue = is_array($value) ? implode(',', $value) : (string) $value;
+
+                    // The answer row the verify page shows for this question
+                    $candidates = TempUserActivityAnswersData::where($answerScope)->where('question_id', $key)->orderBy('id')->get();
+                    $user_answer_get = $this->displayedAnswer($candidates, $check_questionType);
+
+                    if (!empty($check_questionType) && $check_questionType->question_type != "Subjective") {
+                        // Unchanged when it matches any stored answer of this question (a question can
+                        // be rendered twice — standalone and as a conditional child — under one name).
+                        $changed = $isApprove && !$candidates->contains(
+                            fn($c) => !$this->verifierAnswerChanged($check_questionType->question_type, $c->user_answer, $rawValue)
+                        );
+                        if (!$changed) {
+                            if ($user_answer_get) {
+                                $user_answer_get->status = $new_status;
+                                $user_answer_get->remark = $verifier_remark;
+                                $user_answer_get->verified_by = $userId;
+                                $user_answer_get->save();
+                            }
+                            if (($index = array_search($key, $related_questions)) !== false) {
+                                unset($related_questions[$index]);
+                            }
+                            continue;
+                        }
+                    }
+
                     //                    dd($key);
                     //                    dd($check_questionType->question_type);
                     if (!empty($check_questionType)) {
@@ -494,7 +544,7 @@ class VerifierController extends Controller
                                 $value = \Carbon\Carbon::parse($value)->format('d/m/Y');
                             }
                         } elseif ($check_questionType->question_type == "Multi select") {
-                            $value = implode(',', $value);
+                            $value = implode(',', (array) $value);
                         } elseif ($check_questionType->question_type == "Audio") {
                             if (strpos($value, 'data:audio/') === 0) {
                                 $get_privous_audio = TempUserActivityAnswersData::where('row_id', $row_id)
@@ -543,16 +593,14 @@ class VerifierController extends Controller
                             //                            echo 'subjective - '.$value1->id;
                             //                            echo $value;
 
-                            if (!empty($value) && $value1->user_answer != $value) {
+                            if ($isApprove && $value1->user_answer != $value) {
+                                $this->logVerifierEdit($value1, $value1->user_answer, $value, $userId);
                                 $value1->user_answer = $value;
                                 $value1->edited_by_verifier = 1;
-                            } else {
-                                $value1->edited_by_verifier = 0;
                             }
                             $value1->status = $new_status;
                             $value1->remark = $verifier_remark;
                             $value1->verified_by = $userId;
-                            $value1->edited_by_verifier = 1;
                             $value1->save();
                             // Remove the question ID from the related questions array
                             if (($index = array_search($key, $related_questions)) !== false) {
@@ -562,18 +610,20 @@ class VerifierController extends Controller
                     } else {
                         //                        echo '<pre>';
                         //                        echo 'non subjective'.$user_answer_get->id;
+                        // Reaching here means Approve with a changed value (unchanged values continue above)
+                        if (!$user_answer_get && !empty($check_questionType)) {
+                            // The auditor left this question blank: the verifier's answer becomes a new answer row
+                            $user_answer_get = $this->newVerifierAnswer($row_id, $a_id, $activity_sequence, $g_id, (int) $key);
+                        }
                         if ($user_answer_get) {
-
-                            if (!empty($value) && $user_answer_get->user_answer != $value) {
-                                $user_answer_get->user_answer = $value;
-                                $user_answer_get->edited_by_verifier = 1;
-                            } else {
-                                $user_answer_get->edited_by_verifier = 1;
-                            }
+                            $oldAnswer = $user_answer_get->exists ? $user_answer_get->user_answer : null;
+                            $user_answer_get->user_answer = $value;
+                            $user_answer_get->edited_by_verifier = 1;
                             $user_answer_get->status = $new_status;
                             $user_answer_get->remark = $verifier_remark;
                             $user_answer_get->verified_by = $userId;
                             $user_answer_get->save();
+                            $this->logVerifierEdit($user_answer_get, $oldAnswer, $value, $userId);
                             // Remove the question ID from the related questions array
                             if (($index = array_search($key, $related_questions)) !== false) {
                                 unset($related_questions[$index]);
@@ -586,120 +636,42 @@ class VerifierController extends Controller
         // dd($new_status);
         foreach ($related_questions as $re_quest) {
 
-            //            dd($row_id, $a_id, $g_id, $re_quest);
-            $user_answer_count = TempUserActivityAnswersData::where("row_id", $row_id)
-                ->where("activity_id", $a_id)
-                ->where($seqFilter)
-                ->where(function ($query) use ($g_id) {
-                    if ($g_id == 0) {
-                        $query->whereNull('activity_group_name_id')
-                            ->orWhere('activity_group_name_id', 0);
-                    } else {
-                        $query->where('activity_group_name_id', $g_id);
-                    }
-                })
-                ->where('question_id', $re_quest)->count();
-            if ($user_answer_count == 1) {
+            $user_answer_get = TempUserActivityAnswersData::where($answerScope)
+                ->where('question_id', $re_quest)->orderBy('id')->get();
 
-                $user_answer_get = TempUserActivityAnswersData::where("row_id", $row_id)
-                    ->where("activity_id", $a_id)
-                    ->where($seqFilter)
-                    ->where(function ($query) use ($g_id) {
-                        if ($g_id == 0) {
-                            $query->whereNull('activity_group_name_id')
-                                ->orWhere('activity_group_name_id', 0);
-                        } else {
-                            $query->where('activity_group_name_id', $g_id);
-                        }
-                    })
-                    ->where('question_id', $re_quest)->first();
-
-                $auditDate = $user_answer_get->created_at;
-
-                //                echo '<pre>';
-                //                echo 'image'.$user_answer_get->id;
-                if ($request->hasFile($re_quest)) {
-                    //                    echo '<pre>';
-                    //                    echo 'image edit'.$user_answer_get->id;
-                    // this is to remove the previous file from the folder when verifier is updating the file
-                    $folder = "answer";
-                    $previousImagePath = public_path('answer/' . basename($user_answer_get->user_answer));
-                    if (File::exists($previousImagePath)) {
-                        File::delete($previousImagePath);
-                    }
-                    $answer_image = $request->file($re_quest);
-                    $file_name = 'file_' . time() . rand(0, 999) . '.' . $answer_image->getClientOriginalExtension();
-                    $answer_image->move(public_path($folder), $file_name);
-                    $answer_image_url = url('/') . '/' . $folder . '/' . $file_name;
-                    $user_answer_get->user_answer = $answer_image_url;
-                    $user_answer_get->status = $new_status;
-                    $user_answer_get->remark = $verifier_remark;
-                    $user_answer_get->verified_by = $userId;
-                    $user_answer_get->edited_by_verifier = 1;
-                    $user_answer_get->save();
-                } else {
-                    //                dd($user_answer_get->status);
-                    //                print_r($user_answer_get);
-                    //                    echo '<pre>';
-                    //                    echo 'image save'.$user_answer_get->id;
-                    $user_answer_get->status = $new_status;
-                    $user_answer_get->remark = $verifier_remark;
-                    $user_answer_get->verified_by = $userId;
-                    $user_answer_get->edited_by_verifier = 1;
-                    $user_answer_get->save();
-                }
-            } else if ($user_answer_count > 1) {
-
-                $user_answer_get = TempUserActivityAnswersData::where("row_id", $row_id)
-                    ->where("activity_id", $a_id)
-                    ->where($seqFilter)
-                    ->where(function ($query) use ($g_id) {
-                        if ($g_id == 0) {
-                            $query->whereNull('activity_group_name_id')
-                                ->orWhere('activity_group_name_id', 0);
-                        } else {
-                            $query->where('activity_group_name_id', $g_id);
-                        }
-                    })
-                    ->where('question_id', $re_quest)->get();
-
+            if ($user_answer_get->isNotEmpty()) {
                 $auditDate = $user_answer_get[0]->created_at;
+            }
 
-                foreach ($user_answer_get as $key1 => $value1) {
-                    //                    echo '<pre>';
-                    //                    echo 'subj other img- '.$value1->id;
+            // A file chosen for an Image / File Upload question replaces the answer the page shows
+            // (or answers a question the auditor left blank) — on Approve only. The auditor's file
+            // is kept on disk and recorded in verifier_answer_edits.
+            $editedAnswer = null;
+            if ($isApprove && $request->hasFile($re_quest)) {
+                $displayed = $this->displayedAnswer($user_answer_get, Question::find($re_quest))
+                    ?? $this->newVerifierAnswer($row_id, $a_id, $activity_sequence, $g_id, (int) $re_quest);
+                $folder = "answer";
+                $answer_image = $request->file($re_quest);
+                $file_name = 'file_' . time() . rand(0, 999) . '.' . $answer_image->getClientOriginalExtension();
+                $answer_image->move(public_path($folder), $file_name);
 
-                    if ($request->hasFile($re_quest)) {
-                        //                        echo '<pre>';
-                        //                        echo 'subj other with edit img- '.$value1->id;
-                        // this is to remove the previous file from the folder when verifier is updating the file
-                        $folder = "answer";
-                        $previousImagePath = public_path('answer/' . basename($user_answer_get->user_answer));
-                        if (File::exists($previousImagePath)) {
-                            File::delete($previousImagePath);
-                        }
-                        $answer_image = $request->file($re_quest);
-                        $file_name = 'file_' . time() . rand(0, 999) . '.' . $answer_image->getClientOriginalExtension();
-                        $answer_image->move(public_path($folder), $file_name);
-                        $answer_image_url = url('/') . '/' . $folder . '/' . $file_name;
-                        $value1->user_answer = $answer_image_url;
-                        $value1->status = $new_status;
-                        $value1->remark = $verifier_remark;
-                        $value1->verified_by = $userId;
-                        $value1->edited_by_verifier = 1;
-                        $value1->save();
-                    } else {
-                        //                dd($user_answer_get->status);
-                        //                print_r($user_answer_get);
-                        //                        echo '<pre>';
-                        //                        echo 'subj other without edit img- '.$value1->id;
-                        $value1->status = $new_status;
-                        $value1->remark = $verifier_remark;
-                        $value1->verified_by = $userId;
-                        $value1->edited_by_verifier = 1;
-                        $value1->save();
-                    }
-                }
+                $oldAnswer = $displayed->exists ? $displayed->user_answer : null;
+                $displayed->user_answer = $folder . '/' . $file_name; // relative, like the auditor's files
+                $displayed->status = $new_status;
+                $displayed->remark = $verifier_remark;
+                $displayed->verified_by = $userId;
+                $displayed->edited_by_verifier = 1;
+                $displayed->save();
+                $this->logVerifierEdit($displayed, $oldAnswer, $displayed->user_answer, $userId);
+                $editedAnswer = $displayed->id;
+            }
+
+            foreach ($user_answer_get as $value1) {
+                if ($value1->id === $editedAnswer) continue;
+                $value1->status = $new_status;
+                $value1->remark = $verifier_remark;
+                $value1->verified_by = $userId;
+                $value1->save();
             }
         }
 
@@ -1783,6 +1755,13 @@ class VerifierController extends Controller
 
         $activitySequence = (int) ($request->activity_sequence ?? 0);
 
+        // "Download All Attachments": images + file/audio/video attachments, named after the
+        // question. Revert by setting DOWNLOAD_ALL_ATTACHMENTS=false in .env (or restore
+        // VerifierController.php.bak_before_attachments).
+        if (filter_var(env('DOWNLOAD_ALL_ATTACHMENTS', true), FILTER_VALIDATE_BOOLEAN)) {
+            return $this->downloadAllAttachments($request, $activitySequence);
+        }
+
         $imageQuestionIds = Question::where('activity_id', $request->activity_id)
             ->where('question_type', 'Image')
             ->pluck('id');
@@ -1839,5 +1818,179 @@ class VerifierController extends Controller
 
         $zipName = 'images_row' . $request->row_id . '_activity' . $request->activity_id . '.zip';
         return response()->download($tmpFile, $zipName)->deleteFileAfterSend(true);
+    }
+
+    /**
+     * ZIP of every attachment (Image, File Upload, Audio, Video) answered for a row + activity
+     * instance. Files are named "<short_question_name>.<ext>"; when a question has more than one
+     * attachment they become "<short_question_name>_1.<ext>", "_2", ...
+     */
+    private function downloadAllAttachments(Request $request, int $activitySequence)
+    {
+        $questions = Question::where('activity_id', $request->activity_id)
+            ->whereIn('question_type', ['Image', 'File Upload', 'Audio', 'Video'])
+            ->get(['id', 'question'])
+            ->keyBy('id');
+
+        $answers = TempUserActivityAnswersData::where('row_id', $request->row_id)
+            ->where('activity_id', $request->activity_id)
+            ->whereIn('question_id', $questions->keys())
+            ->whereNotNull('user_answer')
+            ->where('user_answer', '!=', '')
+            ->when($activitySequence > 0,
+                fn($q) => $q->where('activity_sequence', $activitySequence),
+                fn($q) => $q->where(fn($q2) => $q2->whereNull('activity_sequence')->orWhere('activity_sequence', 0))
+            )
+            ->orderBy('id')
+            ->get();
+
+        // Collect existing files first so we know how many each base name has.
+        $entries = [];
+        foreach ($answers as $answer) {
+            $paths = json_decode($answer->user_answer, true);
+            if (!is_array($paths)) {
+                $paths = [$answer->user_answer];
+            }
+            $base = $this->shortAttachmentName($questions[$answer->question_id]->question ?? '', $answer->question_id);
+            foreach ($paths as $path) {
+                $cleanPath = ltrim(trim(urldecode((string) $path)), '/');
+                if ($cleanPath === '' || preg_match('#^https?://#i', $cleanPath)) {
+                    continue;
+                }
+                $absPath = public_path($cleanPath);
+                if (!file_exists($absPath)) {
+                    $absPath = base_path('public/' . $cleanPath);
+                }
+                if (!is_file($absPath)) {
+                    Log::warning('downloadAllAttachments: file not found', ['path' => $absPath]);
+                    continue;
+                }
+                $entries[] = ['base' => $base, 'abs' => $absPath];
+            }
+        }
+
+        if (empty($entries)) {
+            return response()->json(['error' => 'No attachments found on disk.'], 404);
+        }
+
+        $totals = array_count_values(array_column($entries, 'base'));
+        $seen   = [];
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'all_att_') . '.zip';
+        $zip     = new ZipArchive();
+        if ($zip->open($tmpFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            abort(500, 'Could not create ZIP archive');
+        }
+
+        foreach ($entries as $e) {
+            $ext  = strtolower(pathinfo($e['abs'], PATHINFO_EXTENSION)) ?: 'jpg';
+            $seen[$e['base']] = ($seen[$e['base']] ?? 0) + 1;
+            $name = $totals[$e['base']] > 1 ? $e['base'] . '_' . $seen[$e['base']] : $e['base'];
+            $zip->addFile($e['abs'], $name . '.' . $ext);
+        }
+        $zip->close();
+
+        $zipName = 'attachments_row' . $request->row_id . '_activity' . $request->activity_id . '.zip';
+        return response()->download($tmpFile, $zipName)->deleteFileAfterSend(true);
+    }
+
+    /**
+     * The answer row the verify page shows for a question (same choice as verify.blade.php):
+     * a conditional child prefers the row answered under its parent, others the standalone row.
+     */
+    private function displayedAnswer($candidates, ?Question $question)
+    {
+        if ($candidates->isEmpty()) return null;
+        $parentId = $question?->parent_question_id;
+        return ($parentId ? $candidates->first(fn($c) => (int) $c->parent_context_id === (int) $parentId) : null)
+            ?? $candidates->first(fn($c) => $c->parent_context_id === null)
+            ?? $candidates->first();
+    }
+
+    /** Whether a value posted from the verify page differs from a stored answer. */
+    private function verifierAnswerChanged(string $type, $stored, string $posted): bool
+    {
+        $stored = trim((string) $stored);
+        $posted = trim($posted);
+        if ($stored === $posted) return false;
+
+        switch ($type) {
+            case 'Audio':
+                // The page posts the existing recording's URL; only a new recording is a change.
+                return str_starts_with($posted, 'data:audio/');
+            case 'Multi select':
+                $set = fn($v) => collect(explode(',', $v))->map(fn($x) => trim($x))->filter(fn($x) => $x !== '')->sort()->values()->all();
+                return $set($stored) !== $set($posted);
+            case 'Date':
+            case 'Date & Time':
+                // The page shows dates as Y-m-d / Y-m-d\TH:i, whatever format the app stored.
+                $format = $type === 'Date' ? 'Y-m-d' : 'Y-m-d H:i';
+                $a = $this->parseAnswerDate($stored);
+                $b = $this->parseAnswerDate($posted);
+                return !$a || !$b ? true : $a->format($format) !== $b->format($format);
+            default:
+                return true;
+        }
+    }
+
+    private function parseAnswerDate(string $value): ?Carbon
+    {
+        if ($value === '') return null;
+        foreach (['d/m/Y H:i:s', 'd/m/Y H:i', 'd/m/Y', 'Y-m-d\TH:i:s', 'Y-m-d\TH:i', 'Y-m-d H:i:s', 'Y-m-d H:i', 'Y-m-d', 'd-m-Y'] as $format) {
+            try {
+                $date = Carbon::createFromFormat('!' . $format, $value);
+                if ($date && $date->format($format) === $value) return $date;
+            } catch (\Throwable $e) {
+            }
+        }
+        try {
+            return Carbon::parse($value);
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /** A new answer row for a question the auditor left blank (owned by the row's auditor). */
+    private function newVerifierAnswer($rowId, $activityId, int $activitySequence, $groupId, int $questionId): TempUserActivityAnswersData
+    {
+        $auditorId = TempUserActivityAnswersData::where('row_id', $rowId)->where('activity_id', $activityId)
+            ->whereRaw('COALESCE(activity_sequence, 0) = ?', [$activitySequence])
+            ->orderBy('id')->value('user_id')
+            ?? TempUserActivityAnswersData::where('row_id', $rowId)->where('activity_id', $activityId)->orderBy('id')->value('user_id');
+
+        return new TempUserActivityAnswersData([
+            'user_id'                => $auditorId,
+            'row_id'                 => $rowId,
+            'activity_id'            => $activityId,
+            'activity_sequence'      => $activitySequence > 0 ? $activitySequence : 0,
+            'activity_group_name_id' => $groupId ?: 0,
+            'question_id'            => $questionId,
+            'same_answer_id'         => (int) TempUserActivityAnswersData::max('same_answer_id') + 1,
+            'is_draft'               => 0,
+        ]);
+    }
+
+    /** Keeps the auditor's original answer when a verifier changes it. */
+    private function logVerifierEdit(TempUserActivityAnswersData $answer, $oldAnswer, $newAnswer, $verifierId): void
+    {
+        VerifierAnswerEdit::create([
+            'answer_id'         => $answer->id,
+            'row_id'            => $answer->row_id,
+            'activity_id'       => $answer->activity_id,
+            'activity_sequence' => (int) $answer->activity_sequence,
+            'question_id'       => $answer->question_id,
+            'old_answer'        => $oldAnswer,
+            'new_answer'        => $newAnswer,
+            'edited_by'         => $verifierId,
+        ]);
+    }
+
+    /** Short, filesystem-safe name from a question's text (max 40 chars). */
+    private function shortAttachmentName(string $question, $fallbackId): string
+    {
+        $slug = trim(preg_replace('/[^A-Za-z0-9]+/', '_', $question), '_');
+        $slug = substr($slug, 0, 40);
+        $slug = rtrim($slug, '_');
+        return $slug !== '' ? $slug : 'question_' . $fallbackId;
     }
 }

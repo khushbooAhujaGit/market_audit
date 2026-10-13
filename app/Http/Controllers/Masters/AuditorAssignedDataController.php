@@ -46,46 +46,74 @@ class AuditorAssignedDataController extends Controller
             $scope->whereIn('id', $assignedDataIds);
         }
 
-        // One list row per assigned project template, combining all of its activities.
-        // The earliest assignment supplies the displayed details; newest activity first.
-        $data_assigned_values = (clone $scope)
-            ->select('project_template_id', DB::raw('MIN(id) as first_id'), DB::raw('MAX(id) as latest_id'))
-            ->groupBy('project_template_id')
+        // One list row per assigned project template and assignment date (newest date first),
+        // showing the activities and auditors assigned on that date.
+        $data_assigned_values = DB::query()
+            ->fromSub($this->assignmentEvents()->whereIn('d.id', (clone $scope)->select('id')), 'e')
+            ->select(
+                'project_template_id',
+                'assigned_on',
+                DB::raw('MIN(data_assign_id) as first_id'),
+                DB::raw('MAX(data_assign_id) as latest_id'),
+                DB::raw('COUNT(DISTINCT user_id) as auditor_count'),
+                DB::raw('GROUP_CONCAT(DISTINCT activity_id) as activity_ids')
+            )
+            ->groupBy('project_template_id', 'assigned_on')
+            ->orderByDesc('assigned_on')
             ->orderByDesc('latest_id')
             ->paginate(10);
 
-        $templateIds = $data_assigned_values->pluck('project_template_id');
+        $templateIds = $data_assigned_values->pluck('project_template_id')->unique();
 
         $firstAssigns = DataAssign::with(['getProjectTemplate.getProject.getUnit.getZone.getCompany', 'templateName', 'TemplateHeadName'])
             ->whereIn('id', $data_assigned_values->pluck('first_id'))
             ->get()
             ->keyBy('id');
 
+        // Every activity of the template (any date): delete still removes the whole template's assignment.
         $assignsByTemplate = (clone $scope)
             ->whereIn('project_template_id', $templateIds)
-            ->with('activityName')
             ->orderBy('id')
             ->get(['id', 'project_template_id', 'activity_id'])
             ->groupBy('project_template_id');
 
-        $auditorCounts = DB::table('user_activity_data_assigns as u')
-            ->join('data_assigns as d', 'd.id', '=', 'u.data_assign_id')
-            ->whereIn('d.project_template_id', $templateIds)
-            ->groupBy('d.project_template_id')
-            ->selectRaw('d.project_template_id, COUNT(DISTINCT u.user_id) as cnt')
-            ->pluck('cnt', 'project_template_id');
+        $activityNames = \App\Models\Activity::whereIn('id', $assignsByTemplate->flatten()->pluck('activity_id')->unique())
+            ->pluck('activity_name', 'id');
 
-        $data_assigned_values->getCollection()->transform(function ($group) use ($firstAssigns, $assignsByTemplate, $auditorCounts) {
+        $data_assigned_values->getCollection()->transform(function ($group) use ($firstAssigns, $assignsByTemplate, $activityNames) {
             $group->setRelation('assign', $firstAssigns->get($group->first_id));
+            $dateActivityIds = array_map('intval', explode(',', (string) $group->activity_ids));
             $group->activities = ($assignsByTemplate->get($group->project_template_id) ?? collect())
-                ->unique('activity_id')
-                ->map(fn($a) => ['id' => $a->activity_id, 'name' => optional($a->activityName)->activity_name ?? 'Activity #' . $a->activity_id])
+                ->pluck('activity_id')
+                ->unique()
+                ->filter(fn($id) => in_array((int) $id, $dateActivityIds, true))
+                ->map(fn($id) => ['id' => $id, 'name' => $activityNames[$id] ?? 'Activity #' . $id])
                 ->values();
-            $group->auditor_count = $auditorCounts->get($group->project_template_id, 0);
+            $group->template_activity_ids = ($assignsByTemplate->get($group->project_template_id) ?? collect())
+                ->pluck('activity_id')->unique()->values();
             return $group;
         });
 
         return view('masters.data_templates.data_assigned', compact('data_assigned_values'));
+    }
+
+    /**
+     * One record per assigned row with the date it was assigned (data_assign_id, project_template_id,
+     * activity_id, user_id, common_id, row_id, assigned_on). An auditor without rows yet, and a
+     * data assignment without auditors, appear once with a NULL row_id. Rows of a template without
+     * data are created by the auditor, so they count from the date the auditor was assigned.
+     */
+    private function assignmentEvents()
+    {
+        return DB::table('data_assigns as d')
+            ->leftJoin('user_activity_data_assigns as u', 'u.data_assign_id', '=', 'd.id')
+            ->leftJoin('project_templates as pt', 'pt.id', '=', 'u.project_template_id')
+            ->leftJoin('user_audit_assigns as a', 'a.common_id', '=', 'u.common_id')
+            ->select('d.id as data_assign_id', 'd.project_template_id', 'd.activity_id', 'u.user_id', 'u.common_id', 'a.row_id')
+            ->selectRaw('DATE(CASE
+                WHEN u.id IS NULL THEN d.created_at
+                WHEN a.id IS NULL OR pt.with_data = 0 THEN u.created_at
+                ELSE a.created_at END) as assigned_on');
     }
 
     public function get_assigned_auditors(Request $request)
@@ -148,8 +176,25 @@ class AuditorAssignedDataController extends Controller
                 $siblingIds = [$request->data_assigned_id];
             }
 
+            // A dated list row: only the auditors and rows assigned on that date.
+            $rowIdsByCommon = null;
+            $assignedOn = $request->input('assigned_on');
+            if ($assignedOn && preg_match('/^\d{4}-\d{2}-\d{2}$/', $assignedOn)) {
+                $rowIdsByCommon = DB::query()
+                    ->fromSub($this->assignmentEvents()->whereIn('d.id', $siblingIds), 'e')
+                    ->where('assigned_on', $assignedOn)
+                    ->whereNotNull('common_id')
+                    ->get(['common_id', 'row_id'])
+                    ->groupBy('common_id')
+                    ->map(fn($events) => $events->pluck('row_id')->filter()->unique()->values()->all());
+            }
+            $rowIdsFor = fn($commonIds) => $rowIdsByCommon !== null
+                ? collect($commonIds)->flatMap(fn($c) => $rowIdsByCommon->get($c, []))->unique()->values()->all()
+                : UserAuditAssigns::whereIn('common_id', $commonIds)->distinct()->pluck('row_id')->all();
+
             /* Get all assigned records across all matching DataAssigns */
             $user_list = UserActivityDataAssign::whereIn('data_assign_id', $siblingIds)
+                ->when($rowIdsByCommon !== null, fn($q) => $q->whereIn('common_id', $rowIdsByCommon->keys()))
                 ->select('user_id', 'common_id', 'activity_id')
                 ->with('get_user_info')
                 ->get()
@@ -186,10 +231,7 @@ class AuditorAssignedDataController extends Controller
             foreach ($user_list as $userId => $records) {
                 $userName = optional($records->first()->get_user_info)->name;
 
-                $allRowIds = UserAuditAssigns::whereIn('common_id', $records->pluck('common_id')->unique())
-                    ->distinct()
-                    ->pluck('row_id')
-                    ->all();
+                $allRowIds = $rowIdsFor($records->pluck('common_id')->unique());
 
                 $rows = DB::table('project_template_name_values_new')
                     ->whereIn('id', $allRowIds)
@@ -203,10 +245,7 @@ class AuditorAssignedDataController extends Controller
 
                 $merged = [];
                 foreach ($records->groupBy('activity_id') as $activityId => $activityRecords) {
-                    $rowIds = UserAuditAssigns::whereIn('common_id', $activityRecords->pluck('common_id')->unique())
-                        ->distinct()
-                        ->pluck('row_id')
-                        ->all();
+                    $rowIds = $rowIdsFor($activityRecords->pluck('common_id')->unique());
 
                     $rowsByVerifier = DB::table('verifier_row_assigns as v')
                         ->join('users', 'users.id', '=', 'v.user_id')

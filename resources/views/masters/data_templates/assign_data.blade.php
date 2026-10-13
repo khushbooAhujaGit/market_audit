@@ -42,6 +42,9 @@
                     <div class="card">
                         <div class="card-header">
                             <h4>Assign Data
+                                @if ($currentUserRole != 'Agency')
+                                    <a href="{{ route('bulk_assign.index') }}" class="btn btn-primary float-end">Bulk Assign</a>
+                                @endif
                                 {{-- <a href="{{route('auditorAssigned.list')}}"> --}}
                                 {{-- <button class="btn btn-primary float-end">View Assigned Data</button> --}}
                                 {{-- </a> --}}

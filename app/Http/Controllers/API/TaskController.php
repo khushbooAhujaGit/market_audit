@@ -290,13 +290,16 @@ class TaskController extends Controller
                         ->merge($activeConditionalIds)->unique()->values()->toArray();
                     $requiredCount = count($requiredQuestionIds);
 
+                    // Only answers the auditor actually submitted count; saved drafts (status 0)
+                    // must not make the activity look done.
+                    $outSubmittedAnswers = $this->onlySubmitted($outBaseAnswers);
                     if ($requiredCount === 0) {
                         $allQIds           = $outletAllQIdsByActivity->get($outActId, []);
-                        $submittedcount    = $outBaseAnswers->whereIn('question_id', $allQIds)
+                        $submittedcount    = $outSubmittedAnswers->whereIn('question_id', $allQIds)
                             ->pluck('question_id')->unique()->count();
                         $check_if_answered = $submittedcount > 0;
                     } else {
-                        $submittedcount    = $this->countSubmittedAgainstRequired($outBaseAnswers, $requiredQuestionIds);
+                        $submittedcount    = $this->countSubmittedAgainstRequired($outSubmittedAnswers, $requiredQuestionIds);
                         $check_if_answered = $submittedcount >= $requiredCount;
                     }
 
@@ -562,13 +565,16 @@ class TaskController extends Controller
                     ->merge($activeCondIds2)->unique()->values()->toArray();
                 $requiredCount = count($requiredQuestionIds);
 
+                // Only answers the auditor actually submitted count; saved drafts (status 0)
+                // must not make the activity look done.
+                $submittedBaseAnswers = $this->onlySubmitted($baseAnswers);
                 if ($requiredCount === 0) {
                     $allQIds        = $masterAllQIdsByActivity->get($actId, []);
-                    $submittedcount = $baseAnswers->whereIn('question_id', $allQIds)
+                    $submittedcount = $submittedBaseAnswers->whereIn('question_id', $allQIds)
                         ->pluck('question_id')->unique()->count();
                     $check_if_answered = $submittedcount > 0;
                 } else {
-                    $submittedcount = $this->countSubmittedAgainstRequired($baseAnswers, $requiredQuestionIds);
+                    $submittedcount = $this->countSubmittedAgainstRequired($submittedBaseAnswers, $requiredQuestionIds);
                     $check_if_answered = $submittedcount >= $requiredCount;
                 }
 
@@ -990,24 +996,35 @@ class TaskController extends Controller
                         ->whereIn('row_id', $allRowIds)
                         ->select(
                             'row_id',
-                            DB::raw('COUNT(DISTINCT activity_id) as completed_activities'),
                             DB::raw('COUNT(DISTINCT CASE WHEN otp_verified_status = 1 AND mobile_otp IS NOT NULL THEN 1 END) as otp_done')
                         )
                         ->groupBy('row_id')
                         ->get();
                     foreach ($rows as $r) {
-                        $completedActivityByRow[$r->row_id] = (int) $r->completed_activities;
                         if ($r->otp_done > 0) $otpVerifiedRows[$r->row_id] = true;
                     }
-                    if (!empty($getAllQuestionIds)) {
-                        $answeredCountByRow = DB::table('temp_user_activity_answers_data')
-                            ->whereIn('activity_id', $activitiesids)
-                            ->whereIn('row_id', $allRowIds)
-                            ->whereIn('question_id', $getAllQuestionIds)
-                            ->select('row_id', DB::raw('COUNT(DISTINCT question_id) as answered'))
-                            ->groupBy('row_id')
-                            ->pluck('answered', 'row_id')
-                            ->toArray();
+
+                    // Only submitted answers count towards "completed" (saved drafts don't)
+                    $submittedPairs = DB::table('temp_user_activity_answers_data')
+                        ->whereIn('activity_id', $activitiesids)
+                        ->whereIn('row_id', $allRowIds)
+                        ->whereIn('status', self::SUBMITTED_ANSWER_STATUSES)
+                        ->select('row_id', 'activity_id', 'question_id')
+                        ->distinct()
+                        ->get()
+                        ->groupBy('row_id');
+                    $requiredSet = array_flip($getAllQuestionIds);
+                    foreach ($submittedPairs as $rid => $pairs) {
+                        $answeredCountByRow[$rid] = $pairs->filter(fn($p) => isset($requiredSet[$p->question_id]))
+                            ->pluck('question_id')->unique()->count();
+
+                        // An activity is completed when all its required questions are submitted
+                        // (or, with no required questions, when anything was submitted for it)
+                        $completedActivityByRow[$rid] = $pairs->groupBy('activity_id')->filter(function ($actPairs, $actId) use ($questionIdsByActivity) {
+                            $required = $questionIdsByActivity[$actId] ?? [];
+                            if (empty($required)) return $actPairs->isNotEmpty();
+                            return $actPairs->pluck('question_id')->intersect($required)->unique()->count() >= count(array_unique($required));
+                        })->count();
                     }
                 }
 
@@ -1281,11 +1298,13 @@ class TaskController extends Controller
         // Pre-fetch data that is constant across all nested loop iterations
         $questionIds = Question::where('activity_id', $activity->id)->pluck('id')->toArray();
 
-        // Pre-fetch all answers for all assigned rows at once (avoids N+1 per-row queries)
+        // Pre-fetch all submitted answers for all assigned rows at once (avoids N+1 per-row
+        // queries). Saved drafts are left out so they don't count as completed/answered.
         $allAnswersByRow = DB::table('temp_user_activity_answers_data')
             ->where('activity_id', $activity->id)
             ->whereIn('row_id', $getRowIds)
             ->whereIn('question_id', $questionIds)
+            ->whereIn('status', self::SUBMITTED_ANSWER_STATUSES)
             ->get()
             ->groupBy('row_id');
 
@@ -2277,6 +2296,7 @@ class TaskController extends Controller
         $allAnswers = collect(DB::table('temp_user_activity_answers_data')
             ->whereIn('row_id', $getRowIds)
             ->get());
+        $submittedAnswers = $this->onlySubmitted($allAnswers);
 
         // Pre-load data that is constant across all loop iterations
         $childTemplateInfoById = $childTemplatesData->keyBy('id');
@@ -2329,7 +2349,8 @@ class TaskController extends Controller
                 // Use pre-loaded collection instead of per-row DB query
                 $templateNameData = $childTemplateInfoById->get($outlet_item->project_template_id);
 
-                $answeredCount = $allAnswers->where('row_id', $outlet_item->row_id)
+                // Only submitted answers count towards "completed" (saved drafts don't)
+                $answeredCount = $submittedAnswers->where('row_id', $outlet_item->row_id)
                     ->whereIn('activity_id', $activities)
                     ->whereIn('question_id', $getAllRequiredQuestionIds)
                     ->unique('question_id')
@@ -2389,7 +2410,7 @@ class TaskController extends Controller
                 }
 
                 $totalActivityCount     = count($activities);
-                $completedActivityCount = $allAnswers
+                $completedActivityCount = $submittedAnswers
                     ->where('row_id', $outlet_item->row_id)
                     ->pluck('activity_id')->unique()->intersect($activities)->count();
                 $pendingActivityCount   = $totalActivityCount - $completedActivityCount;
@@ -4159,30 +4180,9 @@ class TaskController extends Controller
             Cache::forget("proj_dist_data_{$user->id}_{$projectId}");
         }
 
-        // If the question just answered is the last one by sequence, auto-finalize this
-        // instance when it's actually complete — saves the app a separate no-question_id
-        // submit call. Silently does nothing if other required questions are still missing.
-        // Wrapped defensively: the answer above is already saved, so this best-effort step
-        // must never turn a successful save into a failed response.
-        try {
-            $lastQuestionId = DB::table('questions')
-                ->where('activity_id', $actId)
-                ->where('answer_type', 1)
-                ->where('question_type', '!=', 'Multi Response')
-                ->whereNull('parent_question_id')
-                ->whereNotNull('question_sequence')
-                ->orderByDesc('question_sequence')
-                ->value('id');
-
-            if ($lastQuestionId !== null && (int) $lastQuestionId === $qid) {
-                $this->finalizeInstanceIfComplete($rowId, $actId, $seq, $user->id);
-            }
-        } catch (\Throwable $e) {
-            \Log::warning('saveAnswer auto-finalize skipped due to error', [
-                'row_id' => $rowId, 'activity_id' => $actId, 'seq' => $seq, 'error' => $e->getMessage(),
-            ]);
-        }
-
+        // Saving an answer never submits the activity: it stays a draft (status 0) until the
+        // auditor taps Submit (saveAnswer without a question_id, or closeActivity), so
+        // optional questions can still be answered and nothing reaches the verifier early.
         return response()->json([
             'status'  => 200,
             'message' => 'success',
@@ -4203,15 +4203,29 @@ class TaskController extends Controller
     }
 
     /**
-     * List of required (answer_type=1, non-Multi-Response) question IDs for an activity.
+     * Required (answer_type=1, non-Multi-Response) question IDs an instance must answer:
+     * always-shown questions, plus conditional ones only when their trigger matched in
+     * $answers (e.g. a "Remark" required only when its parent was answered "Yes"). An
+     * untriggered conditional question is never shown, so it must not be demanded.
      */
-    private function requiredQuestionIdsForActivity(int $activityId): array
+    private function requiredQuestionIdsForAnswers(int $activityId, iterable $answers): array
     {
-        return DB::table('questions')
+        $required = DB::table('questions')
             ->where('activity_id', $activityId)
             ->where('answer_type', 1)
             ->where('question_type', '!=', 'Multi Response')
-            ->pluck('id')->toArray();
+            ->whereNull('deleted_at')
+            ->get(['id', 'parent_question_id', 'parent_value']);
+
+        $answerByQuestion = collect($answers)->mapWithKeys(fn($a) => [(int) $a->question_id => trim((string) $a->user_answer)]);
+
+        return $required->filter(function ($q) use ($answerByQuestion) {
+            if (empty($q->parent_question_id)) return true;
+            $parentAnswer = $answerByQuestion->get((int) $q->parent_question_id, '');
+            if ($parentAnswer === '') return false;
+            if ($q->parent_value === '__non_empty__') return true;
+            return $q->parent_value !== null && strcasecmp($parentAnswer, (string) $q->parent_value) === 0;
+        })->pluck('id')->map(fn($id) => (int) $id)->values()->all();
     }
 
     /**
@@ -4222,6 +4236,17 @@ class TaskController extends Controller
      * sub-question. Matches on question_id normally, and also checks parent_context_id to
      * still count those swapped rows against the sub-question they actually answer.
      */
+    /**
+     * Answer statuses that mean the auditor has submitted: 1 submitted, 4 rejected and
+     * 5 approved by the verifier. 0 is a saved draft, 3 is sent back for re-answering.
+     */
+    private const SUBMITTED_ANSWER_STATUSES = [1, 4, 5];
+
+    private function onlySubmitted(iterable $answers)
+    {
+        return collect($answers)->filter(fn($a) => in_array((int) $a->status, self::SUBMITTED_ANSWER_STATUSES, true));
+    }
+
     private function countSubmittedAgainstRequired(iterable $answers, array $requiredIds): int
     {
         $answers = collect($answers);
@@ -4229,44 +4254,6 @@ class TaskController extends Controller
             ->merge($answers->pluck('parent_context_id')->filter())
             ->unique();
         return $submittedIds->intersect($requiredIds)->count();
-    }
-
-    /**
-     * If every required question for this row/activity/sequence now has an answer, mark
-     * the answers and the repeat instance (if any) as submitted (status=1). Shared by
-     * handleSubmitMode, finalizeAnswers, and saveAnswer's last-question auto-finalize.
-     */
-    private function finalizeInstanceIfComplete(int $rowId, int $actId, int $seq, int $userId): bool
-    {
-        $requiredIds   = $this->requiredQuestionIdsForActivity($actId);
-        $requiredCount = count($requiredIds);
-
-        $seqFilter = $this->apiActivitySequenceFilter($seq);
-
-        $answers = TempUserActivityAnswersData::where('row_id', $rowId)
-            ->where('activity_id', $actId)
-            ->where('user_id', $userId)
-            ->where($seqFilter)
-            ->get(['question_id', 'parent_context_id']);
-        $submittedCount = $this->countSubmittedAgainstRequired($answers, $requiredIds);
-
-        if ($submittedCount < $requiredCount) {
-            return false;
-        }
-
-        TempUserActivityAnswersData::where('row_id', $rowId)
-            ->where('activity_id', $actId)
-            ->where($seqFilter)
-            ->update(['status' => 1, 'updated_at' => now()]);
-
-        if ($seq > 0) {
-            ActivityRepeatInstance::where('row_id', $rowId)
-                ->where('activity_id', $actId)
-                ->where('activity_sequence', $seq)
-                ->update(['status' => 1]);
-        }
-
-        return true;
     }
 
     /**
@@ -4709,14 +4696,13 @@ class TaskController extends Controller
         $hasSentBack = fn(int $seq): bool => in_array($seq, $sentBackSeqs);
 
         // ── Original instance (activity_sequence = 0) ─────────────────────
-        $requiredIds   = $this->requiredQuestionIdsForActivity($activityId);
-        $requiredCount = count($requiredIds);
-
         $originalAnswers = TempUserActivityAnswersData::where('row_id', $row_id)
             ->where('activity_id', $activityId)
             ->where('user_id', $user->id)
             ->where(fn($q) => $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0))
-            ->get(['question_id', 'parent_context_id']);
+            ->get(['question_id', 'parent_context_id', 'user_answer']);
+        $requiredIds    = $this->requiredQuestionIdsForAnswers($activityId, $originalAnswers);
+        $requiredCount  = count($requiredIds);
         $submittedCount = $this->countSubmittedAgainstRequired($originalAnswers, $requiredIds);
 
         $originalSentBack  = $hasSentBack(0);
@@ -4838,14 +4824,14 @@ class TaskController extends Controller
         // (current_instance_saved/original_submitted) purely from whether every required
         // question has an answer. Gating on the status flag instead could block the user
         // even though the app already shows the instance as complete.
-        $requiredIds   = $this->requiredQuestionIdsForActivity($activityId);
-        $requiredCount = count($requiredIds);
         $currentAnswers = TempUserActivityAnswersData::where('row_id', $row_id)
             ->where('activity_id', $activityId)->where('user_id', $user->id)
             ->where(fn($q) => $currentSequence > 0
                 ? $q->where('activity_sequence', $currentSequence)
                 : $q->whereNull('activity_sequence')->orWhere('activity_sequence', 0))
-            ->get(['question_id', 'parent_context_id']);
+            ->get(['question_id', 'parent_context_id', 'user_answer']);
+        $requiredIds    = $this->requiredQuestionIdsForAnswers((int) $activityId, $currentAnswers);
+        $requiredCount  = count($requiredIds);
         $submittedCount = $this->countSubmittedAgainstRequired($currentAnswers, $requiredIds);
 
         if ($submittedCount < $requiredCount) {
@@ -4984,6 +4970,14 @@ class TaskController extends Controller
             'activity_id' => $activityId,
             'user_id'     => $user->id,
         ]);
+
+        // "Final Submit" submits every entry of the activity: saved drafts become
+        // submitted (sent-back / approved / rejected answers are left as they are).
+        TempUserActivityAnswersData::where('row_id', $row_id)
+            ->where('activity_id', $activityId)
+            ->where('user_id', $user->id)
+            ->where('status', 0)
+            ->update(['status' => 1, 'updated_at' => now()]);
 
         // Signature still owed: template requires one and this user hasn't uploaded
         // it yet for this row+activity.

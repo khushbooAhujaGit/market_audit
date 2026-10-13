@@ -101,18 +101,21 @@
                                             <th>Activities</th>
                                             <th>Template Name</th>
                                             <th>Template Head</th>
+                                            <th>Assigned On</th>
                                             <th>Auditors</th>
                                             <th class="d-none">Verify Users</th>
                                             <th>Action</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {{-- One row per assigned project template; its activities open in a popup --}}
+                                        {{-- One row per assigned project template and assignment date; its activities open in a popup --}}
                                         @foreach ($data_assigned_values as $group)
                                             @php
                                                 $assign  = $group->assign;
                                                 $project = $assign?->getProjectTemplate?->getProject;
                                                 $activityCount = $group->activities->count();
+                                                $templateActivityCount = $group->template_activity_ids->count();
+                                                $assignedOn = $group->assigned_on ? \Carbon\Carbon::parse($group->assigned_on) : null;
                                             @endphp
                                             <tr>
                                                 <td>{{ ($data_assigned_values->firstItem() ?? 1) + $loop->index }}</td>
@@ -131,19 +134,22 @@
                                                 </td>
                                                 <td>{{ $assign?->templateName?->template_name }}</td>
                                                 <td>{{ $assign?->TemplateHeadName?->template_head_name }}</td>
+                                                <td data-order="{{ $group->assigned_on }}">{{ $assignedOn?->format('d-m-Y') }}</td>
                                                 <td class="view_auditors text-decoration-underline"
                                                     data-id="{{ $group->first_id }}"
                                                     data-project-template-id="{{ $group->project_template_id }}"
+                                                    data-assigned-on="{{ $group->assigned_on }}"
                                                     style="cursor:pointer;">
                                                     {{ $group->auditor_count }}
                                                 </td>
                                                 <td></td>
                                                 <td>
                                                     <ul class="action">
+                                                        {{-- Deletes the template's assignment for every date, not only this one --}}
                                                         <li class="delete"
-                                                            data-activity-ids="{{ json_encode($group->activities->pluck('id')) }}"
+                                                            data-activity-ids="{{ json_encode($group->template_activity_ids) }}"
                                                             data-project-template-id="{{ $group->project_template_id }}"
-                                                            title="Delete assignment for all activities of this template"><i
+                                                            title="Delete assignment for all activities and dates of this template"><i
                                                                 class="icon-trash"></i>
                                                         </li>
                                                     </ul>
@@ -466,7 +472,7 @@
                 const activityIds = $(this).data('activity-ids') || [];
                 deleteAssignment(
                     { "project_template_id": $(this).data('project-template-id'), "activity_ids": activityIds },
-                    `This deletes the assignment for all ${activityIds.length} activit${activityIds.length === 1 ? 'y' : 'ies'} of this template. You won't be able to revert this!`
+                    `This deletes the assignment for all ${activityIds.length} activit${activityIds.length === 1 ? 'y' : 'ies'} of this template, on every assigned date. You won't be able to revert this!`
                 );
             });
 
@@ -489,9 +495,11 @@
             $("#templates_table").on("click", ".view_auditors", function(event) {
                 const data_assigned_id = $(this).data('id');
                 const project_template_id = $(this).data('project-template-id');
+                const assigned_on = $(this).data('assigned-on');
                 $("#user_assigned_model").modal('show')
 
-                // No activity_id: auditors across every activity of this template
+                // No activity_id: auditors across every activity of this template,
+                // limited to the auditors and rows assigned on this line's date
                 $.ajax({
                     url: '{{ route('auditors.show') }}',
                     type: "POST",
@@ -499,12 +507,17 @@
                         "_token": "{{ csrf_token() }}",
                         "data_assigned_id": data_assigned_id,
                         "project_template_id": project_template_id,
+                        "assigned_on": assigned_on,
                         "user_type": "auditors"
                     },
                     success: function(response) {
                         console.log(response);
                         if (response.message == "Success") {
                             render_assigned_user(response.assignedValues);
+                            if (assigned_on) {
+                                const [y, m, d] = String(assigned_on).split('-');
+                                $("#model_title").text(`Auditors List (assigned on ${d}-${m}-${y})`);
+                            }
                         }
                     }
                 })

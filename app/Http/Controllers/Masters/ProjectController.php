@@ -551,10 +551,15 @@ class ProjectController extends Controller
             'data_excel' => [
                 'required',
                 'file',
-                'mimetypes:text/plain,text/csv,application/csv',
                 'max:512000', // 500MB = 512000 KB
+                function ($attribute, $file, $fail) {
+                    if (!in_array(strtolower($file->getClientOriginalExtension()), \App\Services\SpreadsheetToCsv::EXTENSIONS, true)) {
+                        $fail('Upload a CSV or Excel file (.csv, .xlsx, .xlsm, .xls).');
+                    }
+                },
             ],
         ]);
+        $uploadExtension = strtolower($request->file('data_excel')->getClientOriginalExtension());
 
         $templateNameId = $formFields['template_name_id'];
         $projectId = $formFields['project_id'];
@@ -582,6 +587,14 @@ class ProjectController extends Controller
             $filename = 'project_data_upload_' . $projectNameGet . '_' . time() . '.' . $file->getClientOriginalExtension();
             $file->move(public_path('projectsDataFiles'), $filename);
             $filePath = public_path('projectsDataFiles/' . $filename);
+
+            // Excel files are converted to CSV so the same fast CSV import handles them
+            try {
+                $filePath = \App\Services\SpreadsheetToCsv::convert($filePath, $uploadExtension);
+            } catch (\Throwable $e) {
+                if (file_exists($filePath)) unlink($filePath);
+                return redirect()->back()->with('error', 'The file could not be read: ' . $e->getMessage());
+            }
 
             $user = User::find(Auth::user()->id);
 
@@ -624,6 +637,16 @@ class ProjectController extends Controller
             $file->move(public_path('projectsDataFiles'), $filename);
             $filePath = public_path('projectsDataFiles/' . $filename);
             $formFields['template_name_id'];
+
+            // Excel files are converted to CSV so the same fast CSV import handles them
+            try {
+                $filePath = \App\Services\SpreadsheetToCsv::convert($filePath, $uploadExtension);
+            } catch (\Throwable $e) {
+                if (file_exists($filePath)) unlink($filePath);
+                return redirect()->back()->with('error', 'The file could not be read: ' . $e->getMessage());
+            }
+
+            $result = ['success' => false, 'message' => 'Upload failed.'];
             try {
                 //                dd(DB::select("SHOW VARIABLES LIKE 'local_infile'"));
                 //                dd($filePath);

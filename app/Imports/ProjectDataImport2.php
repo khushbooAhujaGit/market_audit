@@ -71,15 +71,23 @@ class ProjectDataImport2
             ->select('id', 'template_head_name')
             ->get();
 
-        $expectedHeaders = $templateHeads->pluck('template_head_name')->toArray();
+        // Compare headers ignoring stray/double spaces and invisible characters (BOM,
+        // non-breaking space) on BOTH sides: template column names often keep the
+        // trailing spaces of the sheet they were created from.
+        $normalize = function ($h) {
+            $h = (string) $h;
+            $clean = preg_replace('/[\x{FEFF}\x{00A0}\x{200B}]/u', ' ', $h);
+            $clean = preg_replace('/\s+/u', ' ', $clean ?? $h);
+            return trim($clean ?? $h);
+        };
+
+        $expectedHeaders = array_map($normalize, $templateHeads->pluck('template_head_name')->toArray());
         $templateHeadIds = $templateHeads->pluck('id')->toArray();
 
         // Read and clean CSV headers
         $headers = fgetcsv($inHandle);
-        $headers = array_map(function ($h) {
-            return trim(preg_replace('/\x{FEFF}/u', '', $h));
-        }, $headers);
-        $headers = array_values(array_filter($headers, function ($h) { return trim($h) !== ''; }));
+        $headers = array_map($normalize, $headers);
+        $headers = array_values(array_filter($headers, function ($h) { return $h !== ''; }));
 
         if ($expectedHeaders !== $headers) {
             fclose($inHandle);

@@ -11,11 +11,13 @@ use App\Models\User;
 use App\Models\UserActivityDataAssign;
 use App\Models\UserAuditAssigns;
 use App\Models\Verifier;
+use App\Services\DataAssignmentService;
 use App\Services\VerifierAssignment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Validator;
 use Maatwebsite\Excel\Facades\Excel;
 use Spatie\Permission\Models\Role;
 use App\Exports\UsersExport;
@@ -69,23 +71,30 @@ class UserController extends Controller
             "name" => [
                 'required',
                 'string',
+                'max:255',
             ],
             'email' => [
                 'required',
                 'email',
+                'max:255',
                 'unique:users,email'
             ],
             'mobile' => 'required|unique:users|digits:10',
             'password' => 'required|min:8|max:20',
-            'address1' => 'nullable|string',
-            'address2' => 'nullable|string',
-            'city' => "nullable|string",
-            'district' => "nullable|string",
-            'state' => "nullable|string",
+            'address1' => 'nullable|string|max:255',
+            'address2' => 'nullable|string|max:255',
+            'city' => "nullable|string|max:255",
+            'district' => "nullable|string|max:255",
+            'state' => "nullable|string|max:255",
             'pincode' => ['nullable', 'digits:6', 'numeric'],
-            'roles' => 'required',
+            'roles' => 'required|exists:roles,name',
+            'agency_select' => 'nullable|exists:users,id',
             //            'roles' => 'required|array'
 
+        ], [
+            'roles.required' => 'Please select a role.',
+            'roles.exists'   => 'Please select a valid role.',
+            'agency_select.exists' => 'Please select a valid agency.',
         ]);
 
         //khushboo 31-03-2025
@@ -96,58 +105,7 @@ class UserController extends Controller
             return redirect()->back()->withErrors(['roles' => 'You are not allowed to create a Super Admin user.'])->withInput();
         }
 
-        if ($currentUserRole == 'Agency') {
-            $user = User::create([
-                'name' => $request->name,
-                'email' => $request->email,
-                'mobile' => $request->mobile,
-                'password' => Hash::make($request->password),
-                'address1' => $request->address1,
-                'address2' => $request->address2,
-                'city' => $request->city,
-                'district' => $request->district,
-                'state' => $request->state,
-                'password_info' => $request->password,
-                'pincode' => $request->pincode,
-                'is_agency_user' => 1,
-                'agency_user_id' => Auth::user()->id,
-            ]);
-
-            $user->syncRoles($request->roles);
-
-            return redirect("/users")->with('message', "User created successfully with roles");
-        }
-
-        if ($currentUserRole == 'Verifier') {
-            $user = User::create([
-                'name' => $request->name,
-                'email' => $request->email,
-                'mobile' => $request->mobile,
-                'password' => Hash::make($request->password),
-                'address1' => $request->address1,
-                'address2' => $request->address2,
-                'city' => $request->city,
-                'district' => $request->district,
-                'state' => $request->state,
-                'password_info' => $request->password,
-                'pincode' => $request->pincode,
-                'verifier_user_id' => Auth::user()->id,
-            ]);
-
-            $user->syncRoles($request->roles);
-
-            return redirect("/users")->with('message', "User created successfully with roles");
-        }
-
-        $agency_user_id = null;
-        $is_agency_user = 0;
-        if (isset($request->agency_select) && !empty($request->agency_select)) {
-            $agency_user_id = $request->agency_select;
-            $is_agency_user = 1;
-        }
-        //khushboo 31-03-2025
-
-        $user = User::create([
+        $data = [
             'name' => $request->name,
             'email' => $request->email,
             'mobile' => $request->mobile,
@@ -159,11 +117,38 @@ class UserController extends Controller
             'state' => $request->state,
             'password_info' => $request->password,
             'pincode' => $request->pincode,
-            'is_agency_user' => $request->roles == 'Agency' ? 1 : $is_agency_user,
-            'agency_user_id' => $agency_user_id
-        ]);
+        ];
 
-        $user->syncRoles($request->roles);
+        if ($currentUserRole == 'Agency') {
+            $data['is_agency_user'] = 1;
+            $data['agency_user_id'] = Auth::user()->id;
+        } elseif ($currentUserRole == 'Verifier') {
+            $data['verifier_user_id'] = Auth::user()->id;
+        } else {
+            $agency_user_id = null;
+            $is_agency_user = 0;
+            if (isset($request->agency_select) && !empty($request->agency_select)) {
+                $agency_user_id = $request->agency_select;
+                $is_agency_user = 1;
+            }
+            $data['is_agency_user'] = $request->roles == 'Agency' ? 1 : $is_agency_user;
+            $data['agency_user_id'] = $agency_user_id;
+        }
+        //khushboo 31-03-2025
+
+        // Any failure while saving goes back to the form with the entered values and a message,
+        // instead of an error page.
+        try {
+            DB::transaction(function () use ($data, $request) {
+                $user = User::create($data);
+                $user->syncRoles($request->roles);
+            });
+        } catch (\Throwable $e) {
+            report($e);
+            return redirect()->back()
+                ->withErrors(['general' => 'The user could not be created. Please check the details and try again.'])
+                ->withInput($request->except('password'));
+        }
 
         return redirect("/users")->with('message', "User created successfully with roles");
     }
@@ -183,19 +168,21 @@ class UserController extends Controller
             "name" => [
                 'required',
                 'string',
+                'max:255',
             ],
             'email' => [
                 'required',
                 'email',
+                'max:255',
                 'unique:users,email,' . $user->id,
             ],
             'mobile' => ['required', 'digits:10', 'unique:users,mobile,' . $user->id,],
             'password' => 'required|min:8|max:20',
-            'address1' => 'nullable|string',
-            'address2' => 'nullable|string',
-            'city' => "nullable|string",
-            'district' => "nullable|string",
-            'state' => "nullable|string",
+            'address1' => 'nullable|string|max:255',
+            'address2' => 'nullable|string|max:255',
+            'city' => "nullable|string|max:255",
+            'district' => "nullable|string|max:255",
+            'state' => "nullable|string|max:255",
             'pincode' => ['nullable', 'digits:6', 'numeric'],
             'roles' => 'required',
         ]);
@@ -246,9 +233,24 @@ class UserController extends Controller
         return view('role-permission.user.user_upload');
     }
 
+    /** Roles a user with $creatorRole may give to new users — same as the Add User form. */
+    public static function assignableRoleNames(?string $creatorRole): \Illuminate\Support\Collection
+    {
+        return Role::pluck('name')->filter(fn($r) => match ($creatorRole) {
+            'Agency'   => in_array($r, ['Auditor', 'Verifier'], true),
+            'Verifier' => $r !== 'Super Admin',
+            default    => true,
+        })->values();
+    }
+
+    /**
+     * Bulk user upload. Each row is checked with the same rules as the Add User form
+     * (plus duplicates within the sheet); valid rows are created, invalid rows are
+     * skipped and listed with the reason in a downloadable error file.
+     */
     public function userUpload(Request $request)
     {
-        $validated = $request->validate([
+        $request->validate([
             'user_excel' => [
                 'required',
                 'file',
@@ -256,32 +258,164 @@ class UserController extends Controller
             ],
         ]);
 
-        if ($request->hasFile('user_excel')) {
-            $file = $request->file('user_excel');
-            $data = Excel::toCollection(Excel::class, $file)->first();
-            $dataArray = $data->toArray();
-            // Remove the first element from the array
-            array_shift($dataArray);
-            foreach ($dataArray as $userData) {
-                $user = User::create([
-                    'name' => $userData[0],
-                    'mobile' => $userData[1],
-                    'email' => $userData[2],
-                    'password' => Hash::make($userData[9]),
-                    'password_info' => $userData[9],
-                    'address1' => $userData[3],
-                    'address2' => $userData[4],
-                    'city' => $userData[5],
-                    'district' => $userData[6],
-                    'state' => $userData[7],
-                    'pincode' => $userData[8],
-                    // 'is_agency_user' =>  $userData[10] == 'Agency' ? 1 : null,
-                ]);
+        $columns = ['Name', 'Mobile No', 'Email ID', 'Address 1', 'Address 2', 'City', 'District', 'State', 'Pincode', 'Password', 'Role', 'Agency'];
 
-                $user->syncRoles($userData[10]);
+        $sheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($request->file('user_excel')->getRealPath())->getActiveSheet();
+        $rows = $sheet->toArray(null, true, false, false);
+        array_shift($rows); // header
+
+        // Excel keeps numbers (mobile, pincode, numeric passwords) as numbers: read them as text
+        $text = function ($v) {
+            if ($v === null) return '';
+            if (is_float($v) && floor($v) == $v && abs($v) < 1e15) $v = (int) $v;
+            return trim((string) $v);
+        };
+
+        // Roles this admin may assign — same as the Add User form's role list
+        $currentUser = User::find(Auth::id());
+        $currentUserRole = $currentUser->getRoleNames()->first();
+        $allowedRoles = self::assignableRoleNames($currentUserRole)
+            ->mapWithKeys(fn($r) => [mb_strtolower($r) => $r]);
+
+        // Agency users an Auditor/Verifier can be linked to (by email), as on the Add User form.
+        // Agency users' own uploads are always linked to themselves instead.
+        $agencyIdByEmail = User::role('Agency')->whereNotNull('email')->get(['id', 'email'])
+            ->mapWithKeys(fn($u) => [mb_strtolower(trim($u->email)) => $u->id]);
+
+        // First sheet row for each email / mobile, to catch duplicates within the sheet
+        $firstRowByEmail = [];
+        $firstRowByMobile = [];
+
+        $created = 0;
+        $errorRows = [];
+
+        foreach ($rows as $index => $raw) {
+            $sheetRow = $index + 2;
+            // 12 columns; older templates without the Agency column read it as blank
+            $values = array_map($text, array_pad(array_slice($raw, 0, 12), 12, null));
+            if (implode('', $values) === '') continue; // blank row
+
+            [$name, $mobile, $email, $address1, $address2, $city, $district, $state, $pincode, $password, $roleRaw, $agencyRaw] = $values;
+
+            // Repeated within this sheet: report that instead of "already taken"
+            // (the first occurrence may have just been created by this upload)
+            $emailKey  = mb_strtolower($email);
+            $dupEmail  = $email !== '' && isset($firstRowByEmail[$emailKey]);
+            $dupMobile = $mobile !== '' && isset($firstRowByMobile[$mobile]);
+
+            $validator = Validator::make(
+                compact('name', 'email', 'mobile', 'password', 'address1', 'address2', 'city', 'district', 'state', 'pincode') + ['roles' => $roleRaw],
+                [
+                    'name'     => ['required', 'string', 'max:255'],
+                    'email'    => array_merge(['required', 'email', 'max:255'], $dupEmail ? [] : ['unique:users,email']),
+                    'mobile'   => array_merge(['required', 'digits:10'], $dupMobile ? [] : ['unique:users,mobile']),
+                    'password' => ['required', 'min:8', 'max:20'],
+                    'address1' => ['nullable', 'string', 'max:255'],
+                    'address2' => ['nullable', 'string', 'max:255'],
+                    'city'     => ['nullable', 'string', 'max:255'],
+                    'district' => ['nullable', 'string', 'max:255'],
+                    'state'    => ['nullable', 'string', 'max:255'],
+                    'pincode'  => ['nullable', 'digits:6', 'numeric'],
+                    'roles'    => ['required'],
+                ],
+                [],
+                ['roles' => 'role', 'address1' => 'address 1', 'address2' => 'address 2']
+            );
+            $errors = $validator->errors()->all();
+
+            $role = $allowedRoles->get(mb_strtolower($roleRaw));
+            if ($roleRaw !== '' && !$role) {
+                $errors[] = "The role \"{$roleRaw}\" is not a role you can assign.";
             }
+
+            $agencyId = null;
+            if ($agencyRaw !== '' && $currentUserRole !== 'Agency') {
+                if ($role && !in_array($role, ['Auditor', 'Verifier'], true)) {
+                    $errors[] = 'An agency can only be set for an Auditor or Verifier.';
+                } elseif (!($agencyId = $agencyIdByEmail->get(mb_strtolower($agencyRaw)))) {
+                    $errors[] = "\"{$agencyRaw}\" is not the email of an agency user.";
+                }
+            }
+
+            if ($dupEmail) {
+                $errors[] = "The email is repeated in this sheet (first used on row {$firstRowByEmail[$emailKey]}).";
+            }
+            if ($dupMobile) {
+                $errors[] = "The mobile number is repeated in this sheet (first used on row {$firstRowByMobile[$mobile]}).";
+            }
+            if ($email !== '') $firstRowByEmail[$emailKey] ??= $sheetRow;
+            if ($mobile !== '') $firstRowByMobile[$mobile] ??= $sheetRow;
+
+            if ($errors) {
+                $errorRows[] = array_merge($values, [implode(' ', $errors), $sheetRow]);
+                continue;
+            }
+
+            // Same account links the Add User form sets for the person creating the user
+            $userData = [
+                'name'          => $name,
+                'email'         => $email,
+                'mobile'        => $mobile,
+                'password'      => Hash::make($password),
+                'password_info' => $password,
+                'address1'      => $address1 ?: null,
+                'address2'      => $address2 ?: null,
+                'city'          => $city ?: null,
+                'district'      => $district ?: null,
+                'state'         => $state ?: null,
+                'pincode'       => $pincode ?: null,
+            ];
+            if ($currentUserRole === 'Agency') {
+                $userData += ['is_agency_user' => 1, 'agency_user_id' => $currentUser->id];
+            } elseif ($currentUserRole === 'Verifier') {
+                $userData += ['verifier_user_id' => $currentUser->id];
+            } else {
+                $userData += [
+                    'is_agency_user' => ($role === 'Agency' || $agencyId) ? 1 : 0,
+                    'agency_user_id' => $agencyId,
+                ];
+            }
+
+            try {
+                $user = User::create($userData);
+                $user->syncRoles($role);
+                $created++;
+            } catch (\Throwable $e) {
+                if (isset($user) && $user->exists && !$user->roles()->exists()) $user->delete();
+                $errorRows[] = array_merge($values, ['Could not be saved: ' . $e->getMessage(), $sheetRow]);
+            }
+            unset($user);
         }
-        return redirect("/users")->with('message', "User Uploaded successfully");
+
+        if (!$errorRows) {
+            return redirect("/users")->with('message', "{$created} user(s) uploaded successfully");
+        }
+
+        // Error file: same columns as the template (so it can be corrected and uploaded
+        // again as is) plus the reason and the original sheet row.
+        $token = (string) \Illuminate\Support\Str::uuid();
+        $w = new \App\Services\XlsxStream();
+        $w->beginSheet('Errors', [22, 14, 30, 24, 24, 14, 14, 14, 10, 14, 12, 30, 70, 10], 1);
+        $w->row(array_merge($columns, ['Error', 'Sheet Row']), \App\Services\XlsxStream::STYLE_HEADER);
+        foreach ($errorRows as $row) $w->row($row);
+        $w->endSheet();
+        \Illuminate\Support\Facades\Storage::disk('local')->makeDirectory('user_upload_errors');
+        $w->save(storage_path("app/user_upload_errors/{$token}.xlsx"));
+
+        session(['user_upload_error_file' => $token]);
+        return redirect()->route('users.upload.view')->with('upload_result', [
+            'created' => $created,
+            'skipped' => count($errorRows),
+            'token'   => $token,
+        ]);
+    }
+
+    public function downloadUserUploadErrors(string $token)
+    {
+        abort_unless(session('user_upload_error_file') === $token && preg_match('/^[0-9a-f-]{36}$/', $token), 404);
+        $path = storage_path("app/user_upload_errors/{$token}.xlsx");
+        abort_unless(is_file($path), 404);
+        return response()->download($path, 'user_upload_errors_' . date('Ymd_His') . '.xlsx')->deleteFileAfterSend(true);
     }
 
     public function assignDataToUsers(Request $request)
@@ -313,221 +447,40 @@ class UserController extends Controller
             ]);
         }
 
-        if ($request->verify_users_names != null) {
-            foreach ($request->verify_users_names as $verify_user_name) {
-                $check_if_allocated = Verifier::where('user_id', $verify_user_name)
-                    ->where('project_template_name_id', $projectTemplate_info->id)->first();
-                if (!$check_if_allocated) {
-                    Verifier::create([
-                        'user_id' => $verify_user_name,
-                        'project_template_name_id' => $projectTemplate_info->id,
-                    ]);
-                }
-
-                if ($request->has('is_outlet_assigned')) {
-                    $project_outlets = ProjectTemplate::where('project_id', $request->project_id)
-                        ->where('is_master', 0)
-                        ->get();
-                    foreach ($project_outlets as $project_outlet) {
-                        $check_if_outlet_allocated = Verifier::where('user_id', $verify_user_name)
-                            ->where('project_template_name_id', $project_outlet->id)->first();
-                        if (!$check_if_outlet_allocated) {
-                            Verifier::create([
-                                'user_id' => $verify_user_name,
-                                'project_template_name_id' => $project_outlet->id,
-                            ]);
-                        }
-                    }
-                }
-            }
-        }
-
-        $project_info = Project::findOrFail($request->project_id);
-        $act_group_id = $request->activity_group_name_id ?? null;
-        $project_template_id = ProjectTemplate::where('project_id', $request->project_id)->where('template_name_id', $request->template_name_id)->first();
-        $companyUserId = $request->has('company_user') ? $request->company_user : null;
-        $agencyId = $request->has('agency_list') ? $request->agency_list : null;
-
         // Verifiers get the same rows as the auditors assigned in this submission, and are
         // linked to those auditors for rows the auditors create later.
         $verifierIds = array_values(array_filter(array_map('intval', (array) $request->verify_users_names)));
 
-        foreach ($request->activity_id as $selected_activities) {
-            // Use a transaction + pessimistic lock to prevent duplicate data_assigns
-            // when the form is submitted concurrently (e.g. double-click).
-            $dataAssign = DB::transaction(function () use (
-                $project_info, $selected_activities, $act_group_id, $request,
-                $project_template_id, $is_outlet_assinged, $companyUserId, $agencyId
-            ) {
-                $searchFields = [
-                    'company_id'           => $project_info->company_id,
-                    'zone_id'              => $project_info->zone_id,
-                    'unit_id'              => $project_info->unit_id,
-                    'project_id'           => $request->project_id,
-                    'activity_id'          => $selected_activities,
-                    'activity_group_id'    => $act_group_id,
-                    'template_name_id'     => $request->template_name_id,
-                    'project_template_id'  => $project_template_id->id,
-                    'template_name_head_id'=> $request->template_name_head_id,
-                    'is_outlet_assigned'   => $is_outlet_assinged,
-                ];
-                $query = DataAssign::query();
-                foreach ($searchFields as $col => $val) {
-                    $query = is_null($val) ? $query->whereNull($col) : $query->where($col, $val);
-                }
-                $existing = $query->lockForUpdate()->first();
-                if ($existing) return $existing;
+        DataAssignmentService::ensureTemplateVerifiers($verifierIds, $projectTemplate_info, $is_outlet_assinged == 1);
 
-                return DataAssign::create(array_merge($searchFields, [
-                    'company_user_id' => $companyUserId,
-                    'agency_id'       => $agencyId,
-                ]));
-            });
+        $project_info = Project::findOrFail($request->project_id);
+        $act_group_id = $request->activity_group_name_id ?? null;
+        $project_template_id = $projectTemplate_info;
+        $companyUserId = $request->has('company_user') ? $request->company_user : null;
+        $agencyId = $request->has('agency_list') ? $request->agency_list : null;
+
+        foreach ($request->activity_id as $selected_activities) {
+            $dataAssign = DataAssignmentService::findOrCreateDataAssign(
+                $project_info, (int) $selected_activities, $act_group_id ? (int) $act_group_id : null,
+                (int) $request->template_name_id, $project_template_id->id, $request->template_name_head_id,
+                $is_outlet_assinged, $companyUserId, $agencyId
+            );
 
             if (isset($request->template_name_head_values) && !empty($request->template_name_head_values)) {
                 foreach ($request->template_name_head_values as $template_name_head_v) {
                     if (!empty($request->auditor_names)) {
+                        $rowIds = DB::table('project_template_name_values_new')
+                            ->where('project_template_id', $project_template_id->id)
+                            ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"$request->template_name_head_id\"')) = ?", [trim($template_name_head_v)])
+                            ->pluck('id')
+                            ->toArray();
+
                         foreach ($request->auditor_names as $auditor_id) {
-                            // If outlet assigned → handle master first, then child
+                            DataAssignmentService::assignRows($dataAssign->id, $auditor_id, $project_template_id->id, $selected_activities, $act_group_id, $rowIds, $verifierIds);
+
+                            // If outlet assigned → also the child (outlet) template rows
                             if ($is_outlet_assinged == 1) {
-                                // MASTER TEMPLATE ROWS
-                                $masterRowIds = DB::table('project_template_name_values_new')
-                                    ->where('project_template_id', $project_template_id->id)
-                                    ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"$request->template_name_head_id\"')) = ?", [trim($template_name_head_v)])
-                                    ->pluck('id')
-                                    ->toArray();
-                                // Assign master template rows
-                                $existingCommonId = $this->assignUserActivityAndAuditRows(
-                                    $dataAssign->id,
-                                    $auditor_id,
-                                    $project_template_id->id,
-                                    $selected_activities,
-                                    $act_group_id,
-                                    $masterRowIds,
-                                    verifierIds: $verifierIds
-                                );
-                                // Now get child template id
-                                $childProjectTemplate = DB::table('project_templates')
-                                    ->where('project_id', $project_template_id->project_id)
-                                    ->where('is_master', 0)
-                                    ->get();
-
-                                if (!empty($childProjectTemplate)) {
-                                    foreach ($childProjectTemplate as $childProject) {
-                                        //get master head id value
-
-                                        $getHeadValues = DB::table('project_template_name_values_new')
-                                            ->whereIn('id', $masterRowIds)
-                                            ->pluck(
-                                                DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$childProject->master_head_id}\"')) as head_value")
-                                            )
-                                            ->toArray();
-
-
-                                        if ($childProject->activityType == 0) {
-
-                                            $childdatacheck = DB::table('project_template_name_values_new')
-                                                ->where('project_template_id', $childProject->id)
-                                                ->where(function ($query) use ($getHeadValues) {
-                                                    foreach ($getHeadValues as $value) {
-                                                        $query->orWhereRaw("JSON_SEARCH(template_data_json, 'one', ?) IS NOT NULL", [$value]);
-                                                    }
-                                                })->get();
-
-                                            $childRowIds = DB::table('project_template_name_values_new')
-                                                ->where('project_template_id', $childProject->id)
-                                                ->where(function ($query) use ($getHeadValues) {
-                                                    foreach ($getHeadValues as $value) {
-                                                        $query->orWhereRaw("JSON_SEARCH(template_data_json, 'one', ?) IS NOT NULL", [$value]);
-                                                    }
-                                                })
-                                                ->pluck('id')
-                                                ->toArray();
-
-                                            //   dd($childProject->activityType, $childProject->with_data, !$childdatacheck->isEmpty());
-                                            // Assign child template rows (same logic, different template)
-                                            if (!$childdatacheck->isEmpty()) {
-                                                $this->assignUserActivityAndAuditRows(
-                                                    $dataAssign->id,
-                                                    $auditor_id,
-                                                    $childProject->id,
-                                                    $childProject->activity_group_name_id_or_activity_id,
-                                                    $act_group_id,
-                                                    $childRowIds,
-                                                    verifierIds: $verifierIds
-                                                );
-                                            }
-                                            else if($childProject->with_data == 0){
-                                                // dd('dgdf');
-                                                $this->AssignDataWithoutTemplateData($dataAssign->id, $auditor_id, $childProject->id, $childProject->activity_group_name_id_or_activity_id,  $act_group_id, verifierIds: $verifierIds);
-                                            }
-
-                                        } else if ($childProject->activityType == 1) {
-
-
-                                            $childdatacheck = DB::table('project_template_name_values_new')
-                                                ->where('project_template_id', $childProject->id)
-                                                ->where(function ($query) use ($getHeadValues) {
-                                                    foreach ($getHeadValues as $value) {
-                                                        $query->orWhereRaw("JSON_SEARCH(template_data_json, 'one', ?) IS NOT NULL", [$value]);
-                                                    }
-                                                })->get();
-
-                                            $childRowIds = DB::table('project_template_name_values_new')
-                                                ->where('project_template_id', $childProject->id)
-                                                ->where(function ($query) use ($getHeadValues) {
-                                                    foreach ($getHeadValues as $value) {
-                                                        $query->orWhereRaw("JSON_SEARCH(template_data_json, 'one', ?) IS NOT NULL", [$value]);
-                                                    }
-                                                })
-                                                ->pluck('id')
-                                                ->toArray();
-
-                                            $getActivityIds = ActivityGroupPivot::where('activity_group_id', $childProject->activity_group_name_id_or_activity_id)
-                                                ->pluck('activity_id')->toArray();
-
-                                            foreach ($getActivityIds as $childActivityId) {
-                                                // Assign child template rows (same logic, different template)
-                                                if (!$childdatacheck->isEmpty()) {
-                                                    $this->assignUserActivityAndAuditRows(
-                                                        $dataAssign->id,
-                                                        $auditor_id,
-                                                        $childProject->id,
-                                                        $childActivityId,
-                                                        $childProject->activity_group_name_id_or_activity_id,
-                                                        $childRowIds,
-                                                        verifierIds: $verifierIds
-                                                    );
-                                                }
-                                                else if($childProject->with_data == 0){
-                                                    $this->AssignDataWithoutTemplateData($dataAssign->id, $auditor_id, $childProject->id, $childProject->activity_group_name_id_or_activity_id, $act_group_id);
-                                                    // The call above records the group id as the activity; verifier links
-                                                    // need the real activity id that rows and the queue use.
-                                                    VerifierAssignment::linkAuditor($verifierIds, (int) $auditor_id, (int) $childProject->id, (int) $childActivityId, true);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                            } else {
-
-                                // is_outlet_assigned == 0 → Only master template
-                                $rowIds = DB::table('project_template_name_values_new')
-                                    ->where('project_template_id', $project_template_id->id)
-                                    ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"$request->template_name_head_id\"')) = ?", [trim($template_name_head_v)])
-                                    ->pluck('id')
-                                    ->toArray();
-
-                                $this->assignUserActivityAndAuditRows(
-                                    $dataAssign->id,
-                                    $auditor_id,
-                                    $project_template_id->id,
-                                    $selected_activities,
-                                    $act_group_id,
-                                    $rowIds,
-                                    verifierIds: $verifierIds
-                                );
+                                DataAssignmentService::assignOutletChildren($dataAssign->id, $auditor_id, $project_template_id, $rowIds, $act_group_id, $verifierIds);
                             }
                         }
                     }
@@ -537,23 +490,20 @@ class UserController extends Controller
                 //if template data not uploaded
                 if (!empty($request->auditor_names)) {
                     foreach ($request->auditor_names as $auditor_id) {
-                        $this->AssignDataWithoutTemplateData($dataAssign->id, $auditor_id,$project_template_id->id, $selected_activities,  $act_group_id, verifierIds: $verifierIds);
+                        DataAssignmentService::assignWithoutData($dataAssign->id, $auditor_id, $project_template_id->id, $selected_activities, $act_group_id, null, $verifierIds);
                         if ($is_outlet_assinged == 1) {
                             $childProjectTemplate = DB::table('project_templates')
                                 ->where('project_id', $project_template_id->project_id)
                                 ->where('is_master', 0)
                                 ->get();
-                            if (!empty($childProjectTemplate)) {
-                                foreach ($childProjectTemplate as $childProject) {
-                                    if ($childProject->activityType == 0) {
-                                        $this->AssignDataWithoutTemplateData($dataAssign->id, $auditor_id, $childProject->id, $childProject->activity_group_name_id_or_activity_id, $childProject->id, $act_group_id, verifierIds: $verifierIds);
-                                    } else if ($childProject->activityType == 1) {
-                                        $getActivityIds = ActivityGroupPivot::where('activity_group_id', $childProject->activity_group_name_id_or_activity_id)
-                                            ->pluck('activity_id')->toArray();
-                                        foreach ($getActivityIds as $childActivityId) {
-                                            // Assign child template rows (same logic, different template)
-                                            $this->AssignDataWithoutTemplateData($dataAssign->id, $auditor_id, $childProject->id, $childActivityId,  $childProject->activity_group_name_id_or_activity_id, verifierIds: $verifierIds);
-                                        }
+                            foreach ($childProjectTemplate as $childProject) {
+                                if ($childProject->activityType == 0) {
+                                    DataAssignmentService::assignWithoutData($dataAssign->id, $auditor_id, $childProject->id, $childProject->activity_group_name_id_or_activity_id, $childProject->id, $act_group_id, $verifierIds);
+                                } else if ($childProject->activityType == 1) {
+                                    $getActivityIds = ActivityGroupPivot::where('activity_group_id', $childProject->activity_group_name_id_or_activity_id)
+                                        ->pluck('activity_id')->toArray();
+                                    foreach ($getActivityIds as $childActivityId) {
+                                        DataAssignmentService::assignWithoutData($dataAssign->id, $auditor_id, $childProject->id, $childActivityId, $childProject->activity_group_name_id_or_activity_id, null, $verifierIds);
                                     }
                                 }
                             }
@@ -836,101 +786,13 @@ class UserController extends Controller
 
     private function assignUserActivityAndAuditRows($dataAssignId, $userId, $templateId, $activityId, $activityGroupId, $rowIds, array $verifierIds = [])
     {
-        if (empty($rowIds)) return null;
-
-        VerifierAssignment::assignRows($verifierIds, (int) $templateId, (int) $activityId, $rowIds);
-        VerifierAssignment::linkAuditor($verifierIds, (int) $userId, (int) $templateId, (int) $activityId, false);
-
-        // 1. Check if common_id already exists for this user+template+activity
-        $commonId = UserActivityDataAssign::where([
-            'data_assign_id' => $dataAssignId,
-            'user_id' => $userId,
-            'activity_id' => $activityId,
-            'project_template_id' => $templateId
-        ])->value('common_id');
-
-        if (!$commonId) {
-            // 2. If not exists, create one
-            $commonId = DB::table('user_activity_data_assigns')->max('common_id') + 1;
-
-            $data = [
-                'data_assign_id' => $dataAssignId,
-                'user_id' => $userId,
-                'project_template_id' => $templateId,
-                'activity_id' => $activityId,
-                'common_id' => $commonId
-            ];
-
-            if ($activityGroupId) {
-                $data['activity_sequence_id'] = ActivityGroupPivot::where('activity_group_id', $activityGroupId)
-                    ->where('activity_id', $activityId)
-                    ->value('sequence');
-            }
-
-            UserActivityDataAssign::create($data);
-        }
-
-        // 3. Find already inserted row_ids
-        $existingRowIds = UserAuditAssigns::where('common_id', $commonId)
-            ->whereIn('row_id', $rowIds)
-            ->pluck('row_id')
-            ->toArray();
-
-        // 4. Insert only missing rows under the SAME common_id
-        $missingRowIds = array_diff($rowIds, $existingRowIds);
-
-        foreach ($missingRowIds as $rowId) {
-            UserAuditAssigns::create([
-                'row_id' => $rowId,
-                'common_id' => $commonId
-            ]);
-        }
-
-        return $commonId;
+        return DataAssignmentService::assignRows($dataAssignId, $userId, $templateId, $activityId, $activityGroupId, $rowIds, $verifierIds);
     }
 
 
     private function AssignDataWithoutTemplateData($dataAssignId, $userId, $templateId, $activityId, $activityGroupId, $rowIds=null, array $verifierIds = [])
     {
-        // dd('dgfdg');
-        // if (empty($rowIds)) return null;
-
-        // No uploaded rows: link the auditor so each row they create reaches these
-        // verifiers, and hand over rows they already created here.
-        VerifierAssignment::linkAuditor($verifierIds, (int) $userId, (int) $templateId, (int) $activityId, true);
-
-        // 1. Check if common_id already exists for this user+template+activity
-        $commonId = UserActivityDataAssign::where([
-            'data_assign_id' => $dataAssignId,
-            'user_id' => $userId,
-            'activity_id' => $activityId,
-            'project_template_id' => $templateId
-        ])->value('common_id');
-
-        if (!$commonId) {
-            // 2. If not exists, create one
-            $commonId = DB::table('user_activity_data_assigns')->max('common_id') + 1;
-
-            $data = [
-                'data_assign_id' => $dataAssignId,
-                'user_id' => $userId,
-                'project_template_id' => $templateId,
-                'activity_id' => $activityId,
-                'common_id' => $commonId
-            ];
-
-            if ($activityGroupId) {
-                $data['activity_sequence_id'] = ActivityGroupPivot::where('activity_group_id', $activityGroupId)
-                    ->where('activity_id', $activityId)
-                    ->value('sequence');
-            }
-
-            UserActivityDataAssign::create($data);
-        }
-
-
-
-        return $commonId;
+        return DataAssignmentService::assignWithoutData($dataAssignId, $userId, $templateId, $activityId, $activityGroupId, $rowIds, $verifierIds);
     }
 
 

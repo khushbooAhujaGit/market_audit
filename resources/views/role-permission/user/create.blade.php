@@ -21,6 +21,17 @@
                                                     enctype="multipart/form-data" class="row g-3 needs-validation"
                                                     novalidate="">
                                                     @csrf
+                                                    @if ($errors->any())
+                                                        <div class="col-12">
+                                                            <div class="alert alert-danger mb-0">
+                                                                @if ($errors->has('general'))
+                                                                    {{ $errors->first('general') }}
+                                                                @else
+                                                                    The user was not created. Please correct the fields marked below.
+                                                                @endif
+                                                            </div>
+                                                        </div>
+                                                    @endif
                                                     <div class="col-xl-6 col-sm-6">
                                                         <label class="form-label" for="name">Name<span
                                                                 class="txt-danger">*</span></label>
@@ -28,7 +39,7 @@
                                                             value="{{ old('name') }}" name="name" type="text"
                                                             placeholder="Enter name" required="">
                                                         @error('name')
-                                                            <p class="text-red-500 text-xs mt-1">
+                                                            <p class="text-danger small mt-1 mb-0">
                                                                 {{ $message }}
                                                             </p>
                                                         @enderror
@@ -40,7 +51,7 @@
                                                             value="{{ old('email') }}" name="email" type="email"
                                                             placeholder="Enter email" required="">
                                                         @error('email')
-                                                            <p class="text-red-500 text-xs mt-1">
+                                                            <p class="text-danger small mt-1 mb-0">
                                                                 {{ $message }}
                                                             </p>
                                                         @enderror
@@ -52,7 +63,7 @@
                                                             value="{{ old('mobile') }}" name="mobile" type="number"
                                                             placeholder="Enter mobile number" required="">
                                                         @error('mobile')
-                                                            <p class="text-red-500 text-xs mt-1">
+                                                            <p class="text-danger small mt-1 mb-0">
                                                                 {{ $message }}
                                                             </p>
                                                         @enderror
@@ -64,7 +75,7 @@
                                                             value="{{ old('password') }}" name="password" type="password"
                                                             placeholder="Enter password" required="">
                                                         @error('password')
-                                                            <p class="text-red-500 text-xs mt-1">
+                                                            <p class="text-danger small mt-1 mb-0">
                                                                 {{ $message }}
                                                             </p>
                                                         @enderror
@@ -76,7 +87,7 @@
                                                             value="{{ old('address1') }}" name="address1" type="text"
                                                             placeholder="Enter address1">
                                                         @error('address1')
-                                                            <p class="text-red-500 text-xs mt-1">
+                                                            <p class="text-danger small mt-1 mb-0">
                                                                 {{ $message }}
                                                             </p>
                                                         @enderror
@@ -88,7 +99,7 @@
                                                             value="{{ old('address2') }}" name="address2" type="text"
                                                             placeholder="Enter address2">
                                                         @error('address2')
-                                                            <p class="text-red-500 text-xs mt-1">
+                                                            <p class="text-danger small mt-1 mb-0">
                                                                 {{ $message }}
                                                             </p>
                                                         @enderror
@@ -100,7 +111,7 @@
                                                             value="{{ old('city') }}" name="city" type="text"
                                                             placeholder="Enter city">
                                                         @error('city')
-                                                            <p class="text-red-500 text-xs mt-1">
+                                                            <p class="text-danger small mt-1 mb-0">
                                                                 {{ $message }}
                                                             </p>
                                                         @enderror
@@ -112,7 +123,7 @@
                                                             value="{{ old('district') }}" name="district" type="text"
                                                             placeholder="Enter district">
                                                         @error('district')
-                                                            <p class="text-red-500 text-xs mt-1">
+                                                            <p class="text-danger small mt-1 mb-0">
                                                                 {{ $message }}
                                                             </p>
                                                         @enderror
@@ -124,7 +135,7 @@
                                                             value="{{ old('pincode') }}" name="pincode" type="number"
                                                             placeholder="Enter pincode">
                                                         @error('pincode')
-                                                            <p class="text-red-500 text-xs mt-1">
+                                                            <p class="text-danger small mt-1 mb-0">
                                                                 {{ $message }}
                                                             </p>
                                                         @enderror
@@ -139,7 +150,7 @@
                                                                 @if (old('state') == 'Andaman and Nicobar Islands') selected @endif>Andaman
                                                                 and Nicobar Islands</option>
                                                             <option value="Andhra Pradesh"
-                                                                @if (old('state') == 'ndhra Pradesh') selected @endif>Andhra
+                                                                @if (old('state') == 'Andhra Pradesh') selected @endif>Andhra
                                                                 Pradesh</option>
                                                             <option value="Arunachal Pradesh"
                                                                 @if (old('state') == 'Arunachal Pradesh') selected @endif>Arunachal
@@ -249,7 +260,7 @@
                                                         </select>
                                                         <div class="invalid-feedback">Please select a valid state.</div>
                                                         @error('state')
-                                                            <p class="text-red-500 text-xs mt-1">
+                                                            <p class="text-danger small mt-1 mb-0">
                                                                 {{ $message }}
                                                             </p>
                                                         @enderror
@@ -257,25 +268,32 @@
 
                                                     {{-- //khushboo 31-03-2025 --}}
                                                     <div class="col-xl-6 col-sm-6">
-                                                        <label class="form-label" for="roles">Role</label>
+                                                        <label class="form-label" for="roles">Role<span
+                                                                class="txt-danger">*</span></label>
                                                         <select class="form-select" id="roles" name="roles"
                                                             required="" >
+                                                            <option value="">Select role</option>
                                                             @foreach ($roles as $role)
                                                                 @if ($currentUserRole == 'Agency')
                                                                     @if ($role->name == 'Auditor' || $role->name == 'Verifier')
                                                                         <option value="{{ $role->name }}"
-                                                                            @if (is_array(old('role')) && in_array($role->id, old('role'))) selected @endif>
+                                                                            @selected(old('roles') == $role->name)>
                                                                             {{ $role->name }}
                                                                         </option>
                                                                     @endif
                                                                 @else
                                                                     <option value="{{ $role->name }}"
-                                                                        @if (is_array(old('role')) && in_array($role->id, old('role'))) selected @endif>
+                                                                        @selected(old('roles') == $role->name)>
                                                                         {{ $role->name }}
                                                                     </option>
                                                                 @endif
                                                             @endforeach
                                                         </select>
+                                                        @error('roles')
+                                                            <p class="text-danger small mt-1 mb-0">
+                                                                {{ $message }}
+                                                            </p>
+                                                        @enderror
                                                     </div>
                                                     <div class="col-xl-6 col-sm-6 d-none" id="AgencyDiv" >
                                                         <label class="form-label" for="roles">Select Agency</label>
@@ -283,10 +301,16 @@
                                                             name="agency_select" >
                                                             <option></option>
                                                             @foreach ($agencies as $agency)
-                                                                <option value="{{ $agency->id }}">{{ $agency->name }}
+                                                                <option value="{{ $agency->id }}"
+                                                                    @selected(old('agency_select') == $agency->id)>{{ $agency->name }}
                                                                 </option>
                                                             @endforeach
                                                         </select>
+                                                        @error('agency_select')
+                                                            <p class="text-danger small mt-1 mb-0">
+                                                                {{ $message }}
+                                                            </p>
+                                                        @enderror
                                                     </div>
                                                     {{-- //khushboo 31-03-2025 --}}
 

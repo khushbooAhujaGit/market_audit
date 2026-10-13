@@ -11,6 +11,12 @@ use Illuminate\Http\Request;
 
 class SubjectDropdownController extends Controller
 {
+    function __construct()
+    {
+        return $this->middleware("auth");
+    }
+    
+    
     public function view_subject_options($id){
         $subjectInfo = SubjectQuestion::findOrFail($id);
 

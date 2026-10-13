@@ -17,6 +17,13 @@ use Illuminate\Support\Facades\DB;
 
 class ProjectTemplateController extends Controller
 {
+    
+    function __construct()
+    {
+        return $this->middleware("auth");
+    }
+    
+    
     public function projectTemplateInfo(Request $request)
     {
         $projectTemplate = ProjectTemplate::with('getTemplate.getTemplateHeads')->where('project_id', $request->p_id)

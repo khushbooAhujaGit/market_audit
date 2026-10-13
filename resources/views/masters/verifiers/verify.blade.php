@@ -161,14 +161,26 @@
                                             <h5 class="mt-2 p-2 d-flex align-items-center justify-content-between flex-wrap gap-2">
                                                 <span>Activity Questions</span>
                                                 <span class="d-flex align-items-center gap-2">
+                                                    @if (filter_var(env('DOWNLOAD_ALL_ATTACHMENTS', true), FILTER_VALIDATE_BOOLEAN))
+                                                        <a href="{{ url('/Verifier/download_all_images') . '?' . http_build_query(['row_id' => $related_values->id, 'activity_id' => $related_questions[0]->activity_id, 'activity_sequence' => $activity_sequence ?? 0]) }}"
+                                                           class="btn btn-sm btn-success"
+                                                           title="Download all attachments (images and files) as ZIP">
+                                                            &#11015; Download All Attachments
+                                                        </a>
+                                                    @else
                                                     <button type="button" onclick="downloadAllImagesAsZip(this)"
                                                        class="btn btn-sm btn-success"
                                                        title="Download all image answers as ZIP">
                                                         &#11015; Download All Images
                                                     </button>
+                                                    @endif
                                                     <span class="badge bg-secondary fs-6" style="cursor:pointer;" id="edit_answers">Edit</span>
                                                 </span>
                                             </h5>
+                                            <div id="edit_answers_hint" class="alert alert-warning py-2 px-3 mx-2 mb-2 small d-none">
+                                                Editing answers: your changes are saved only when you click <strong>Approve</strong>.
+                                                Reject and Sendback keep the auditor's answers. The auditor's original answer is kept and shown under each edited question.
+                                            </div>
                                             <form method="post" action="{{ route('verifier.activityQuestionAnswers') }}"
                                                 enctype="multipart/form-data">
                                                 @csrf
@@ -258,7 +270,8 @@
                                                                         @if ($parentQuestion->answer_type == 1)
                                                                             <span class="text-danger">*</span>
                                                                         @endif
-                                                                    </td> 
+                                                                        @include('masters.verifiers.partials.answer_edit_note', ['question' => $parentQuestion])
+                                                                    </td>
                                                                     <td class="col-md-6">
                                                                         @switch($parentQuestion->question_type)
                                                                             @case('Multi Response')
@@ -920,6 +933,7 @@
                                                                                     @if ($childQuestion->answer_type == 1)
                                                                                         <span class="text-danger">*</span>
                                                                                     @endif
+                                                                                    @include('masters.verifiers.partials.answer_edit_note', ['question' => $childQuestion])
                                                                                 </td>
                                                                                 <td class="col-md-6">
                                                                                     @if ($childAnswer)
@@ -2373,6 +2387,7 @@
                 // Enable all file and date inputs by removing disabled
                 $('input[disabled], select[disabled]').removeAttr('disabled');
                 $(".subjective_ques").removeClass('d-none');
+                $("#edit_answers_hint").removeClass('d-none');
             })
 
             $('#approve, #reject').on('click', function() {

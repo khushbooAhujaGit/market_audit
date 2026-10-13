@@ -35,6 +35,7 @@ class User extends Authenticatable
         'agency_user_id',
         'is_agency_user',
         //khushboo 31-03-2025
+        'verifier_user_id', // user created by a Verifier (shown on that Verifier's user list)
     ];
 
     /**

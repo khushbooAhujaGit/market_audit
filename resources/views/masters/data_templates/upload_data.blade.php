@@ -128,7 +128,9 @@
                                                         <label class="form-label" for="data_excel">Data Excel File<span
                                                                 class="txt-danger"></span></label>
                                                         <input class="form-control" id="data_excel" name="data_excel"
-                                                               type="file" required="" placeholder="">
+                                                               type="file" required="" placeholder=""
+                                                               accept=".csv,.txt,.xlsx,.xlsm,.xls">
+                                                        <small class="text-muted">CSV or Excel (.csv, .xlsx, .xlsm, .xls)</small>
                                                         @error('data_excel')
                                                         <p class="text-red-500 text-xs mt-1">
                                                             {{$message}}

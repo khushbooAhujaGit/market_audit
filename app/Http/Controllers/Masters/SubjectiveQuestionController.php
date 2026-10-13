@@ -11,6 +11,12 @@ use Illuminate\Http\Request;
 
 class SubjectiveQuestionController extends Controller
 {
+    function __construct()
+    {
+        return $this->middleware("auth");
+    }
+    
+    
     public function index()
     {
         $subjective_activities = Activity::whereHas('questions', function ($query) {
