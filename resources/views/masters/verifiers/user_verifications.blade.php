@@ -8,7 +8,7 @@
                 <div class="card">
                     <div class="card-header">
                         <h4>My Verifications Projects </h4>
-
+                        <p class="text-muted mb-0 mt-1 small">Click an activity to open the audits waiting for your verification.</p>
                     </div>
                     <div class="card-body">
                         <div class="table-responsive theme-scrollbar">
@@ -32,24 +32,24 @@
                                             <td>{{ isset($my_verification->projectTemplateInfo->getTemplate) ? $my_verification->projectTemplateInfo->getTemplate->template_name : '' }}
                                             </td>
                                             <td>
-                                                <ul>
+                                                {{-- Each activity is a clickable chip that opens its verification queue --}}
+                                                <div class="verify-activity-list">
                                                     @if (isset($my_verification->projectTemplateInfo) && $my_verification->projectTemplateInfo->activityType === 0)
-                                                        <li><a
-                                                                href="{{ route('activity.verification.view', ['pt' => $my_verification->projectTemplateInfo->id, 'a' => $my_verification->projectTemplateInfo->related_activity->id]) }}">{{ $my_verification->projectTemplateInfo->related_activity->activity_name }}</a>
-                                                        </li>
+                                                        <a class="verify-activity-chip"
+                                                            href="{{ route('activity.verification.view', ['pt' => $my_verification->projectTemplateInfo->id, 'a' => $my_verification->projectTemplateInfo->related_activity->id]) }}">{{ $my_verification->projectTemplateInfo->related_activity->activity_name }}<span class="chip-arrow">&rsaquo;</span></a>
                                                     @else
                                                         @if (isset($my_verification->projectTemplateInfo))
-                                                        
+
                                                             @if(!empty($my_verification->projectTemplateInfo->activityGroup) && !empty($my_verification->projectTemplateInfo->activityGroup->get_group_activities))
                                                                 @foreach ($my_verification->projectTemplateInfo->activityGroup->get_group_activities as $group_activity)
-                                                                    <li><a
-                                                                            href="{{ route('activityGroup.verification.view', ['pt' => $my_verification->projectTemplateInfo->id, 'g' => $my_verification->projectTemplateInfo->activityGroup->id, 's' => $group_activity->sequence, 'a' => $group_activity->activity_id]) }}">{{ optional($group_activity->activityName)->activity_name }}</a>
-                                                                    </li>
+                                                                    @continue(empty($group_activity->activityName))
+                                                                    <a class="verify-activity-chip"
+                                                                        href="{{ route('activityGroup.verification.view', ['pt' => $my_verification->projectTemplateInfo->id, 'g' => $my_verification->projectTemplateInfo->activityGroup->id, 's' => $group_activity->sequence, 'a' => $group_activity->activity_id]) }}">{{ optional($group_activity->activityName)->activity_name }}<span class="chip-arrow">&rsaquo;</span></a>
                                                                 @endforeach
                                                             @endif
                                                         @endif
                                                     @endif
-                                                </ul>
+                                                </div>
                                             </td>
                                             <td class="d-none" >
                                                 <ul class="action">
@@ -73,6 +73,23 @@
         </div>
     </div>
 
+@endsection
+
+@section('style')
+    <style>
+        .verify-activity-list { display: flex; flex-wrap: wrap; gap: 6px; }
+        .verify-activity-chip {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 10px; border-radius: 8px;
+            background: #e8f0fe; color: #1a56db !important; border: 1px solid #c3d5fb;
+            font-size: 13px; font-weight: 500; line-height: 1.4; text-decoration: none;
+            transition: background .15s, border-color .15s, color .15s;
+        }
+        .verify-activity-chip .chip-arrow { font-size: 16px; line-height: 1; }
+        .verify-activity-chip:hover, .verify-activity-chip:focus {
+            background: #1a56db; border-color: #1a56db; color: #fff !important;
+        }
+    </style>
 @endsection
 
 @section('scripts')

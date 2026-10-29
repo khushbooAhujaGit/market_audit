@@ -153,7 +153,8 @@ trait  InterventionImage
         try {
             $info = pathinfo($absoluteImagePath);
             $extension = $info['extension'] ?? 'jpg';
-            $filename  = uniqid() . $info['filename'];
+            // "geo_" marks a stamped file, so the stamping job never stamps it again
+            $filename  = \App\Services\GeoStamp::PREFIX . uniqid() . $info['filename'];
 
             $image_height = 1920;
             $image_width  = 1440;

@@ -49,12 +49,18 @@
         @if($subQuestion->answer_type == 1)
             <span class="text-danger">*</span>
         @endif
+        @include('masters.verifiers.partials.answer_edit_note', ['question' => $subQuestion])
     </td>
     <td class="col-md-6">
         @if($subQuestion->question_type === 'Multi Response')
             {{-- Multi Response = section header, no answer stored --}}
         @elseif(!$sqValue)
             <span class="text-muted fst-italic">&#8212; No answer &#8212;</span>
+            @if ($mrParentId !== null && $subQuestion->question_type === 'Free Text')
+                {{-- Revealed by the Edit button so the verifier can answer it (saved on Approve) --}}
+                <input type="text" name="mr_answer[{{ $mrParentId }}][{{ $sqid }}]" value=""
+                    class="form-control verifier-blank-answer d-none" readonly>
+            @endif
         @elseif(in_array($subQuestion->question_type, ['Barcode', 'QR Code', 'RFID']))
             {{-- Must come before the JSON-image check below: a scan answer is a JSON object too --}}
             @include('masters.verifiers.partials.scan_answer_verify', [
@@ -146,7 +152,8 @@
                 <a href="https://www.google.com/maps?q={{ urlencode($sqValue) }}" target="_blank"
                     class="small text-primary mt-1 d-inline-block">&#128205; View on Map</a>
             @else
-                <input type="text" value="{{ $sqValue }}" class="form-control" readonly>
+                {{-- Named by the answer row so an edit (Edit button, saved on Approve) updates exactly this answer --}}
+                <input type="text" value="{{ $sqValue }}" name="answer_row[{{ $sqAns->id }}]" class="form-control" readonly>
             @endif
         @endif
     </td>
@@ -198,6 +205,7 @@
                 </small><br>
                 {{ $condChild->question }}
                 @if($condChild->answer_type == 1)<span class="text-danger">*</span>@endif
+                @include('masters.verifiers.partials.answer_edit_note', ['question' => $condChild])
             </td>
             <td class="col-md-6">
                 @if(!$ccValue)
@@ -209,17 +217,42 @@
                     ])
                 @else
                     @php
+                        // Multiple images/files are stored as a JSON array of paths: decode it first,
+                        // since an extension check on the raw JSON text never matches.
+                        $ccPaths = json_decode($ccValue, true);
+                        $ccPaths = is_array($ccPaths) ? array_values(array_filter($ccPaths, 'is_string')) : [];
+                        $ccImgExts = ['jpg','jpeg','png','gif','webp','svg'];
                         $ccExt    = strtolower(pathinfo($ccValue, PATHINFO_EXTENSION));
-                        $ccIsImg  = in_array($ccExt, ['jpg','jpeg','png','gif','webp']) && str_contains($ccValue, '/');
+                        $ccIsImg  = in_array($ccExt, $ccImgExts) && str_contains($ccValue, '/');
                         $ccIsFile = in_array($ccExt, ['pdf','xls','xlsx','doc','docx']) && str_contains($ccValue, '/');
                     @endphp
-                    @if($ccIsImg)
+                    @if(!empty($ccPaths))
+                        <div class="d-flex flex-wrap gap-2 mb-1">
+                            @foreach ($ccPaths as $ccPath)
+                                @if (in_array(strtolower(pathinfo($ccPath, PATHINFO_EXTENSION)), $ccImgExts))
+                                    <img src="{{ asset($ccPath) }}" alt="answer" class="imagemodal"
+                                         data-setval="{{ asset($ccPath) }}" data-verifier-img="{{ asset($ccPath) }}"
+                                         style="width:72px;height:72px;object-fit:cover;border-radius:4px;border:1px solid #ddd;cursor:pointer;">
+                                @else
+                                    <a href="{{ asset($ccPath) }}" target="_blank" class="btn btn-sm btn-outline-secondary">&#128206; View File {{ $loop->iteration }}</a>
+                                @endif
+                            @endforeach
+                        </div>
+                        @if (count($ccPaths) > 1)
+                            <a href="{{ route('report.download.images.zip', ['answer_id' => $ccAns->id]) }}"
+                               class="btn btn-sm btn-success mt-1" style="font-size:12px;">
+                                &#8615; Download ZIP ({{ count($ccPaths) }} files)
+                            </a>
+                        @else
+                            <a href="{{ asset($ccPaths[0]) }}" download class="btn btn-sm btn-outline-secondary mt-1" style="font-size:12px;">&#11015; Download</a>
+                        @endif
+                    @elseif($ccIsImg)
                         <img src="{{ asset($ccValue) }}" class="imagemodal" data-setval="{{ asset($ccValue) }}"
                              style="max-width:100%;max-height:150px;border-radius:4px;border:1px solid #ddd;cursor:pointer;">
                     @elseif($ccIsFile)
                         <a href="{{ asset($ccValue) }}" target="_blank" class="btn btn-sm btn-outline-secondary">View File</a>
                     @else
-                        <input type="text" value="{{ $ccValue }}" class="form-control" readonly>
+                        <input type="text" value="{{ $ccValue }}" name="answer_row[{{ $ccAns->id }}]" class="form-control" readonly>
                     @endif
                 @endif
             </td>

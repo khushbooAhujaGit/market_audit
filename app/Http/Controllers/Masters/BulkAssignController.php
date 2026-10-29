@@ -11,6 +11,7 @@ use App\Models\ProjectTemplate;
 use App\Models\TemplateNameHead;
 use App\Models\User;
 use App\Services\DataAssignmentService;
+use App\Services\VerifierAssignment;
 use App\Services\XlsxStream;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -36,8 +37,12 @@ class BulkAssignController extends Controller
     public function index()
     {
         $this->denyAgency();
-        $projects = Project::open()->orderBy('id', 'DESC')->get(['id', 'project_name']);
-        return view('masters.data_templates.bulk_assign', compact('projects'));
+        $verifier = $this->verifierId();
+        $projects = Project::open()
+            ->when($verifier, fn($q) => $q->whereIn('id', VerifierAssignment::assignedDataAssigns($verifier)->pluck('project_id')->unique()))
+            ->orderBy('id', 'DESC')->get(['id', 'project_name']);
+        $isVerifier = (bool) $verifier;
+        return view('masters.data_templates.bulk_assign', compact('projects', 'isVerifier'));
     }
 
     public function templates(Request $request)
@@ -45,19 +50,23 @@ class BulkAssignController extends Controller
         $this->denyAgency();
         $request->validate(['project_id' => 'required|integer']);
         $project = Project::open()->findOrFail($request->project_id);
+        $verifier = $this->verifierId();
 
         $templates = ProjectTemplate::with('getTemplate')
             ->where('project_id', $project->id)
+            ->when($verifier, fn($q) => $q->whereIn('id', VerifierAssignment::assignedDataAssigns($verifier)->pluck('project_template_id')->unique()))
             ->orderByDesc('is_master')
             ->orderBy('id')
             ->get();
-        $hasChildren = $templates->where('is_master', 0)->isNotEmpty();
+        $hasChildren = ProjectTemplate::where('project_id', $project->id)->where('is_master', 0)->exists();
 
         return response()->json([
             'templates' => $templates->map(fn($pt) => [
                 'id'                 => $pt->id,
                 'name'               => optional($pt->getTemplate)->template_name ?? ('Template #' . $pt->id),
-                'rows'               => DB::table('project_template_name_values_new')->where('project_template_id', $pt->id)->count(),
+                'rows'               => $verifier
+                    ? count($this->verifierRowsByActivity($verifier, $pt)->flatten()->unique())
+                    : DB::table('project_template_name_values_new')->where('project_template_id', $pt->id)->count(),
                 'activities'         => $this->activitiesFor($pt)->pluck('name')->values(),
                 'can_assign_outlets' => $pt->is_master == 1 && $hasChildren,
             ])->values(),
@@ -120,13 +129,18 @@ class BulkAssignController extends Controller
         );
 
         $headIds = $heads->pluck('id')->all();
-        $assignBlank = $withOutlets ? ['', '', 'No'] : ['', ''];
+        // A verifier's sheet has only the rows (per activity) given to them, with their own number as verifier
+        $verifier = $this->verifierId();
+        $ownRows = $verifier ? $this->verifierRowsByActivity($verifier, $pt)->map(fn($ids) => array_flip($ids)) : null;
+        $verifierMobile = $verifier ? (string) User::find($verifier)->mobile : '';
+        $assignBlank = $withOutlets ? ['', $verifierMobile, 'No'] : ['', $verifierMobile];
         $lastRow = 2;
         DB::table('project_template_name_values_new')
             ->where('project_template_id', $pt->id)
+            ->when($ownRows !== null, fn($q) => $q->whereIn('id', $ownRows->flatMap(fn($ids) => array_keys($ids))->unique()->values()))
             ->select('id', 'template_data_json')
             ->lazyById(1000)
-            ->each(function ($row) use ($w, $headIds, $activities, $assignBlank, &$lastRow) {
+            ->each(function ($row) use ($w, $headIds, $activities, $assignBlank, $ownRows, &$lastRow) {
                 $json = json_decode($row->template_data_json, true) ?: [];
                 $values = [(int) $row->id];
                 foreach ($headIds as $headId) {
@@ -134,6 +148,7 @@ class BulkAssignController extends Controller
                     $values[] = is_scalar($v) ? (string) $v : json_encode($v);
                 }
                 foreach ($activities as $activity) {
+                    if ($ownRows !== null && !isset($ownRows->get($activity['id'], [])[(int) $row->id])) continue;
                     $w->row(array_merge($values, [$activity['name']], $assignBlank));
                     $lastRow++;
                 }
@@ -142,11 +157,15 @@ class BulkAssignController extends Controller
         if ($lastRow > 2) {
             $w->inputTip(
                 "{$colAuditor}3:{$colAuditor}{$lastRow}", 'Assign To (Auditor)',
-                "Enter the auditor's 10-digit mobile number to assign this row + activity. For more than one auditor, separate the numbers with commas. A Verifier Mobile No is also needed, or the row is not assigned."
+                $verifier
+                    ? "Enter the 10-digit mobile number of one of your auditors to assign this row + activity. For more than one auditor, separate the numbers with commas."
+                    : "Enter the auditor's 10-digit mobile number to assign this row + activity. For more than one auditor, separate the numbers with commas. A Verifier Mobile No is also needed, or the row is not assigned."
             );
             $w->inputTip(
                 "{$colVerifier}3:{$colVerifier}{$lastRow}", 'Verified By (Verifier)',
-                "Enter the verifier's 10-digit mobile number. For more than one verifier, separate the numbers with commas. An Auditor Mobile No is also needed, or the row is not assigned."
+                $verifier
+                    ? "You are the verifier of the rows you assign."
+                    : "Enter the verifier's 10-digit mobile number. For more than one verifier, separate the numbers with commas. With no Auditor Mobile No the row goes to the verifier only, who assigns their own auditors later."
             );
             if ($withOutlets) {
                 $w->listValidation(
@@ -229,12 +248,26 @@ class BulkAssignController extends Controller
         // ── Lookups ───────────────────────────────────────────────────────────
         $templateRowIds = DB::table('project_template_name_values_new')->where('project_template_id', $pt->id)
             ->pluck('id')->flip();
-        $auditorIdByMobile  = User::role('Auditor')->whereNotNull('mobile')->get(['id', 'mobile'])
+        // A verifier assigns only their own auditors, on the rows (per activity) given to them, as the verifier
+        $verifier = $this->verifierId();
+        $verifierRows = null;
+        if ($verifier) {
+            $givenTemplateIds = VerifierAssignment::assignedDataAssigns($verifier)->pluck('project_template_id')->map(fn($id) => (int) $id)->all();
+            if (!in_array((int) $pt->id, $givenTemplateIds, true)) {
+                return response()->json(['message' => 'This project or template has not been assigned to you.'], 422);
+            }
+            $verifierRows = $this->verifierRowsByActivity($verifier, $pt)->map(fn($ids) => array_flip($ids));
+        }
+        $auditorIdByMobile  = User::role('Auditor')->whereNotNull('mobile')
+            ->when($verifier, fn($q) => $q->where('verifier_user_id', $verifier))
+            ->get(['id', 'mobile'])
             ->mapWithKeys(fn($u) => [self::normalizeMobile((string) $u->mobile) => $u->id]);
         $verifierIdByMobile = User::role('Verifier')->whereNotNull('mobile')->get(['id', 'mobile'])
             ->mapWithKeys(fn($u) => [self::normalizeMobile((string) $u->mobile) => $u->id]);
         $anyUserMobiles = DB::table('users')->whereNotNull('mobile')->pluck('mobile')
             ->mapWithKeys(fn($m) => [self::normalizeMobile((string) $m) => true]);
+        // Outlet (child) template: rows whose own template head value matches no parent row
+        $parentCheck = \App\Services\OutletDistributorMatch::rowsWithoutParent($pt, $templateRowIds->keys()->all());
 
         // ── Validate every line before assigning anything ──────────────────────
         $errorLines = [];
@@ -246,7 +279,8 @@ class BulkAssignController extends Controller
         $headerOk = null;
 
         XlsxStream::readColumns($path, self::SHEET, array_values(array_filter($cols)), function ($excelRow, $v) use (
-            $cols, $defaultOutlet, $templateRowIds, $activityIdByName, $auditorIdByMobile, $verifierIdByMobile, $anyUserMobiles,
+            $cols, $defaultOutlet, $templateRowIds, $activityIdByName, $auditorIdByMobile, $verifierIdByMobile, $anyUserMobiles, $parentCheck,
+            $verifier, $verifierRows,
             &$errorLines, &$groups, &$assignedLines, &$skippedLines, &$incompleteLines, &$outletLines, &$headerOk
         ) {
             $rowIdRaw = trim((string) $v[$cols['row']]);
@@ -262,20 +296,30 @@ class BulkAssignController extends Controller
                 return;
             }
             if ($excelRow < 3) return;
-            // A line is assigned only when both an auditor and a verifier are given
-            if ($auditors === '' && $verifiers === '') {
-                if ($rowIdRaw !== '' || $activity !== '') $skippedLines++;
-                return;
-            }
-            if ($auditors === '' || $verifiers === '') {
-                $incompleteLines++;
-                return;
+            // A verifier's line needs only an auditor (the verifier is themselves)
+            if ($verifier) {
+                if ($auditors === '') {
+                    if ($rowIdRaw !== '' || $activity !== '') $skippedLines++;
+                    return;
+                }
+            } else {
+                // Admin: a verifier is always needed; with no auditor the line goes to the verifier only
+                if ($auditors === '' && $verifiers === '') {
+                    if ($rowIdRaw !== '' || $activity !== '') $skippedLines++;
+                    return;
+                }
+                if ($verifiers === '') {
+                    $incompleteLines++;
+                    return;
+                }
             }
 
             $errors = [];
             $rowId = ctype_digit($rowIdRaw) ? (int) $rowIdRaw : null;
             if ($rowId === null || !$templateRowIds->has($rowId)) {
                 $errors[] = $rowIdRaw === '' ? 'Row ID is empty.' : "Row ID \"{$rowIdRaw}\" is not a row of this template.";
+            } elseif (array_key_exists($rowId, $parentCheck['missing_rows'])) {
+                $errors[] = "No matching parent row: {$parentCheck['own_head']} \"{$parentCheck['missing_rows'][$rowId]}\" matches no {$parentCheck['master_head']} value in the parent template.";
             }
             $activityId = $activityIdByName[mb_strtolower($activity)] ?? null;
             if (!$activityId) {
@@ -294,7 +338,7 @@ class BulkAssignController extends Controller
                     } elseif ($idByMobile->has($mobile)) {
                         $ids[] = (int) $idByMobile[$mobile];
                     } elseif ($anyUserMobiles->has($mobile)) {
-                        $errors[] = "{$mobile} is not " . (str_starts_with($role, 'A') ? 'an' : 'a') . " {$role}.";
+                        $errors[] = "{$mobile} is not {$role}.";
                     } else {
                         $errors[] = "{$mobile} is not a registered user's mobile number.";
                     }
@@ -303,8 +347,12 @@ class BulkAssignController extends Controller
                 sort($ids);
                 return $ids;
             };
-            $auditorIds  = $resolve($auditors, $auditorIdByMobile, 'Auditor');
-            $verifierIds = $resolve($verifiers, $verifierIdByMobile, 'Verifier');
+            $auditorIds  = $resolve($auditors, $auditorIdByMobile, $verifier ? 'one of your auditors' : 'an Auditor');
+            $verifierIds = $verifier ? [$verifier] : $resolve($verifiers, $verifierIdByMobile, 'a Verifier');
+            if ($verifier && $activityId && $rowId !== null
+                && !isset($verifierRows->get($activityId, [])[$rowId])) {
+                $errors[] = "Row ID {$rowId} is not assigned to you for \"{$activity}\".";
+            }
 
             $isOutlet = $defaultOutlet;
             if ($cols['outlet'] !== '') {
@@ -335,8 +383,10 @@ class BulkAssignController extends Controller
             return $this->errorFile($errorLines);
         }
         if (!$groups) {
-            return response()->json(['message' => 'Nothing to assign: fill in both Auditor Mobile No and Verifier Mobile No on the lines you want to assign.'
-                . ($incompleteLines ? " {$incompleteLines} line(s) have only one of the two." : '')], 422);
+            return response()->json(['message' => ($verifier
+                    ? 'Nothing to assign: fill in Auditor Mobile No on the lines you want to assign.'
+                    : 'Nothing to assign: fill in Verifier Mobile No (and Auditor Mobile No, or leave it empty to give the line to the verifier only) on the lines you want to assign.')
+                . ($incompleteLines ? " {$incompleteLines} line(s) have an Auditor Mobile No but no Verifier Mobile No." : '')], 422);
         }
 
         $units = [];
@@ -350,12 +400,18 @@ class BulkAssignController extends Controller
             }
         }
 
+        // A verifier's assignments keep the agency / company user of the admin's assignment
+        $given = $verifier ? VerifierAssignment::assignedDataAssigns($verifier)->where('project_template_id', $pt->id)->first() : null;
+
         $token = (string) Str::uuid();
         Storage::disk('local')->put("bulk_assign/{$token}.json", json_encode([
             'user_id'               => Auth::id(),
             'project_template_id'   => $pt->id,
             'template_name_head_id' => (int) ($meta['template_name_head_id'] ?? 0) ?: null,
             'verifier_outlet'       => $verifierOutlet,
+            'limit_verifier'        => $verifier,
+            'agency_id'             => $given->agency_id ?? null,
+            'company_user_id'       => $given->company_user_id ?? null,
             'units'                 => $units,
         ]));
 
@@ -404,12 +460,18 @@ class BulkAssignController extends Controller
             $isOutlet = (int) $unit['o'];
             $dataAssign = DataAssignmentService::findOrCreateDataAssign(
                 $project, (int) $unit['a'], $groupId, (int) $pt->template_name_id, $pt->id,
-                $job['template_name_head_id'], $isOutlet
+                $job['template_name_head_id'], $isOutlet, $job['company_user_id'] ?? null, $job['agency_id'] ?? null
             );
+            VerifierAssignment::recordDataAssign($unit['ver'], $dataAssign->id, (int) $job['user_id']);
+
+            if (empty($unit['aud'])) {
+                // No auditor: the verifiers get the rows and assign their own auditors later
+                DataAssignmentService::assignToVerifiersOnly($unit['ver'], $pt, (int) $unit['a'], $unit['rows'], $isOutlet === 1);
+            }
             foreach ($unit['aud'] as $auditorId) {
                 DataAssignmentService::assignRows($dataAssign->id, $auditorId, $pt->id, $unit['a'], $groupId, $unit['rows'], $unit['ver']);
                 if ($isOutlet === 1) {
-                    DataAssignmentService::assignOutletChildren($dataAssign->id, $auditorId, $pt, $unit['rows'], $groupId, $unit['ver']);
+                    DataAssignmentService::assignOutletChildren($dataAssign->id, $auditorId, $pt, $unit['rows'], $groupId, $unit['ver'], $job['limit_verifier'] ?? null);
                 }
             }
             $i++;
@@ -421,7 +483,22 @@ class BulkAssignController extends Controller
         return response()->json(['processed' => $i, 'total' => $total, 'done' => $done]);
     }
 
-    /** Activities of a project template in order: [['id' => int, 'name' => string], ...] */
+    /** Logged-in Verifier's id (they bulk-assign their own auditors), null for other roles. */
+    private function verifierId(): ?int
+    {
+        return Auth::user()->hasRole('Verifier') ? (int) Auth::id() : null;
+    }
+
+    /** Rows of the template given to a verifier, per assigned activity: [activity_id => [row ids]] */
+    private function verifierRowsByActivity(int $verifierId, ProjectTemplate $pt): Collection
+    {
+        return VerifierAssignment::assignedDataAssigns($verifierId)
+            ->where('project_template_id', $pt->id)
+            ->pluck('activity_id')->map(fn($id) => (int) $id)->unique()
+            ->mapWithKeys(fn($activityId) => [$activityId => VerifierAssignment::ownRowIds($verifierId, (int) $pt->id, $activityId)]);
+    }
+
+    /** Activities of a project template in order: [['id' => int, 'name' => string], ...] (a Verifier's: only theirs) */
     private function activitiesFor(ProjectTemplate $pt): Collection
     {
         $ref = $pt->activity_group_name_id_or_activity_id;
@@ -430,6 +507,11 @@ class BulkAssignController extends Controller
         $ids = $pt->activityType == 1
             ? ActivityGroupPivot::where('activity_group_id', $ref)->orderBy('sequence')->pluck('activity_id')->all()
             : [(int) $ref];
+        if ($verifier = $this->verifierId()) {
+            $given = VerifierAssignment::assignedDataAssigns($verifier)->where('project_template_id', $pt->id)
+                ->pluck('activity_id')->map(fn($id) => (int) $id)->all();
+            $ids = array_values(array_filter($ids, fn($id) => in_array((int) $id, $given, true)));
+        }
         $names = Activity::whereIn('id', $ids)->pluck('activity_name', 'id');
 
         // Names identify the activity in the sheet, so keep them unique

@@ -61,8 +61,13 @@
                             <div class="bulk-step">
                                 <h6>2. Upload the filled sheet</h6>
                                 <ul class="bulk-hint ps-3 mb-3">
-                                    <li>Fill <strong>both Auditor Mobile No and Verifier Mobile No</strong> (10-digit mobile numbers) on the lines you want to assign. For more than one person, separate the numbers with commas.</li>
-                                    <li>A line with only one of the two, or neither, is not assigned to anyone. Existing assignments are kept; nothing is removed or replaced.</li>
+                                    @if ($isVerifier)
+                                        <li>The sheet has only the rows assigned to you. Fill <strong>Auditor Mobile No</strong> (10-digit mobile numbers of your own auditors) on the lines you want to assign; you are the verifier. For more than one auditor, separate the numbers with commas.</li>
+                                        <li>A line without an auditor is not assigned. Existing assignments are kept; nothing is removed or replaced.</li>
+                                    @else
+                                        <li>Fill <strong>Auditor Mobile No and Verifier Mobile No</strong> (10-digit mobile numbers) on the lines you want to assign. For more than one person, separate the numbers with commas.</li>
+                                        <li>Leave Auditor Mobile No empty to give the line to the <strong>verifier only</strong>; the verifier then assigns their own auditors. A line with only an auditor, or neither, is not assigned. Existing assignments are kept; nothing is removed or replaced.</li>
+                                    @endif
                                     <li>The whole sheet is checked first. If any line is wrong, nothing is assigned and a file listing the errors is downloaded.</li>
                                 </ul>
                                 <div class="row g-3 align-items-end">
@@ -186,7 +191,7 @@
 
             function incompleteNote(job) {
                 return job.incomplete
-                    ? `<br><strong>${job.incomplete.toLocaleString()} line(s) were not assigned</strong> because they have only an Auditor Mobile No or only a Verifier Mobile No; both are needed. `
+                    ? `<br><strong>${job.incomplete.toLocaleString()} line(s) were not assigned</strong> because they have an Auditor Mobile No but no Verifier Mobile No. `
                     : '';
             }
 

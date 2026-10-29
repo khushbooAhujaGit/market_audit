@@ -184,6 +184,14 @@
 
             @if (session('success'))
             $('.loader-backdrop').addClass('d-none');
+            @if (strlen(session('success')) > 120)
+            // Long message (e.g. file links / files still to upload): keep it open to read
+            Swal.fire({
+                icon: "success",
+                title: "Uploaded",
+                text: @json(session('success'))
+            });
+            @else
             Swal.fire({
                 position: "top-center",
                 icon: "success",
@@ -192,14 +200,30 @@
                 timer: 1500
             });
             @endif
+            @endif
             @if (session('error'))
             $('.loader-backdrop').addClass('d-none');
+            @if (session('error_file'))
+            // File-column problems: the rows with errors can be downloaded
             Swal.fire({
                 icon: "error",
                 title: "Oops...",
-                text: "Something went wrong!",
-                footer: '<a href="#">  {{ session('error') }}</a>'
+                text: @json(session('error')),
+                width: 700,
+                showCancelButton: true,
+                confirmButtonText: "Download Error File",
+                cancelButtonText: "Close"
+            }).then(result => {
+                if (result.isConfirmed) window.location.href = @json(session('error_file'));
             });
+            @else
+            Swal.fire({
+                icon: "error",
+                title: "Oops...",
+                text: @json(session('error')),
+                width: 700
+            });
+            @endif
                 @endif
 
             $('form').on('submit', function (e) {

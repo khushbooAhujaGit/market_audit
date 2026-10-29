@@ -81,8 +81,10 @@ class ProjectDataUploadWithJob implements ShouldQueue
         $templateHeads = DB::table('template_name_heads')
             ->where('template_name_id', $templateInfo->id)
             ->orderBy('id')
-            ->select('id', 'template_head_name')
+            ->select('id', 'template_head_name', 'is_file')
             ->get();
+        // File columns keep their slashes and colons (links); see TemplateDocuments::clean()
+        $fileHeadIds = $templateHeads->where('is_file', 1)->pluck('id')->flip();
 
         // Compare headers ignoring stray/double spaces and invisible characters (BOM,
         // non-breaking space) on BOTH sides: template column names often keep the
@@ -144,15 +146,37 @@ class ProjectDataUploadWithJob implements ShouldQueue
         $now = now()->format('Y-m-d H:i:s');
 //        $statement = $pdo->prepare($insertBaseSql);
 
+        // Rows identical (all columns) to one already in the template, or earlier in this file, are skipped
+        $seenKeys = \App\Services\TemplateRowDuplicates::existingKeys($projectTemplateId, $templateHeadIds);
+        $duplicatesSkipped = 0;
+        $totalInserted = 0;
+
         while (($data = fgetcsv($inHandle)) !== false) {
+            // Skip completely empty rows (same as the direct upload)
+            if (empty(array_filter($data, fn($v) => trim((string) $v) !== ''))) {
+                continue;
+            }
+
             $templateDataJson = [];
 
             foreach ($data as $i => $value) {
                 if (!isset($templateHeadIds[$i])) continue;
+                if ($fileHeadIds->has($templateHeadIds[$i])) {
+                    $templateDataJson[$templateHeadIds[$i]] = \App\Services\TemplateDocuments::clean($value);
+                    continue;
+                }
                 $value = preg_replace('/[\/\\\\\'"]/', '', $value);
                 $value = $this->sanitizeCsvValue($value);
                 $templateDataJson[$templateHeadIds[$i]] = $value;
             }
+
+            $rowKey = \App\Services\TemplateRowDuplicates::key($templateDataJson, $templateHeadIds);
+            if (isset($seenKeys[$rowKey])) {
+                $duplicatesSkipped++;
+                continue;
+            }
+            $seenKeys[$rowKey] = true;
+            $totalInserted++;
 
             // 🔎 Match against master values first for Mapping Distributor with Outlet
             $matchedMasterId = null;
@@ -163,6 +187,14 @@ class ProjectDataUploadWithJob implements ShouldQueue
                         $matchedMasterId = $found['id'];
                         break;
                     }
+                }
+                // Own reference head holding the distributor value plus extra text, e.g. "Disha Enteprises (SS)"
+                if (!$matchedMasterId && !empty($projectTemplateInfo->own_reference_head_id)) {
+                    $best = \App\Services\OutletDistributorMatch::bestMatch(
+                        $templateDataJson[$projectTemplateInfo->own_reference_head_id] ?? null,
+                        collect($masterTemplateValuesData)->pluck('value')->filter()->unique()
+                    );
+                    $matchedMasterId = $best !== null ? (collect($masterTemplateValuesData)->firstWhere('value', $best)['id'] ?? null) : null;
                 }
             }
 
@@ -198,7 +230,7 @@ class ProjectDataUploadWithJob implements ShouldQueue
         unlink($tempCsvPath);
 
         $duration = microtime(true) - $startTime;
-        Log::info("Project data imported successfully in " . round($duration, 2) . " seconds");
+        Log::info("Project data imported successfully in " . round($duration, 2) . " seconds: {$totalInserted} rows, {$duplicatesSkipped} duplicates skipped");
     }
 
     function buildMultiInsertQuery($baseSql, $rowCount)

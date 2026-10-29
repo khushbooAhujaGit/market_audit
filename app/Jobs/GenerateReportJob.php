@@ -727,6 +727,7 @@ class GenerateReportJob implements ShouldQueue
 
         $related_questions = Question::with(['subQuestions.childQuestion'])
             ->where('activity_id', $activity_check->id)
+            ->withoutOrphans()
             ->orderBy('question_sequence', 'asc')
             ->get();
 

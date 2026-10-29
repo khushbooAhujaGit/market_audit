@@ -459,33 +459,12 @@ class ProjectController extends Controller
             }
         }
 
-        $currentUser = User::find(Auth::user()->id);
+        // Users of agencies with older assignments are offered too (same as get_agency_users).
+        $filtered_verifier_list = collect($verifier_user_list);
+        $filtered_auditor_list = $this->ownAuditors() ?? collect($auditor_user_list);
 
-        $excludedAgencyIds = Project::where('is_agency_required', 1)
-            ->whereHas('dataAssigns', function ($query) use ($currentUser) {
-                $query->where('agency_id', $currentUser->agency_user_id)
-                    ->orWhere('agency_id', $currentUser->id);
-            })
-            ->with('dataAssigns')
-            ->get()
-            ->pluck('dataAssigns')
-            ->flatten()
-            ->pluck('agency_id')
-            ->unique()
-            ->toArray();
-
-        // Filter verifier list
-        $filtered_verifier_list = collect($verifier_user_list)->filter(function ($user) use ($excludedAgencyIds) {
-            return !in_array($user->agency_user_id, $excludedAgencyIds);
-        });
-
-        // Filter auditor list
-        $filtered_auditor_list = collect($auditor_user_list)->filter(function ($user) use ($excludedAgencyIds) {
-            return !in_array($user->agency_user_id, $excludedAgencyIds);
-        });
-
-        $html1 = '';
-        if ($filtered_verifier_list->isNotEmpty()) {
+        $html1 = $this->ownVerifierOption() ?? '';
+        if ($html1 === '' && $filtered_verifier_list->isNotEmpty()) {
             $html1 = '<option selected disabled value="">Choose...</option>';
             foreach ($filtered_verifier_list as $val1) {
                 $html1 .= "<option value={$val1->id}>{$val1->name}</option>";
@@ -505,6 +484,16 @@ class ProjectController extends Controller
         $projectMasterInfo = ProjectTemplate::with('getTemplate.getTemplateHeads')->where('project_id', $request->id)
             ->where('is_master', 1)->first();
         $projectTemplateNames = ProjectTemplate::where('project_id', $request->id)->with('getTemplate.getTemplateHeads')->get();
+
+        // A Verifier sees only the templates assigned to them, and picks no agency: the
+        // agency of the admin's assignment is kept and their own auditors are listed.
+        if ($request->boolean('for_assign') && Auth::user()->hasRole('Verifier')) {
+            $givenTemplateIds = \App\Services\VerifierAssignment::assignedDataAssigns(Auth::id())
+                ->where('project_id', (int) $request->id)->pluck('project_template_id')->unique()->all();
+            $projectTemplateNames = $projectTemplateNames->whereIn('id', $givenTemplateIds)->values();
+            $is_agency_required = false;
+            $html = '';
+        }
 
         //khushboo 05-04-2025
         $otpProjectActivities = false;
@@ -572,7 +561,7 @@ class ProjectController extends Controller
             $checkTemplateValues = DB::table('project_template_name_values_new')->where('project_template_id', $getMasterTemplate->id)->exists();
 
             $checkProjectTemplate = ProjectTemplate::where('project_id', $projectId)->where('template_name_id', $templateNameId)->first();
-            if ($checkTemplateValues && $checkProjectTemplate->is_master == 0 && !empty($checkProjectTemplate->own_reference_head_id) && !empty($checkProjectTemplate->master_head_id)) {
+            if ($checkTemplateValues && $checkProjectTemplate && $checkProjectTemplate->is_master == 0 && !empty($checkProjectTemplate->own_reference_head_id) && !empty($checkProjectTemplate->master_head_id)) {
                 $dataFilter = 1;
             }
         }
@@ -598,16 +587,25 @@ class ProjectController extends Controller
 
             $user = User::find(Auth::user()->id);
 
+            // File columns: every name / link is checked before anything is imported
+            $docTemplate = ProjectTemplate::where('project_id', $projectId)->where('template_name_id', $templateNameId)->first();
+            $docCells = $docTemplate ? \App\Services\TemplateDocuments::csvFileCells($filePath, $docTemplate) : [];
+            if ($docProblems = ($docCells ? \App\Services\TemplateDocuments::problems($docTemplate, $docCells) : [])) {
+                return $this->documentErrorResponse($docProblems, $filePath);
+            }
+
             dispatch(new ProjectDataUploadWithJob($filePath, $formFields['project_id'], $formFields['template_name_id'], $user, $dataFilter));
             //            $job = new ProjectDataUploadWithJob($filePath, $formFields['project_id'], $formFields['template_name_id'], $user, $dataFilter);
             //            $job->handle();
+
+            $linkNote = $this->registerDocuments($docTemplate, $docCells);
 
             $filePath = storage_path('app/' . $filePath);
             if (File::exists($filePath)) {
                 File::delete($filePath);
             }
 
-            return redirect()->back()->with('success', "Data import has been queued and will be processed shortly.");
+            return redirect()->back()->with('success', "Data import has been queued and will be processed shortly." . $linkNote);
         }
 
         $insertProjectTemplateData = [];
@@ -646,6 +644,12 @@ class ProjectController extends Controller
                 return redirect()->back()->with('error', 'The file could not be read: ' . $e->getMessage());
             }
 
+            // File columns: every name / link is checked before anything is imported
+            $docCells = \App\Services\TemplateDocuments::csvFileCells($filePath, $checkProjectTemplate);
+            if ($docProblems = ($docCells ? \App\Services\TemplateDocuments::problems($checkProjectTemplate, $docCells) : [])) {
+                return $this->documentErrorResponse($docProblems, $filePath);
+            }
+
             $result = ['success' => false, 'message' => 'Upload failed.'];
             try {
                 //                dd(DB::select("SHOW VARIABLES LIKE 'local_infile'"));
@@ -673,8 +677,78 @@ class ProjectController extends Controller
             if (!$result['success']) {
                 return redirect()->back()->with('error', $result['message']);
             }
-            return redirect()->back()->with('success', $result['message']);
+            return redirect()->back()->with('success', $result['message'] . $this->registerDocuments($checkProjectTemplate, $docCells));
         }
+    }
+
+    /**
+     * Upload refused because of file-column problems: the message shows the first ones, and an error
+     * file holds every row with a problem (its columns as uploaded, plus the errors and the sheet row).
+     */
+    private function documentErrorResponse(array $problems, string $csvPath)
+    {
+        $errors = array_map(fn($p) => "Row {$p['line']}, {$p['head']}: {$p['reason']}", $problems);
+        $shown = array_slice($errors, 0, 10);
+        $message = 'Nothing was uploaded: ' . count($errors) . ' file ' . \Illuminate\Support\Str::plural('cell', count($errors)) . ' need fixing. '
+            . implode(' ', $shown) . (count($errors) > count($shown) ? ' …and ' . (count($errors) - count($shown)) . ' more.' : '');
+
+        $reasons = [];
+        foreach ($problems as $p) $reasons[$p['line']][] = "{$p['head']}: {$p['reason']}";
+
+        $token = null;
+        if ($handle = @fopen($csvPath, 'r')) {
+            $header = fgetcsv($handle) ?: [];
+            if (isset($header[0])) $header[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string) $header[0]);
+            $width = count($header);
+            $w = new \App\Services\XlsxStream();
+            $w->beginSheet('Errors', array_merge(array_fill(0, $width, 22), [90, 10]), 1);
+            $w->row(array_merge($header, ['Error', 'Sheet Row']), \App\Services\XlsxStream::STYLE_HEADER);
+            $line = 1;
+            while (($data = fgetcsv($handle)) !== false) {
+                $line++;
+                if (!isset($reasons[$line])) continue;
+                $w->row(array_merge(array_pad(array_slice($data, 0, $width), $width, ''), [implode('; ', $reasons[$line]), $line]));
+            }
+            fclose($handle);
+            $w->endSheet();
+
+            // Error files are removed when downloaded; ones never downloaded are cleared after a day
+            $token = (string) \Illuminate\Support\Str::uuid();
+            \Illuminate\Support\Facades\Storage::disk('local')->makeDirectory('data_upload_errors');
+            foreach (glob(storage_path('app/data_upload_errors/*.xlsx')) ?: [] as $old) {
+                if (filemtime($old) < time() - 86400) @unlink($old);
+            }
+            $w->save(storage_path("app/data_upload_errors/{$token}.xlsx"));
+            session(['data_upload_error_file' => $token]);
+        }
+        if (file_exists($csvPath)) unlink($csvPath);
+
+        return redirect()->back()->with('error', $message)->with('error_file', $token ? route('projectData.uploadErrors', $token) : null);
+    }
+
+    /** The error file of the last refused data upload (only for the user who uploaded it). */
+    public function downloadDataUploadErrors(string $token)
+    {
+        abort_unless(session('data_upload_error_file') === $token && preg_match('/^[0-9a-f-]{36}$/', $token), 404);
+        $path = storage_path("app/data_upload_errors/{$token}.xlsx");
+        abort_unless(is_file($path), 404);
+        return response()->download($path, 'data_upload_errors_' . date('Ymd_His') . '.xlsx')->deleteFileAfterSend(true);
+    }
+
+    /**
+     * After a data upload: records the file names / links of the file columns; links are then
+     * downloaded once the page has been sent. Returns a note for the success message.
+     */
+    private function registerDocuments(?ProjectTemplate $projectTemplate, array $docCells): string
+    {
+        if (!$projectTemplate || !$docCells) return '';
+        $queued = \App\Services\TemplateDocuments::register($projectTemplate, array_column($docCells, 2), Auth::id());
+        if ($queued) {
+            \App\Jobs\FetchTemplateDocumentsJob::dispatchAfterResponse($projectTemplate->id);
+        }
+        $waiting = \App\Models\TemplateDocument::where('project_template_id', $projectTemplate->id)->where('status', 'awaiting_file')->count();
+        return ($queued ? " {$queued} file " . \Illuminate\Support\Str::plural('link', $queued) . ' will be downloaded in the background.' : '')
+            . ($waiting ? " {$waiting} " . \Illuminate\Support\Str::plural('file', $waiting) . ' named in the data still need to be uploaded on Template Documents.' : '');
     }
 
     public function upload_project_template_data_old_sept(Request $request)
@@ -1000,12 +1074,20 @@ class ProjectController extends Controller
         //            ->paginate($perPage)
         //            ->appends($request->all());
 
+        // Search across every page: matches any column value of the row (case-insensitive, partial).
+        // JSON_SEARCH looks only at values, so a number never matches the column ids used as keys.
+        $search = trim((string) $request->input('search', ''));
+
         $projectTemplateDataGet = DB::table('project_template_name_values_new')
             ->where('project_template_id', $projectTemplate->id)
+            ->when($search !== '', function ($q) use ($search) {
+                $pattern = '%' . addcslashes(mb_strtolower($search), '%_\\') . '%';
+                $q->whereRaw("JSON_SEARCH(LOWER(template_data_json), 'one', ?) IS NOT NULL", [$pattern]);
+            })
             ->select('id', 'project_template_id', 'template_data_json')
             ->orderBy('id')
             ->paginate($perPage)
-            ->appends($request->all());
+            ->appends($request->except('page'));
 
         // Decode the JSON for each row
         $projectTemplateDataGet->getCollection()->transform(function ($item) {
@@ -1013,9 +1095,14 @@ class ProjectController extends Controller
             return $item;
         });
 
+        // File columns: their documents on this page, shown as links / thumbnails
+        $fileHeadIds = array_flip(\App\Services\TemplateDocuments::fileHeadIds((int) $templateNameId));
+        $documents = $fileHeadIds ? \App\Services\TemplateDocuments::lookup($projectTemplate->id,
+            $projectTemplateDataGet->getCollection()->flatMap(fn($row) => array_intersect_key($row->decoded_json ?: [], $fileHeadIds))) : [];
+
         $response = "yes";
         //         dd($projectTemplateDataGet);
-        return view('masters.data_templates.view_project_data', compact('projectTemplate', 'response', 'projectTemplateDataGet'));
+        return view('masters.data_templates.view_project_data', compact('projectTemplate', 'response', 'projectTemplateDataGet', 'fileHeadIds', 'documents'));
     }
 
 
@@ -1055,10 +1142,24 @@ class ProjectController extends Controller
         $new_json_data = collect($new_values)          // make it a collection
             ->pluck('value', 'id') // pluck value keyed by id
             ->toArray();
+
+        // File columns: one file name or link, not used by another template of the project
+        $docTemplate = ProjectTemplate::find($data->project_template_id);
+        $fileHeads = TemplateNameHead::whereIn('id', \App\Services\TemplateDocuments::fileHeadIds((int) $docTemplate->template_name_id))->pluck('template_head_name', 'id');
+        $docCells = [];
+        foreach ($fileHeads as $headId => $headName) {
+            $new_json_data[$headId] = \App\Services\TemplateDocuments::clean($new_json_data[$headId] ?? '');
+            $docCells[] = ['', $headName, $new_json_data[$headId]];
+        }
+        if ($docErrors = \App\Services\TemplateDocuments::check($docTemplate, $docCells)) {
+            return redirect()->back()->withErrors(['values' => str_replace('Row , ', '', implode(' ', $docErrors))])->withInput();
+        }
+
         //        dd($new_json_data, $id);
         $data->update([
             'template_data_json' => json_encode($new_json_data)
         ]);
+        $this->registerDocuments($docTemplate, $docCells);
 
         // Loop through the values and update them
         //        foreach ($request->input('values') as $valueData) {
@@ -1239,9 +1340,13 @@ class ProjectController extends Controller
             $verifier_users = User::where('agency_user_id', Auth::user()->id)->role('Verifier')->get();
         } else {
             $template_names = TemplateName::all();
-            $users = User::all();
-            $projects = Project::all();
-            $verifier_users = [];
+            // A Verifier assigns only the auditors they created, with themselves as verifier
+            $users = $currentUserRole == 'Verifier' ? $this->ownAuditors() : User::all();
+            // A Verifier assigns only on the (open) projects an admin assigned to them
+            $projects = $currentUserRole == 'Verifier'
+                ? Project::open()->whereIn('id', \App\Services\VerifierAssignment::assignedDataAssigns($currentUser->id)->pluck('project_id')->unique())->orderBy('id', 'DESC')->get()
+                : Project::all();
+            $verifier_users = $currentUserRole == 'Verifier' ? collect([$currentUser]) : [];
         }
 
         //khushboo 31-03-2025
@@ -1300,33 +1405,22 @@ class ProjectController extends Controller
     {
         $projectTemplateInfo = ProjectTemplate::find($request->project_template_id);
         if ($projectTemplateInfo) {
-            $projectRowData = $request->except(['_token', 'project_template_id']);
+            // File columns can come as a chosen file instead of a typed name / link
+            $files = $request->allFiles();
+            $projectRowData = array_diff_key($request->except(['_token', 'project_template_id']), $files);
+            foreach (array_keys($files) as $fileHeadId) {
+                $projectRowData[$fileHeadId] = $projectRowData[$fileHeadId] ?? '';
+            }
             ksort($projectRowData);
+            [$projectRowData, $docErrors, $pendingFiles] = \App\Services\TemplateDocuments::prepareRowFiles($projectTemplateInfo, $projectRowData, $files);
+            if ($docErrors) {
+                return response()->json(['message' => implode(' ', $docErrors)]);
+            }
 
             $is_template_master = $projectTemplateInfo->is_master;
             $get_header_id = "";
             $get_header_value = "";
             $json_Data = [];
-            //for linking outlet with distributor
-            $matchedMasterId = null;
-            $masterTemplateValuesData = null;
-            if ($projectTemplateInfo->is_master == 0) {
-                $masterHeadId = $projectTemplateInfo->master_head_id;
-                $masterData = ProjectTemplate::where('project_id', $projectTemplateInfo->project_id)->where('is_master', 1)->first();
-                $masterTemplateValuesData = DB::table('project_template_name_values_new')
-                    ->where('project_template_id', $masterData->id)
-                    ->select('id', 'template_data_json')
-                    ->get()
-                    ->map(function ($row) use ($masterHeadId) {
-                        $json = json_decode($row->template_data_json, true);
-                        return [
-                            'id' => $row->id,  // keep the row id
-                            'value' => $json[$masterHeadId] ?? null // keep only matched key value
-                        ];
-                    });
-            }
-            //for linking outlet with distributor
-            //            dd($projectRowData, $masterTemplateValuesData, $projectTemplateInfo->is_master);
             foreach ($projectRowData as $headId => $projectData) {
 
                 if (empty($get_header_id) && !empty($projectData)) {
@@ -1334,12 +1428,9 @@ class ProjectController extends Controller
                     $get_header_value = $projectData;
                 }
                 $json_Data[$headId] = $projectData == null ? "" : $projectData;
-                //link outlet with distributor
-                $found = collect($masterTemplateValuesData)->firstWhere('value', $projectData);
-                if ($found) {
-                    $matchedMasterId = $found['id'];
-                }
             }
+            // Outlet row: linked to its distributor row
+            $matchedMasterId = \App\Services\OutletDistributorMatch::parentRowId($projectTemplateInfo, $json_Data);
 
             $projectTemplateNameValues = ProjectTemplateNameValuesNew::create([
                 'project_template_id' => $projectTemplateInfo->id,
@@ -1397,78 +1488,24 @@ class ProjectController extends Controller
                         $activityGroupId,
                         $rowIds
                     );
+                    // The auditor's verifiers hold the new assignment too (their Data Assigned List)
+                    \App\Services\VerifierAssignment::recordForAuditor($dataAssign->id, auth()->id(), $projectTemplateInfo->id, (int) $activity);
                 } else {
-                    $getDataAssign = DB::table('data_assigns')->where('project_id', $projectInfo->id)
-                        ->where('activity_id', $activity)
-                        ->where('template_name_id', $templateNameInfo->id)
+                    // Template without uploaded data: the row joins the auditor's own assignment on this
+                    // template and activity — given by an admin, by their verifier, or with "Assign
+                    // Outlets Also" for an outlet template (those are stored on the outlet template too).
+                    $commonId = DB::table('user_activity_data_assigns')
                         ->where('project_template_id', $projectTemplateInfo->id)
-                        ->where('template_name_head_id', $get_header_id)
-                        ->orderBy('id', 'desc')
-                        ->first();
+                        ->where('user_id', auth()->id())
+                        ->where('activity_id', $activity)
+                        ->orderByDesc('id')
+                        ->value('common_id');
 
-                    if (!empty($getDataAssign)) {
-
-                        $getCommonId = DB::table('user_activity_data_assigns')->where('data_assign_id', $getDataAssign->id)
-                            ->where('project_template_id', $projectTemplateInfo->id)
-                            ->where('user_id', auth()->user()->id)
-                            ->where('activity_id', $activity)
-                            ->pluck('common_id')->toArray();
-
-                        // add row ids on user auditor assign table
+                    if ($commonId && !DB::table('user_audit_assigns')->where('common_id', $commonId)->where('row_id', $projectTemplateNameValues->id)->exists()) {
                         DB::table('user_audit_assigns')->insert([
                             'row_id' => $projectTemplateNameValues->id,
-                            'common_id' => $getCommonId[0]
+                            'common_id' => $commonId
                         ]);
-                    } else {
-
-                        //if mapped with is outlet assigned
-                        $master_project_template = ProjectTemplate::where('project_id', $projectInfo->id)
-                            ->where('is_master', 1)->first();
-
-                        $activityOrGroupMaster = $projectTemplateInfo->activityType;
-                        $activity_group_name_id_or_activity_id_master = $projectTemplateInfo->activity_group_name_id_or_activity_id;
-                        $activityIdsArrMaster = [];
-                        $activityGroupIdMaster = null;
-                        if ($activityOrGroupMaster == 1) {
-                            $activityGroupId = $activity_group_name_id_or_activity_id_master;
-                            $group_activities = ActivityGroupPivot::where('activity_group_id', $activity_group_name_id_or_activity_id_master)->get();
-                            foreach ($group_activities as $group_activity) {
-                                $activityIdsArrMaster[] = $group_activity->activity_id;
-                            }
-                        } else {
-                            $activityGroupId = null;
-                            $activityIdsArrMaster[] = $activity_group_name_id_or_activity_id_master;
-                        }
-
-                        //get master data assign ids
-                        $checkOutletAssignData = DB::table('data_assigns')->where('project_id', $projectInfo->id)
-                            ->whereIn('activity_id', $activityIdsArrMaster)
-                            ->where('template_name_id', $master_project_template->template_name_id)
-                            ->where('project_template_id', $master_project_template->id)
-                            //                            ->where('template_name_head_id', $get_header_id)
-                            ->where('is_outlet_assigned', 1)
-                            ->orderBy('id', 'desc')
-                            ->get();
-
-                        if (!$checkOutletAssignData->isEmpty()) {
-                            $masterDataAssignIds = $checkOutletAssignData->pluck('id')->toArray();
-
-                            //get child project template common ids linked with master data assign ids
-                            $getCommonIds = DB::table('user_activity_data_assigns')
-                                ->whereIn('data_assign_id', $masterDataAssignIds)
-                                ->where('project_template_id', $projectTemplateInfo->id)
-                                ->where('user_id', auth()->user()->id)
-                                ->where('activity_id', $activity)
-                                ->pluck('common_id')->toArray();
-
-                            // add row ids on user auditor assign table
-                            foreach ($getCommonIds as $commonId) {
-                                DB::table('user_audit_assigns')->insert([
-                                    'row_id' => $projectTemplateNameValues->id,
-                                    'common_id' => $commonId
-                                ]);
-                            }
-                        }
                     }
                 }
             }
@@ -1476,6 +1513,7 @@ class ProjectController extends Controller
             \App\Services\VerifierAssignment::assignAuditorCreatedRow(
                 auth()->id(), $projectTemplateInfo->id, $activityIdsArr, $projectTemplateNameValues->id
             );
+            \App\Services\TemplateDocuments::saveRowFiles($projectTemplateInfo, $json_Data, $pendingFiles, auth()->id());
 
             $redirectUrl = route('user.project.row_id.activity', [
                 'row_id' => $max_row_id,
@@ -1640,6 +1678,24 @@ class ProjectController extends Controller
     }
 
 
+    // A logged-in Verifier verifies their own assignments: Verify User Name offers only them, preselected.
+    private function ownVerifierOption(): ?string
+    {
+        $user = Auth::user();
+        if (!$user || !$user->hasRole('Verifier')) return null;
+
+        return '<option value="' . $user->id . '" selected>' . e($user->name) . '</option>';
+    }
+
+    // For a logged-in Verifier: the auditors they created (whatever agency is picked); null for other roles.
+    private function ownAuditors()
+    {
+        $user = Auth::user();
+        if (!$user || !$user->hasRole('Verifier')) return null;
+
+        return User::where('verifier_user_id', $user->id)->role('Auditor')->orderBy('name')->get();
+    }
+
     //khushboo 31-03-2025
     public function get_agency_users(Request $request)
     {
@@ -1672,92 +1728,14 @@ class ProjectController extends Controller
 
             // dd($request);
             // dd($request);
-            $currentUser = User::find(Auth::user()->id);
-            // dd('fgf');
-            if ($currentUser->getRoleNames()->first() == 'Super Admin') {
+            // Every user of the selected agency is offered, whoever is assigning. Agencies that already
+            // had data on this template used to be hidden for non-admins, which left the lists empty;
+            // rows already assigned to a user are not duplicated by the assignment itself.
+            $filtered_verifier_list = collect($verifier_users);
+            $filtered_auditor_list = $this->ownAuditors() ?? collect($auditor_user_list);
 
-                // // Step 1: Get all relevant agency_ids used in matching projects
-                // $excludedAgencyIds = Project::where('is_agency_required', 1)
-                //     ->whereHas('dataAssigns', function ($query) use ($currentUser, $request) {
-                //         $query->where(function ($q) use ($request) {
-                //             $q->where(function ($subQ) use ($request) {
-                //                 $subQ->where('template_name_head_id', $request->template_name_head_id)
-                //                     ->where('project_template_id', $request->project_template_id)
-                //                     ->where('activity_group_id', $request->activity_group_name_id);
-                //             })->orWhereIn('activity_id', $request->activity_id);
-                //         })->where(function ($q2) use ($currentUser) {
-                //             $q2->where('agency_id', $currentUser->agency_user_id)
-                //                 ->orWhere('agency_id', $currentUser->id);
-                //         });
-                //     })
-                //     ->with('dataAssigns')
-                //     ->get()
-                //     ->pluck('dataAssigns')
-                //     ->filter() // ✅ this removes any null values
-                //     ->flatten()
-                //     ->pluck('agency_id')
-                //     ->filter() // ✅ this removes null agency_id
-                //     ->unique()
-                //     ->values()
-                //     ->toArray();
-                $excludedAgencyIds = [];
-
-                $filtered_verifier_list = collect($verifier_users)->filter(function ($user) use ($excludedAgencyIds) {
-                    return !in_array($user->agency_user_id, $excludedAgencyIds) &&
-                        !in_array($user->id, $excludedAgencyIds);
-                });
-
-                $filtered_auditor_list = collect($auditor_user_list)->filter(function ($user) use ($excludedAgencyIds) {
-                    return !in_array($user->agency_user_id, $excludedAgencyIds) &&
-                        !in_array($user->id, $excludedAgencyIds);
-                });
-            } else {
-
-                $excludedAgencyIds = Project::where('is_agency_required', 1)
-                    ->whereHas('dataAssigns', function ($query) use ($currentUser, $request) {
-                        $query->where(function ($q) use ($currentUser, $request) {
-                            $q->where(function ($subQ) use ($request) {
-                                $subQ->where('template_name_head_id', $request->template_name_head_id)
-                                    ->where('project_template_id', $request->project_template_id)
-                                    ->where('activity_group_id', $request->activity_group_name_id);
-                            })->orWhereIn('activity_id', $request->activity_id);
-                        })->where(function ($q2) use ($currentUser) {
-                            $q2->where('agency_id', $currentUser->agency_user_id)
-                                ->orWhere('agency_id', $currentUser->id);
-                        });
-                    })
-                    ->with('dataAssigns')
-                    ->get()
-                    ->pluck('dataAssigns')
-                    ->flatten()
-                    ->pluck('agency_id')
-                    ->unique()
-                    ->toArray();
-
-                // Filter verifier list
-                $filtered_verifier_list = collect($verifier_users)->filter(function ($user) use ($excludedAgencyIds) {
-                    return !in_array($user->agency_user_id, $excludedAgencyIds);
-                });
-
-                // Filter auditor list
-                $filtered_auditor_list = collect($auditor_user_list)->filter(function ($user) use ($excludedAgencyIds) {
-                    return !in_array($user->agency_user_id, $excludedAgencyIds);
-                });
-            }
-
-
-            // Filter verifier list
-            $filtered_verifier_list = collect($verifier_users)->filter(function ($user) use ($excludedAgencyIds) {
-                return !in_array($user->agency_user_id, $excludedAgencyIds);
-            });
-
-            // Filter auditor list
-            $filtered_auditor_list = collect($auditor_user_list)->filter(function ($user) use ($excludedAgencyIds) {
-                return !in_array($user->agency_user_id, $excludedAgencyIds);
-            });
-
-            $html1 = '';
-            if ($filtered_verifier_list->isNotEmpty()) {
+            $html1 = $this->ownVerifierOption() ?? '';
+            if ($html1 === '' && $filtered_verifier_list->isNotEmpty()) {
                 $html1 = '<option selected disabled value="">Choose...</option>';
                 foreach ($filtered_verifier_list as $val1) {
                     $html1 .= "<option value={$val1->id}>{$val1->name}</option>";

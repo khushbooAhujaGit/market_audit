@@ -263,6 +263,11 @@
                                     </tr>
                                 </thead>
                                 <tbody>
+                                    @php
+                                        // Files of the rows' file columns (Template Documents), for the rows on this page
+                                        $docRowIdOf = fn($row) => $isParent == 0 ? ($row['data_item']['id'] ?? null) : ($row['data_item']['row_id'] ?? null);
+                                        $rowDocuments = \App\Services\TemplateDocuments::forRows(collect($project_data_arr)->map($docRowIdOf));
+                                    @endphp
                                     @forelse($project_data_arr as $index => $project_data)
                                         <tr>
                                             <!-- Serial Number -->
@@ -299,6 +304,25 @@
                                                             {{ $project_data['data_item']['head_value'] }}
                                                         @endif
                                                     </div>
+
+                                                    <!-- Documents: each file, and all stored files of the row as one .zip -->
+                                                    @php
+                                                        $docRowId = $docRowIdOf($project_data);
+                                                        $rowDocs = collect($rowDocuments[$docRowId] ?? [])->unique(fn($doc) => $doc['id'] ?? $doc['file_name']);
+                                                        $storedDocs = $rowDocs->where('status', 'available')->count();
+                                                    @endphp
+                                                    @if ($rowDocs->isNotEmpty())
+                                                        <div class="d-flex flex-wrap align-items-center gap-1 mt-1 small">
+                                                            {{-- Info icon: a popup with each document as a link --}}
+                                                            <a href="javascript:void(0)" class="row-documents-info text-decoration-none d-inline-flex align-items-center gap-1"
+                                                                title="Documents" data-title="{{ $project_data['main_header'] ?? ($project_data['data_item']['head_name'] ?? '') }}"
+                                                                data-docs="{{ json_encode($rowDocs->map(fn($doc) => ['head' => $doc['head_name'], 'name' => $doc['file_name'], 'url' => $doc['url'], 'status' => $doc['status']])->values()) }}"
+                                                                data-zip="{{ $storedDocs ? route('template_documents.row_zip', $docRowId) : '' }}">
+                                                                <i class="fa fa-info-circle text-primary fs-6"></i>
+                                                                <span class="text-muted">{{ $rowDocs->count() }} {{ \Illuminate\Support\Str::plural('document', $rowDocs->count()) }}</span>
+                                                            </a>
+                                                        </div>
+                                                    @endif
 
                                                     <!-- Hidden Details -->
                                                     <div class="show-con d-none">
@@ -559,6 +583,24 @@
                             </div>
                         </div>
                     </div>
+                    {{-- Documents of a row (info icon on the card) --}}
+                    <div class="modal fade" id="row_documents_modal" tabindex="-1" role="dialog" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered" role="document">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title" id="row_documents_title">Documents</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <ul class="list-group" id="row_documents_list"></ul>
+                                </div>
+                                <div class="modal-footer">
+                                    <a class="btn btn-primary d-none" id="row_documents_zip" href="#"><i class="fa fa-download"></i> Download all (ZIP)</a>
+                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     {{-- Add Data Modal --}}
                     <div class="modal fade" id="add_data" data-bs-backdrop="static" data-bs-keyboard="false"
                         tabindex="-1" role="dialog" aria-labelledby="questionEditModal" aria-hidden="true">
@@ -572,7 +614,12 @@
                                 </div>
                                 <div class="modal-body">
                                     <div class="modal-toggle-wrapper">
-                                        <form id="project_data_add_form">
+                                        @php
+                                            // File columns (Template Documents) take the file itself
+                                            $docAccept = '.' . implode(',.', \App\Services\TemplateDocuments::EXTENSIONS);
+                                            $docHint = strtoupper(implode(', ', \App\Services\TemplateDocuments::EXTENSIONS)) . ', up to 25 MB';
+                                        @endphp
+                                        <form id="project_data_add_form" enctype="multipart/form-data">
                                             @if ($project_temp_info->is_master == 1)
                                                 {{-- Master template form --}}
                                                 <div class="row">
@@ -582,10 +629,18 @@
                                                         <div class="col-xl-6 col-sm-6 mb-2">
                                                             <label class="form-label"
                                                                 for="{{ $projectTemplateHeaderInfo->id }}">{{ $projectTemplateHeaderInfo->template_head_name }}</label>
-                                                            <input class="form-control"
-                                                                id="{{ $projectTemplateHeaderInfo->id }}"
-                                                                name="{{ $projectTemplateHeaderInfo->id }}" type="text"
-                                                                placeholder="Enter Data" required="">
+                                                            @if ($projectTemplateHeaderInfo->is_file)
+                                                                {{-- File column: the file itself (PDF, image, Excel, Word) --}}
+                                                                <input class="form-control" id="{{ $projectTemplateHeaderInfo->id }}"
+                                                                    name="{{ $projectTemplateHeaderInfo->id }}" type="file"
+                                                                    accept="{{ $docAccept }}">
+                                                                <small class="text-muted">{{ $docHint }}</small>
+                                                            @else
+                                                                <input class="form-control"
+                                                                    id="{{ $projectTemplateHeaderInfo->id }}"
+                                                                    name="{{ $projectTemplateHeaderInfo->id }}" type="text"
+                                                                    placeholder="Enter Data" required="">
+                                                            @endif
                                                         </div>
                                                     @endforeach
                                                 </div>
@@ -638,6 +693,16 @@
                                                                             <small class="text-muted">(Reference ID)</small>
                                                                         @endif
                                                                     </label>
+                                                                    @if ($projectTemplateHeaderInfo->is_file && !$isMasterHead && !$isOwnReference)
+                                                                        {{-- File column: the file itself (PDF, image, Excel, Word) --}}
+                                                                        <input class="form-control template-input"
+                                                                            id="input-{{ $templateId }}-{{ $projectTemplateHeaderInfo->id }}"
+                                                                            name="{{ $projectTemplateHeaderInfo->id }}" type="file"
+                                                                            accept="{{ $docAccept }}"
+                                                                            data-template-id="{{ $templateId }}"
+                                                                            data-head-id="{{ $projectTemplateHeaderInfo->id }}">
+                                                                        <small class="text-muted">{{ $docHint }}</small>
+                                                                    @else
                                                                     <input class="form-control template-input"
                                                                         id="input-{{ $templateId }}-{{ $projectTemplateHeaderInfo->id }}"
                                                                         name="{{ $projectTemplateHeaderInfo->id }}"
@@ -648,6 +713,7 @@
                                                                         @if ($isReadonly) readonly
                                                                        style="background-color: #f8f9fa;" @endif
                                                                         @if (!$isMasterHead && !$isOwnReference) required @endif>
+                                                                    @endif
                                                                 </div>
                                                             @endforeach
                                                         </div>
@@ -1022,6 +1088,31 @@
                     $('#row_detail_modal').modal('show');
                 });
 
+                // &#9472;&#9472; Documents popup (info icon on a card) &#9472;&#9472;
+                $(document).on('click', '.row-documents-info', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    var esc = function(v) { return $('<div>').text(v == null ? '' : v).html(); };
+                    var notStored = {
+                        awaiting_file: 'Not uploaded yet',
+                        queued: 'Downloading',
+                        failed: 'Download failed',
+                        invalid: 'Not a file name'
+                    };
+                    var docs = $(this).data('docs') || [];
+                    var html = docs.map(function(doc) {
+                        var name = doc.url
+                            ? '<a href="' + esc(doc.url) + '" target="_blank" style="word-break:break-all;"><i class="fa fa-file-o me-1"></i>' + esc(doc.name) + '</a>'
+                            : '<span style="word-break:break-all;">' + esc(doc.name) + '</span> <span class="badge bg-warning text-dark ms-1">' + esc(notStored[doc.status] || doc.status) + '</span>';
+                        return '<li class="list-group-item"><div class="small text-muted">' + esc(doc.head) + '</div>' + name + '</li>';
+                    }).join('');
+                    $('#row_documents_title').text(($(this).data('title') ? $(this).data('title') + ' – ' : '') + 'Documents');
+                    $('#row_documents_list').html(html || '<li class="list-group-item text-muted">No documents.</li>');
+                    var zip = $(this).data('zip');
+                    $('#row_documents_zip').toggleClass('d-none', !zip).attr('href', zip || '#');
+                    $('#row_documents_modal').modal('show');
+                });
+
                 // &#9472;&#9472; Submit ADD form &#9472;&#9472;
                 $('#submit_data_btn').click(function(e) {
                     e.preventDefault();
@@ -1035,8 +1126,9 @@
 
                         var filledFields = 0;
                         formData.forEach(function(v, k) {
-                            if (k !== '_token' && k !== 'project_template_id' && v !== '' && v !==
-                                null) {
+                            // An empty file picker still sends an empty file
+                            var filled = (v instanceof File) ? v.size > 0 : (v !== '' && v !== null);
+                            if (k !== '_token' && k !== 'project_template_id' && filled) {
                                 filledFields++;
                             }
                         });
@@ -1101,6 +1193,14 @@
                         $activeTemplate.find('input, select, textarea').each(function() {
                             var $el = $(this);
                             var name = $el.attr('name');
+                            // File column: send the chosen file
+                            if (name && $el.attr('type') === 'file') {
+                                if (this.files && this.files.length) {
+                                    formData.append(name, this.files[0]);
+                                    filledFields++;
+                                }
+                                return;
+                            }
                             var val = $el.val() || '';
                             if (name && name !== 'project_template_id') {
                                 formData.append(name, val);

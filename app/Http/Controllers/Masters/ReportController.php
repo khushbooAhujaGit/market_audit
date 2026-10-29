@@ -369,6 +369,21 @@ class ReportController extends Controller
      * produced by buildReportFile()'s $allGroupIds: either a new-style activity_sequence
      * (int, 0 = original) or an old-style same_answer_id group (['sid' => id]).
      */
+    /**
+     * Verifier remark text for an answer. Answers normally store a remark id (remark_masters);
+     * older ones may hold the typed text, or the bare word "other" (saved when "Other Remark"
+     * was chosen without text), which has no remark to show.
+     */
+    private function verificationRemarkText($answer, $remarkMap = null): string
+    {
+        $remark = trim((string) ($answer->remark ?? ''));
+        if ($remark === '' || strcasecmp($remark, 'other') === 0) return '';
+        if (!ctype_digit($remark)) return $remark;
+
+        $info = $remarkMap !== null ? ($remarkMap[$remark] ?? null) : $answer->get_remark_info;
+        return $info ? (string) $info->remark : $remark . ' is deleted';
+    }
+
     private function filterAnswersByInstanceGroup(iterable $items, $group)
     {
         return collect($items)->filter(
@@ -448,6 +463,7 @@ class ReportController extends Controller
 
         // Preload ALL Questions for all activities in one query and index by activity_id
         $allActivityQuestions = \App\Models\Question::whereIn('activity_id', $request->activity_id)
+            ->withoutOrphans()
             ->with(['subQuestions.childQuestion'])
             ->orderBy('question_sequence')
             ->get()
@@ -801,11 +817,17 @@ class ReportController extends Controller
         // which distributor/outlet each instance belongs to.
         $activitySheetsAccum = [];
 
+        // File columns (Template Documents): a link to the stored file instead of its name
+        $documentCells = \App\Services\TemplateDocuments::reportCells((int) $projectTemplate->id, $projectTemplateData);
+        $templateHeadIds = array_column($template_heads, 'id');
+
         foreach ($projectTemplateData as $projectTemplate_data) {
+            // Template columns in header order, by header id (a row's JSON keys can be in any order)
             $rowData = [];
-            $get_json_data = json_decode($projectTemplate_data->template_data_json);
-            foreach ($get_json_data as $value) {
-                $rowData[] = $value;
+            $get_json_data = json_decode($projectTemplate_data->template_data_json, true) ?: [];
+            foreach ($templateHeadIds as $headId) {
+                $value = $documentCells[$projectTemplate_data->id][$headId] ?? ($get_json_data[$headId] ?? '');
+                $rowData[] = is_scalar($value) || $value === null ? $value : json_encode($value);
             }
 
             $rowAnswers = $allAnswers[$projectTemplate_data->id] ?? collect();
@@ -874,9 +896,7 @@ class ReportController extends Controller
                         ? ($verifiers[$firstAnswer->verified_by]?->name ?? "User (ID: {$firstAnswer->verified_by}) has been deleted")
                         : '';
                     $rowData[] = $firstAnswer->status == 5 ? 'Verified' : ($firstAnswer->status == 4 ? 'Rejected' : '');
-                    $rowData[] = $firstAnswer->remark
-                        ? ($remarks[$firstAnswer->remark]?->remark ?? $firstAnswer->remark . ' is deleted')
-                        : '';
+                    $rowData[] = $this->verificationRemarkText($firstAnswer, $remarks);
                     $rowData[] = in_array($firstAnswer->status, [4, 5]) && $firstAnswer->updated_at
                         ? $firstAnswer->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i') : '';
                     $rowData[] = $firstAnswer->latitude  ?? '';
@@ -1065,8 +1085,7 @@ class ReportController extends Controller
                                 $instVerifierName = $vd ? $vd->name : "User (ID: {$ans->verified_by}) has been deleted";
                             }
                             if (!$instRemark && $ans->remark) {
-                                $rd = $remarks[$ans->remark] ?? null;
-                                $instRemark = $rd ? $rd->remark : $ans->remark . ' is deleted';
+                                $instRemark = $this->verificationRemarkText($ans, $remarks);
                             }
                             if (!$instVerifDT && in_array($ans->status, [4, 5])) {
                                 $instVerifDT = $ans->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i');
@@ -2123,6 +2142,7 @@ class ReportController extends Controller
 
         // Preload all questions for all activities in one query
         $allDistQuestions = Question::whereIn('activity_id', $dist_activites)
+            ->withoutOrphans()
             ->orderBy('question_sequence')
             ->get()
             ->groupBy('activity_id');
@@ -2302,8 +2322,10 @@ class ReportController extends Controller
                                         if (!$verifierName && $userAnswer->verified_by && $userAnswer->getVerifier) {
                                             $verifierName = $userAnswer->getVerifier->name;
                                         }
-                                        if (!$verificationRemark && $userAnswer->remark && $userAnswer->get_remark_info) {
-                                            $verificationRemark = $userAnswer->get_remark_info->remark;
+                                        if (!$verificationRemark) {
+                                            $verificationRemark = $this->verificationRemarkText($userAnswer);
+                                        }
+                                        if (!$verificationDateTime && in_array((int) $userAnswer->status, [4, 5]) && $userAnswer->updated_at) {
                                             $verificationDateTime = $userAnswer->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i');
                                         }
                                     }
@@ -2375,8 +2397,10 @@ class ReportController extends Controller
                                 if (!$verifierName && $user_answer->verified_by && $user_answer->getVerifier) {
                                     $verifierName = $user_answer->getVerifier->name;
                                 }
-                                if (!$verificationRemark && $user_answer->remark && $user_answer->get_remark_info) {
-                                    $verificationRemark = $user_answer->get_remark_info->remark;
+                                if (!$verificationRemark) {
+                                    $verificationRemark = $this->verificationRemarkText($user_answer);
+                                }
+                                if (!$verificationDateTime && in_array((int) $user_answer->status, [4, 5]) && $user_answer->updated_at) {
                                     $verificationDateTime = $user_answer->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i');
                                 }
 
@@ -2497,7 +2521,7 @@ class ReportController extends Controller
                             foreach ($answers as $a) {
                                 if (!$instAuditorName && $a->getUser)    { $instAuditorName   = $a->getUser->name; $instAuditDateTime = $a->created_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i'); }
                                 if (!$instVerifierName && $a->verified_by && $a->getVerifier) { $instVerifierName  = $a->getVerifier->name; }
-                                if (!$instVerifRemark  && $a->remark && $a->get_remark_info)  { $instVerifRemark   = $a->get_remark_info->remark; $instVerifDateTime = $a->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i'); }
+                                if (!$instVerifRemark) { $instVerifRemark = $this->verificationRemarkText($a); } if (!$instVerifDateTime && in_array((int) $a->status, [4, 5]) && $a->updated_at) { $instVerifDateTime = $a->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i'); }
                                 if (!$instVerifStatus)  { $instVerifStatus = $a->status == 5 ? 'Approved' : ($a->status == 4 ? 'Rejected' : 'Pending'); }
                             }
                             $vals = $answers->map(function ($a) {
@@ -2510,7 +2534,7 @@ class ReportController extends Controller
                             if ($ans) {
                                 if (!$instAuditorName && $ans->getUser)    { $instAuditorName   = $ans->getUser->name; $instAuditDateTime = $ans->created_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i'); }
                                 if (!$instVerifierName && $ans->verified_by && $ans->getVerifier) { $instVerifierName  = $ans->getVerifier->name; }
-                                if (!$instVerifRemark  && $ans->remark && $ans->get_remark_info)  { $instVerifRemark   = $ans->get_remark_info->remark; $instVerifDateTime = $ans->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i'); }
+                                if (!$instVerifRemark) { $instVerifRemark = $this->verificationRemarkText($ans); } if (!$instVerifDateTime && in_array((int) $ans->status, [4, 5]) && $ans->updated_at) { $instVerifDateTime = $ans->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i'); }
                                 if (!$instVerifStatus)  { $instVerifStatus = $ans->status == 5 ? 'Approved' : ($ans->status == 4 ? 'Rejected' : 'Pending'); }
 
                                 if (in_array($col['type'], ['File Upload', 'Image', 'Audio'])) {
@@ -2596,10 +2620,7 @@ class ReportController extends Controller
                                         if (!$instVerifierName && $ia->verified_by && $ia->getVerifier) {
                                             $instVerifierName = $ia->getVerifier->name;
                                         }
-                                        if (!$instVerifRemark && $ia->remark && $ia->get_remark_info) {
-                                            $instVerifRemark    = $ia->get_remark_info->remark;
-                                            $instVerifDateTime  = $ia->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i');
-                                        }
+                                        if (!$instVerifRemark) { $instVerifRemark = $this->verificationRemarkText($ia); } if (!$instVerifDateTime && in_array((int) $ia->status, [4, 5]) && $ia->updated_at) { $instVerifDateTime = $ia->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i'); }
                                     }
                                 }
                             } else {
@@ -2621,10 +2642,7 @@ class ReportController extends Controller
                                 if (!$instVerifierName && $ia->verified_by && $ia->getVerifier) {
                                     $instVerifierName = $ia->getVerifier->name;
                                 }
-                                if (!$instVerifRemark && $ia->remark && $ia->get_remark_info) {
-                                    $instVerifRemark   = $ia->get_remark_info->remark;
-                                    $instVerifDateTime = $ia->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i');
-                                }
+                                if (!$instVerifRemark) { $instVerifRemark = $this->verificationRemarkText($ia); } if (!$instVerifDateTime && in_array((int) $ia->status, [4, 5]) && $ia->updated_at) { $instVerifDateTime = $ia->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i'); }
                                 if (in_array($aq->question_type, ["File Upload", "Image", "Audio"])) {
                                     $instanceSheetData[] = [$instRowCounter++, $displayQ, $this->imageAnswerUrl($ia)];
                                 } elseif ($aq->question_type == "Location" && empty($ia->user_answer) && $ia->latitude && $ia->longitude) {
@@ -2742,6 +2760,7 @@ class ReportController extends Controller
 
                     // Get all questions with hierarchical structure for child activity
                     $allChildQuestions = Question::where('activity_id', $child_activity)
+                        ->withoutOrphans()
                         ->orderBy('question_sequence')
                         ->get();
 
@@ -2981,8 +3000,8 @@ class ReportController extends Controller
                                         $answers[] = $auditDateTimeChild ?: ($lastAnswer->created_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i') ?? '');
                                         $answers[] = $verificationOutletStatusShow;
                                         $answers[] = $lastAnswer->verified_by ? ($lastAnswer->getVerifier->name ?? '') : '';
-                                        $answers[] = $lastAnswer->remark ? ($lastAnswer->get_remark_info->remark ?? '') : '';
-                                        $answers[] = $lastAnswer->remark ? $lastAnswer->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i') : '';
+                                        $answers[] = $this->verificationRemarkText($lastAnswer);
+                                        $answers[] = in_array((int) $lastAnswer->status, [4, 5]) && $lastAnswer->updated_at ? $lastAnswer->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i') : '';
                                     }
 
                                     $activitySheetData[] = $answers;
@@ -3015,7 +3034,7 @@ class ReportController extends Controller
                                                         foreach ($oas as $oa) {
                                                             if (!$oAuditorName && $oa->getUser) { $oAuditorName = $oa->getUser->name; $oAuditDT = $oa->created_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i'); }
                                                             if (!$oVerifierName && $oa->verified_by && $oa->getVerifier) { $oVerifierName = $oa->getVerifier->name; }
-                                                            if (!$oVerifRemark && $oa->remark && $oa->get_remark_info) { $oVerifRemark = $oa->get_remark_info->remark; $oVerifDT = $oa->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i'); }
+                                                            if (!$oVerifRemark) { $oVerifRemark = $this->verificationRemarkText($oa); } if (!$oVerifDT && in_array((int) $oa->status, [4, 5]) && $oa->updated_at) { $oVerifDT = $oa->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i'); }
                                                             if (!$oVerifStatus) { $oVerifStatus = $oa->status == 5 ? 'Approved' : ($oa->status == 4 ? 'Rejected' : 'Pending'); }
                                                         }
                                                         $oRow[] = $oas->map(fn($a) => str_contains($a->user_answer, '/') ? $this->imageAnswerUrl($a) : $a->user_answer)->implode(' | ') ?: null;
@@ -3024,7 +3043,7 @@ class ReportController extends Controller
                                                         if ($oa) {
                                                             if (!$oAuditorName && $oa->getUser) { $oAuditorName = $oa->getUser->name; $oAuditDT = $oa->created_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i'); }
                                                             if (!$oVerifierName && $oa->verified_by && $oa->getVerifier) { $oVerifierName = $oa->getVerifier->name; }
-                                                            if (!$oVerifRemark && $oa->remark && $oa->get_remark_info) { $oVerifRemark = $oa->get_remark_info->remark; $oVerifDT = $oa->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i'); }
+                                                            if (!$oVerifRemark) { $oVerifRemark = $this->verificationRemarkText($oa); } if (!$oVerifDT && in_array((int) $oa->status, [4, 5]) && $oa->updated_at) { $oVerifDT = $oa->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i'); }
                                                             if (!$oVerifStatus) { $oVerifStatus = $oa->status == 5 ? 'Approved' : ($oa->status == 4 ? 'Rejected' : 'Pending'); }
                                                             if (in_array($col['type'], ['File Upload', 'Image', 'Audio'])) { $oRow[] = $this->imageAnswerUrl($oa); }
                                                             elseif ($col['type'] === 'Location' && empty($oa->user_answer) && $oa->latitude) { $oRow[] = $oa->latitude . ', ' . $oa->longitude; }
@@ -3250,7 +3269,7 @@ class ReportController extends Controller
 //        dd($activity_check);
         // $remarks = RemarkMaster::where('status', 1)->get();
 
-        $related_questions = Question::where('activity_id', $activity_check->id)->orderBy('question_sequence', 'asc')->get();
+        $related_questions = Question::where('activity_id', $activity_check->id)->withoutOrphans()->orderBy('question_sequence', 'asc')->get();
 //        dd($related_questions);
 
 

@@ -394,6 +394,7 @@ class TaskController extends Controller
                     'row_id'           => (int) $row_id,
                     'project_id'       => $project->id,
                     'distributor_value'=> $distributor_value,
+                    'documents'        => \App\Services\TemplateDocuments::forRowsApi([$row_id])[(int) $row_id] ?? [],
                     'is_outlet'        => true,
                     'total'            => $collection['total'],
                     'per_page'         => $collection['per_page'],
@@ -680,6 +681,7 @@ class TaskController extends Controller
                 'row_id'            => (int) $row_id,
                 'project_id'        => $project->id,
                 'distributor_value' => $distributor_value,
+                'documents'         => \App\Services\TemplateDocuments::forRowsApi([$row_id])[(int) $row_id] ?? [],
                 'is_outlet'         => $status == 1,
                 'total'             => $collection['total'],
                 'per_page'          => $collection['per_page'],
@@ -1122,7 +1124,7 @@ class TaskController extends Controller
         $currentPage      = (int) $request->get('page', 1);
         $perPage          = 10;
         $total            = $collection->count();
-        $currentPageItems = $collection->slice(($currentPage - 1) * $perPage, $perPage)->values();
+        $currentPageItems = $this->withRowDocuments($collection->slice(($currentPage - 1) * $perPage, $perPage)->values(), fn($item) => $item['row_id']);
 
         $paginated = new LengthAwarePaginator(
             $currentPageItems, $total, $perPage, $currentPage,
@@ -1466,7 +1468,10 @@ class TaskController extends Controller
 
         $currentPage = request()->get('page', 1);
         $perPage = 10;
-        $currentPageItems = $distributors_collection->slice(($currentPage - 1) * $perPage, $perPage)->values();
+        $currentPageItems = $this->withRowDocuments(
+            $distributors_collection->slice(($currentPage - 1) * $perPage, $perPage)->values(),
+            fn($item) => optional(collect($item['getDataOfRows'])->first())->row_id
+        );
         $paginatedDistributors = new LengthAwarePaginator(
             $currentPageItems,
             $distributors_collection->count(),
@@ -2195,6 +2200,33 @@ class TaskController extends Controller
         //            ->where('template_name_head_id', $childTempOwnRefIds)
         //            ->where('value', $distributor_value);
 
+        // An outlet belongs to this distributor when a value equals the distributor value (as
+        // before), or its own reference head (e.g. DB Code) holds the distributor's master head
+        // value followed by extra text, e.g. "Disha Enteprises (SS)" (see OutletDistributorMatch).
+        $distributorRowData   = json_decode($rowInfo->template_data_json, true) ?: [];
+        $childOwnHeadById     = $childTemplatesData->pluck('own_reference_head_id', 'id');
+        $childMasterHeadById  = $childTemplatesData->pluck('master_head_id', 'id');
+        $distributorNamesByHead = [];
+        foreach ($childMasterHeadById->filter()->unique() as $masterHeadId) {
+            $distributorNamesByHead[$masterHeadId] = \App\Services\OutletDistributorMatch::distributorValues((int) $projectTemplate->id, $masterHeadId);
+        }
+        $outletBelongs = function ($item) use ($distributor_value, $distributorRowData, $childOwnHeadById, $childMasterHeadById, $distributorNamesByHead) {
+            $json = json_decode($item->template_data_json, true) ?: [];
+            if (in_array($distributor_value, $json, true)) {
+                return true;
+            }
+            $ownHeadId    = $childOwnHeadById[$item->project_template_id] ?? null;
+            $masterHeadId = $childMasterHeadById[$item->project_template_id] ?? null;
+            if (!$ownHeadId || !$masterHeadId) {
+                return false;
+            }
+            return \App\Services\OutletDistributorMatch::belongsTo(
+                \App\Services\OutletDistributorMatch::headValue($json, $ownHeadId),
+                $distributorRowData[$masterHeadId] ?? $distributor_value,
+                $distributorNamesByHead[$masterHeadId] ?? []
+            );
+        };
+
         $checkPrentOutletAssign = DB::table('data_assigns')->where('project_template_id', $projectTemplate->id)
             ->where('is_outlet_assigned', 1)
             ->exists();
@@ -2221,11 +2253,7 @@ class TaskController extends Controller
             $outlet_items = $allTemplateNamesValues
                 ->whereIn('row_id', $getRowIdsnew)
                 ->whereIn('project_template_id', $childTemplatesIds)
-                ->filter(function ($item) use ($distributor_value) {
-                    $json = json_decode($item->template_data_json, true);
-                    // check if distributor_value exists anywhere in JSON values
-                    return in_array($distributor_value, $json, true);
-                });
+                ->filter($outletBelongs);
 
             //            dd($outlet_items, $childTemplatesIds, $getRowIds, $distributor_value, $allTemplateNamesValues);
 
@@ -2235,11 +2263,7 @@ class TaskController extends Controller
                 ->whereIn('row_id', $getRowIds)
                 ->whereIn('project_template_id', $childTemplatesIds)
                 ->whereIn('template_name_head_id', $childTempOwnRefIds)
-                ->filter(function ($item) use ($distributor_value) {
-                    $json = json_decode($item->template_data_json, true);
-                    // check if distributor_value exists anywhere in JSON values
-                    return in_array($distributor_value, $json, true);
-                });
+                ->filter($outletBelongs);
         }
 
         // dd($outlet_items->IsEmpty());
@@ -2249,11 +2273,7 @@ class TaskController extends Controller
                 ->whereIn('row_id', $getRowIds)
                 ->whereIn('project_template_id', $childTemplatesIds)
                 ->whereIn('template_name_head_id', $childTempOwnRefIds)
-                ->filter(function ($item) use ($distributor_value) {
-                    $json = json_decode($item->template_data_json, true);
-                    // check if distributor_value exists anywhere in JSON values
-                    return in_array($distributor_value, $json, true);
-                });
+                ->filter($outletBelongs);
 
             // dd($outlet_items, $getRowIds);
 
@@ -2472,7 +2492,7 @@ class TaskController extends Controller
         $distributors_collection = collect($project_data_arr);
         $currentPage = request()->get('page', 1);
         $perPage = 10;
-        $currentPageItems = $distributors_collection->slice(($currentPage - 1) * $perPage, $perPage)->values();
+        $currentPageItems = $this->withRowDocuments($distributors_collection->slice(($currentPage - 1) * $perPage, $perPage)->values(), fn($item) => $item['row_id']);
         $paginatedDistributors = new LengthAwarePaginator(
             $currentPageItems,
             $distributors_collection->count(),
@@ -2502,6 +2522,16 @@ class TaskController extends Controller
             'total_pages'          => $paginatedDistributors->lastPage(),
             'data'                 => $paginatedDistributors->items(),
         ], 200);
+    }
+
+    /**
+     * Adds "documents" to each list item: the files of the row's file columns (head, file name, status,
+     * kind and a 24-hour download link), [] when the row has none. Only the page shown.
+     */
+    private function withRowDocuments($items, callable $rowIdOf)
+    {
+        $documents = \App\Services\TemplateDocuments::forRowsApi($items->map($rowIdOf));
+        return $items->map(fn($item) => $item + ['documents' => $documents[(int) $rowIdOf($item)] ?? []]);
     }
 
 
@@ -2909,9 +2939,10 @@ class TaskController extends Controller
                 }
             });
 
-            // --- 11. Dispatch image job ---
-            if (!empty($imagesToProcess)) {
-                dispatch(new ConvertAuditorSelfiesToGeoSelfies($imagesToProcess));
+            // --- 11. Geo-stamp this submission's images (uploaded files and pre-uploaded multi-image
+            // paths) by their saved answers; a new answer's record only exists after the insert above
+            if (!empty($imagesToProcess) || !empty($multiImageKeys)) {
+                \App\Services\GeoStamp::queueFor((int) $request->row_id, (int) $request->activity_id, (int) $activitySequence);
             }
 
             return response([
@@ -3174,7 +3205,7 @@ class TaskController extends Controller
         $headRows = DB::table('template_name_heads')
             ->where('template_name_id', $template->id)
             ->orderBy('id')
-            ->get(['id', 'template_head_name', 'value_type', 'is_required']);
+            ->get(['id', 'template_head_name', 'value_type', 'is_required', 'is_file']);
 
         // Batch-load options for every dropdown head in one query instead of one per head.
         $dropdownHeadIds = $headRows->where('value_type', 'dropdown')->pluck('id')->toArray();
@@ -3197,7 +3228,12 @@ class TaskController extends Controller
                 'is_required' => ((int)$h->id === $mainHeaderId || (int)$h->id === $subHeaderId || (bool) $h->is_required),
                 'value_type'  => $h->value_type ?: 'text',
             ];
-            if ($h->value_type === 'dropdown') {
+            if ($h->is_file) {
+                // File column: send the file itself (multipart, key = this id) — or a file name / http(s) link as text
+                $entry['value_type']         = 'file';
+                $entry['allowed_extensions'] = \App\Services\TemplateDocuments::EXTENSIONS;
+                $entry['max_size_mb']        = (int) (\App\Services\TemplateDocuments::MAX_BYTES / 1048576);
+            } elseif ($h->value_type === 'dropdown') {
                 $entry['options'] = $optionsByHeadId->get($h->id, []);
             } elseif ($h->value_type === 'yes_no') {
                 $entry['options'] = ['Yes', 'No'];
@@ -3285,7 +3321,12 @@ class TaskController extends Controller
                 $projectTemplateInfoDetails = $projectTemplateInfo->getTemplate;
                 $projectTemplateHeaders = $projectTemplateInfoDetails->getTemplateHeads;
 
-                $projectRowData = $request->except(['project_template_id']);
+                // File columns can come as an uploaded file (multipart) instead of a typed name / link
+                $uploadedFiles  = $request->allFiles();
+                $projectRowData = array_diff_key($request->except(['project_template_id']), $uploadedFiles);
+                foreach (array_keys($uploadedFiles) as $fileKey) {
+                    $projectRowData[$fileKey] = $projectRowData[$fileKey] ?? '';
+                }
 
                 // Build lookup maps from template headers
                 // headerIdMap: id => header object
@@ -3304,6 +3345,14 @@ class TaskController extends Controller
 
                 $templateDataJson = [];
                 $unknownKeys      = [];
+
+                // Uploaded files by header id, keyed the same way as the values
+                $filesByHeaderId = [];
+                foreach ($uploadedFiles as $fileKey => $file) {
+                    $header = $useIdMode ? ($headerIdMap[(int) $fileKey] ?? null)
+                        : ($headerNameMap[strtolower(str_replace([' ', '-'], '_', trim($fileKey)))] ?? null);
+                    if ($header && $file instanceof \Illuminate\Http\UploadedFile) $filesByHeaderId[$header->id] = $file;
+                }
 
                 if ($useIdMode) {
                     // ── ID mode: keys are header IDs ─────────────────────────────
@@ -3336,6 +3385,16 @@ class TaskController extends Controller
                         'status'       => 422,
                         'message'      => 'Unknown header keys provided.',
                         'unknown_keys' => $unknownKeys,
+                    ], 422);
+                }
+
+                // File columns: an uploaded file is checked and gets its (unique) name; a typed name / link is checked
+                [$templateDataJson, $docErrors, $pendingFiles] = \App\Services\TemplateDocuments::prepareRowFiles($projectTemplateInfo, $templateDataJson, $filesByHeaderId);
+                if (!empty($docErrors)) {
+                    return response()->json([
+                        'status'  => 422,
+                        'message' => 'Some files could not be accepted.',
+                        'errors'  => $docErrors,
                     ], 422);
                 }
 
@@ -3374,10 +3433,13 @@ class TaskController extends Controller
                     }
                 }
 
-                // Insert single row with JSON data
+                // Insert single row with JSON data (columns in header id order, like uploaded rows)
+                ksort($templateDataJson);
                 $newRowId = DB::table('project_template_name_values_new')->insertGetId([
                     'project_template_id' => $projectTemplateInfo->id,
                     'template_data_json'  => json_encode($templateDataJson),
+                    // Outlet row: linked to its distributor row (as on the web Add form)
+                    'distributor_id'      => \App\Services\OutletDistributorMatch::parentRowId($projectTemplateInfo, $templateDataJson),
                     'created_at'          => now(),
                     'updated_at'          => now(),
                 ]);
@@ -3455,11 +3517,21 @@ class TaskController extends Controller
                         $activityGroupId,
                         $rowIds
                     );
+                    // The auditor's verifiers hold the new assignment too (their Data Assigned List)
+                    \App\Services\VerifierAssignment::recordForAuditor($dataAssign->id, $request->user()->id, $projectTemplateInfo->id, (int) $activity);
                 }
 
                 \App\Services\VerifierAssignment::assignAuditorCreatedRow(
                     $request->user()->id, $projectTemplateInfo->id, $activityIdsArr, $newRowId
                 );
+                \App\Services\TemplateDocuments::saveRowFiles($projectTemplateInfo, $templateDataJson, $pendingFiles, $request->user()->id);
+
+                return response()->json([
+                    'status'    => 200,
+                    'message'   => 'Distributor Added Successfully',
+                    'row_id'    => (int) $newRowId,
+                    'documents' => \App\Services\TemplateDocuments::forRowsApi([$newRowId])[$newRowId] ?? [],
+                ]);
             }
 
             return response()->json(['status' => 200, 'message' => 'Distributor Added Successfully']);
@@ -3728,6 +3800,8 @@ class TaskController extends Controller
                 'row_id'      => 'required|integer',
                 'activity_id' => 'sometimes|integer',
                 'question_id' => 'sometimes|integer',
+                'latitude'    => 'sometimes|nullable|numeric',
+                'longitude'   => 'sometimes|nullable|numeric',
             ]);
 
             $projectTemp = ProjectTemplateNameValuesNew::find($request->row_id);
@@ -3754,7 +3828,20 @@ class TaskController extends Controller
             $file->move(public_path($dir), $fileName);
             @chmod(public_path("$dir/$fileName"), 0777);
 
-            return response()->json(['path' => "$dir/$fileName"]);
+            // With the location sent, the image is geo-stamped now and the stamped path returned;
+            // otherwise it is stamped once its answer is saved (saveAnswer / submit)
+            $path = "$dir/$fileName";
+            $stamped = false;
+            if (\App\Services\GeoStamp::hasLocation($request->latitude, $request->longitude)) {
+                try {
+                    $path = \App\Services\GeoStamp::stampFile($path, $request->latitude, $request->longitude, now());
+                    $stamped = true;
+                } catch (\Throwable $e) {
+                    Log::error('uploadActivityImage geo stamp failed: ' . $e->getMessage());
+                }
+            }
+
+            return response()->json(['path' => $path, 'geo_stamped' => $stamped]);
         } catch (\Throwable $e) {
             Log::error('uploadActivityImage API error: ' . $e->getMessage());
             return response()->json(['error' => $e->getMessage()], 500);
@@ -4174,6 +4261,12 @@ class TaskController extends Controller
             ]);
         }
 
+        // Image answer (uploaded here, or paths pre-uploaded via uploadActivityImage): geo-stamp it
+        if ($question->question_type === 'Image') {
+            \App\Services\GeoStamp::queueAnswers([$savedRecord->id]);
+            $savedRecord->refresh();
+        }
+
         // Bust the distributor-list cache so the next projectDistributorData call reflects this answer
         $projectId = optional($projectTemp->getProjectTemplateData)->project_id;
         if ($projectId) {
@@ -4371,6 +4464,9 @@ class TaskController extends Controller
             ->where($seqFilter)
             ->update(['status' => 1, 'updated_at' => now()]);
 
+        // Any image of this instance not geo-stamped yet (e.g. saved before stamping existed)
+        \App\Services\GeoStamp::queueFor($rowId, $actId, $seq);
+
         // Mark this repeat instance itself as submitted, so addInstance() stops
         // treating it as "still in progress" and allows the next instance.
         if ($seq > 0) {
@@ -4484,6 +4580,9 @@ class TaskController extends Controller
             ->where($seqFilter)
             ->update(['status' => 1, 'updated_at' => now()]);
 
+        // Any image of this instance not geo-stamped yet
+        \App\Services\GeoStamp::queueFor($rowId, $actId, $seq);
+
         // Mark this repeat instance itself as submitted, so addInstance() stops
         // treating it as "still in progress" and allows the next instance.
         if ($seq > 0) {
@@ -4545,13 +4644,18 @@ class TaskController extends Controller
 
         $storedJson = json_decode($row->template_data_json, true) ?? [];
 
+        // File columns: the stored document (link, status) next to the value
+        $documents = collect(\App\Services\TemplateDocuments::forRowsApi([$row->id])[$row->id] ?? [])->keyBy('head_id');
+
         $data = DB::table('template_name_heads')
             ->where('template_name_id', $templateNameId)
-            ->get(['id', 'template_head_name'])
+            ->get(['id', 'template_head_name', 'is_file'])
             ->map(fn($hdr) => [
-                'id'    => $hdr->id,
-                'name'  => $hdr->template_head_name,
-                'value' => $storedJson[$hdr->id] ?? null,
+                'id'       => $hdr->id,
+                'name'     => $hdr->template_head_name,
+                'value'    => $storedJson[$hdr->id] ?? null,
+                'is_file'  => (bool) $hdr->is_file,
+                'document' => $documents->get($hdr->id),
             ])->values()->toArray();
 
         return response()->json([
@@ -4559,6 +4663,7 @@ class TaskController extends Controller
             'row_id'               => (int) $rowId,
             'project_template_id'  => $row->project_template_id,
             'data'                 => $data,
+            'documents'            => $documents->values(),
         ]);
     }
 
@@ -4601,9 +4706,21 @@ class TaskController extends Controller
                 $headerNameMap[$normalizedName] = $hdr;
             }
 
-            $payload = $request->except(['row_id']);
+            // File columns can come as an uploaded file (multipart) instead of a typed name / link
+            $uploadedFiles = $request->allFiles();
+            $payload = array_diff_key($request->except(['row_id']), $uploadedFiles);
+            foreach (array_keys($uploadedFiles) as $fileKey) {
+                $payload[$fileKey] = $payload[$fileKey] ?? '';
+            }
             $nonSystemKeys = array_keys($payload);
             $useIdMode = count($nonSystemKeys) > 0 && count(array_filter($nonSystemKeys, 'is_numeric')) === count($nonSystemKeys);
+
+            $filesByHeaderId = [];
+            foreach ($uploadedFiles as $fileKey => $file) {
+                $header = $useIdMode ? ($headerIdMap[(int) $fileKey] ?? null)
+                    : ($headerNameMap[strtolower(str_replace([' ', '-'], '_', trim($fileKey)))] ?? null);
+                if ($header && $file instanceof \Illuminate\Http\UploadedFile) $filesByHeaderId[$header->id] = $file;
+            }
 
             $updates     = [];
             $unknownKeys = [];
@@ -4639,9 +4756,22 @@ class TaskController extends Controller
                 return response()->json(['status' => 422, 'message' => 'No valid header values provided.'], 422);
             }
 
-            // Merge updates into the existing JSON (partial update)
+            // File columns: an uploaded file is checked and gets its (unique) name; a typed name / link is checked
+            $projectTemplate = ProjectTemplate::find($row->project_template_id);
+            [$updates, $docErrors, $pendingFiles] = \App\Services\TemplateDocuments::prepareRowFiles($projectTemplate, $updates, $filesByHeaderId);
+            if (!empty($docErrors)) {
+                return response()->json([
+                    'status'  => 422,
+                    'message' => 'Some files could not be accepted.',
+                    'errors'  => $docErrors,
+                ], 422);
+            }
+
+            // Merge updates into the existing JSON (partial update). array_replace, not array_merge:
+            // the keys are header ids, which array_merge would renumber (losing every column).
             $existing = json_decode($row->template_data_json, true) ?? [];
-            $merged   = array_merge($existing, $updates);
+            $merged   = array_replace($existing, $updates);
+            ksort($merged);   // columns in header id order, like uploaded rows
 
             DB::table('project_template_name_values_new')
                 ->where('id', $request->row_id)
@@ -4650,7 +4780,14 @@ class TaskController extends Controller
                     'updated_at'         => now(),
                 ]);
 
-            return response()->json(['status' => 200, 'message' => 'Row updated successfully.']);
+            \App\Services\TemplateDocuments::saveRowFiles($projectTemplate, $merged, $pendingFiles, $request->user()->id);
+
+            return response()->json([
+                'status'    => 200,
+                'message'   => 'Row updated successfully.',
+                'row_id'    => (int) $request->row_id,
+                'documents' => \App\Services\TemplateDocuments::forRowsApi([$request->row_id])[(int) $request->row_id] ?? [],
+            ]);
 
         } catch (\Exception $e) {
             Log::info('Template row update failed: ' . $e->getMessage());

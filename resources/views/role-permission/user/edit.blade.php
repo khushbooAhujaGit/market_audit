@@ -306,7 +306,8 @@
                                                                 required="">
                                                             @foreach ($roles as $role)
                                                                 @if ($currentUserRole == 'Verifier')
-                                                                    @if ($role->name == 'Verifier')
+                                                                    {{-- Same roles a Verifier can choose on Add User (all but Super Admin); the user's own role stays selected --}}
+                                                                    @if ($role->name != 'Super Admin')
                                                                         <option value="{{ $role->name }}"
                                                                                 @if (in_array($role->name, $user->getRoleNames()->toArray())) selected @endif>
                                                                             {{ $role->name }}
@@ -341,6 +342,25 @@
                                                             @endforeach
                                                         </select>
                                                     </div>
+
+                                                    {{-- Auditor -> Verifier mapping (admin side only): the auditor then shows on that verifier's Users list --}}
+                                                    @if ($canMapVerifier)
+                                                        <div class="col-xl-6 col-sm-6 d-none" id="VerifierDiv">
+                                                            <label class="form-label" for="verifier_select">Select Verifier</label>
+                                                            <select class="form-select" id="verifier_select" name="verifier_select">
+                                                                <option></option>
+                                                                @foreach ($verifiers as $verifier)
+                                                                    <option value="{{ $verifier->id }}"
+                                                                        @selected((string) old('verifier_select', $user->verifier_user_id) === (string) $verifier->id)>
+                                                                        {{ $verifier->name }} ({{ $verifier->email }})
+                                                                    </option>
+                                                                @endforeach
+                                                            </select>
+                                                            @error('verifier_select')
+                                                                <p class="text-danger small mt-1 mb-0">{{ $message }}</p>
+                                                            @enderror
+                                                        </div>
+                                                    @endif
 
                                                     <div class="col-12 text-end">
                                                         <button class="btn btn-primary">Add Now</button>
@@ -382,6 +402,18 @@
                 $('#AgencyDiv').removeClass('d-none');
             } else {
                 $('#AgencyDiv').addClass('d-none');
+            }
+
+            // Verifier mapping is only for Auditor users
+            if ($('#verifier_select').length) {
+                $("#verifier_select").select2({
+                    placeholder: "Select Verifier",
+                    allowClear: true,
+                    width: '100%'
+                });
+                const toggleVerifier = () => $('#VerifierDiv').toggleClass('d-none', $('#roles').val() !== 'Auditor');
+                $('#roles').on('change', toggleVerifier);
+                toggleVerifier();
             }
 
         })

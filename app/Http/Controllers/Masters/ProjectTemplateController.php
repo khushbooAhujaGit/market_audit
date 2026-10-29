@@ -96,6 +96,15 @@ class ProjectTemplateController extends Controller
 //            dd($checkDataAssign);
 //            dd($project_info, $selected_activities, $act_group_id, $projectTemplate);
         }
+
+        // A Verifier works on the admin's assignment: same selector, only its activities.
+        $verifierActivityIds = null;
+        if ($currentUserRole == 'Verifier' && $request->boolean('for_assign')) {
+            $given = \App\Services\VerifierAssignment::assignedDataAssigns($currentUser->id)
+                ->where('project_template_id', $projectTemplate->id);
+            $checkDataAssign = $given->first() ?? [];
+            $verifierActivityIds = $given->pluck('activity_id')->map(fn($id) => (int) $id)->unique()->values();
+        }
         //khushboo 03-04-2025
 
 
@@ -105,7 +114,8 @@ class ProjectTemplateController extends Controller
             'main_headers' => $project_template_main_headers,
             'verifier_exist' => $verifier_exist,
             'checkDataAssign' => $checkDataAssign,
-            'head_data_exists' => $head_data_exists
+            'head_data_exists' => $head_data_exists,
+            'verifier_activity_ids' => $verifierActivityIds,
         ]);
     }
 
@@ -168,13 +178,31 @@ class ProjectTemplateController extends Controller
 
         $headIdToExtract = $request->id;
 
-        $projectTemplateHeadValues = DB::table('project_template_name_values_new')
+        // A Verifier picks only from the rows an admin gave them; values whose rows have no
+        // auditor yet are listed separately so "Assign Auditors" can preselect them.
+        $verifierRowIds = null;
+        $pendingRowIds = [];
+        if ($request->boolean('for_assign') && Auth::user()->hasRole('Verifier')) {
+            $activityIds = \App\Services\VerifierAssignment::assignedDataAssigns(Auth::id())
+                ->where('project_template_id', $projectTemplate->id)->pluck('activity_id')->map(fn($id) => (int) $id)->unique()->all();
+            $verifierRowIds = collect($activityIds)
+                ->flatMap(fn($activityId) => \App\Services\VerifierAssignment::ownRowIds(Auth::id(), $projectTemplate->id, $activityId))
+                ->unique()->values()->all();
+            $pendingRowIds = collect(\App\Services\VerifierAssignment::pendingRows(Auth::id(), $projectTemplate->id, $activityIds))
+                ->flatten()->unique()->values()->all();
+        }
+
+        $headValuesOf = fn($rowIds) => DB::table('project_template_name_values_new')
             ->where('project_template_id', $projectTemplate->id)
+            ->when($rowIds !== null, fn($q) => $q->whereIn('id', $rowIds))
             ->whereRaw("JSON_EXTRACT(template_data_json, '$.\"$headIdToExtract\"') IS NOT NULL")
             ->select(DB::raw("DISTINCT JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"$headIdToExtract\"')) as extracted_value"))
             ->pluck('extracted_value');
 
+        $projectTemplateHeadValues = $headValuesOf($verifierRowIds);
+        $pendingHeadValues = $pendingRowIds ? $headValuesOf($pendingRowIds) : [];
+
 //        dd($projectTemplateHeadValues);
-        return response()->json(['message' => "Success", 'related_head_values' => $projectTemplateHeadValues]);
+        return response()->json(['message' => "Success", 'related_head_values' => $projectTemplateHeadValues, 'pending_head_values' => $pendingHeadValues]);
     }
 }

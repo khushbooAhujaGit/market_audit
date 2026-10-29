@@ -18,6 +18,7 @@ use App\Models\ActivityInstanceClose;
 use App\Models\User;
 use App\Models\Verifier;
 use App\Models\VerifierAnswerEdit;
+use App\Services\TemplateDocuments;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -74,17 +75,17 @@ class VerifierController extends Controller
         }
 
         // Get one row per (row_id, activity_sequence) pair so every instance is listed.
-        // status 0 = never submitted; 1 = submitted by auditor, awaiting verification
-        // (set in TaskController::handleSubmitMode/finalizeAnswers). Neither has been
-        // acted on by a verifier yet, so both count as pending here.
+        // Only submitted audits (status 1: the auditor pressed Submit in the app or on the
+        // web form) are listed; drafts (status 0) stay out until the auditor submits.
         $rawPairs = TempUserActivityAnswersData::whereIn('row_id', $uniqueRowIds)
             ->where('activity_id', $a)
-            ->whereIn('status', [0, 1])
+            ->where('status', 1)
             ->select('row_id', 'activity_sequence')
             ->distinct()
             ->orderBy('row_id')
             ->orderByRaw('COALESCE(activity_sequence, 0) ASC')
             ->get();
+        [$rawPairs, $remarkMissing] = $this->withRemarkMissingPairs($rawPairs, $uniqueRowIds, $a);
 
         $verification_data = [];
         $rowCache = [];
@@ -94,9 +95,10 @@ class VerifierController extends Controller
                 if (!$rd) continue;
                 $vals      = [];
                 $json_data = json_decode($rd->template_data_json);
+                $documents = TemplateDocuments::forRow($rd);   // file columns: the stored file
                 foreach ($json_data as $key => $value) {
                     $head   = TemplateNameHead::find($key);
-                    $vals[] = ['name' => $head->template_head_name, 'value' => $value];
+                    $vals[] = ['name' => $head->template_head_name, 'value' => $value, 'document' => $documents[$key] ?? null];
                 }
                 $rd->templateNameValues = $vals;
                 $rowCache[$pair->row_id] = ['model' => $rd, 'vals' => $vals];
@@ -116,6 +118,7 @@ class VerifierController extends Controller
             $entry->templateNameValues = $rowCache[$pair->row_id]['vals'];
             $entry->activity_sequence  = $seq;
             $entry->instance_label     = $instance_label;
+            $entry->remark_missing     = isset($remarkMissing[$pair->row_id . ':' . $seq]);
             $verification_data[]       = $entry;
         }
 
@@ -153,21 +156,21 @@ class VerifierController extends Controller
         }
 
         // Get unique (row_id, activity_sequence) pairs that are pending verification.
-        // status 0 = never submitted; 1 = submitted by auditor, awaiting verification
-        // (set in TaskController::handleSubmitMode/finalizeAnswers). Neither has been
-        // acted on by a verifier yet, so both count as pending here.
+        // Only submitted audits (status 1: the auditor pressed Submit in the app or on the
+        // web form) are listed; drafts (status 0) stay out until the auditor submits.
         // Exclude any pair that has already been touched by a verifier (verified_by IS NOT NULL),
         // which handles sub-question answers stored with NULL activity_sequence not getting
         // updated during instance-specific verification.
         $rawPairs = TempUserActivityAnswersData::whereIn('row_id', $uniqueRowIds)
             ->where('activity_id', $a)
-            ->whereIn('status', [0, 1])
+            ->where('status', 1)
             ->where(fn($q) => $q->whereNull('verified_by')->orWhere('verified_by', 0))
             ->select('row_id', 'activity_sequence')
             ->distinct()
             ->orderBy('row_id')
             ->orderByRaw('COALESCE(activity_sequence, 0) ASC')
             ->get();
+        [$rawPairs, $remarkMissing] = $this->withRemarkMissingPairs($rawPairs, $uniqueRowIds, $a);
 
         $verification_data = [];
         $rowCache = [];
@@ -177,9 +180,10 @@ class VerifierController extends Controller
                 if (!$rd) continue;
                 $vals = [];
                 $json_data = json_decode($rd->template_data_json);
+                $documents = TemplateDocuments::forRow($rd);   // file columns: the stored file
                 foreach ($json_data as $key => $value) {
                     $head = TemplateNameHead::find($key);
-                    $vals[] = ['name' => $head->template_head_name, 'value' => $value];
+                    $vals[] = ['name' => $head->template_head_name, 'value' => $value, 'document' => $documents[$key] ?? null];
                 }
                 $rd->templateNameValues = $vals;
                 $rowCache[$pair->row_id] = ['model' => $rd, 'vals' => $vals];
@@ -199,9 +203,47 @@ class VerifierController extends Controller
             $entry->templateNameValues = $rowCache[$pair->row_id]['vals'];
             $entry->activity_sequence  = $seq;
             $entry->instance_label     = $instance_label;
+            $entry->remark_missing     = isset($remarkMissing[$pair->row_id . ':' . $seq]);
             $verification_data[] = $entry;
         }
         return view('masters.verifiers.verifications', compact('verification_data', 'activity_info'));
+    }
+
+    /**
+     * Audits already approved/rejected whose verifier remark never got saved properly: the bare
+     * word "other" ("Other Remark" chosen without text) or the id of a remark that no longer
+     * exists. They go back into the queue (flagged) so the verifier can set the remark again.
+     * Returns [all pairs to list, set of "row_id:sequence" keys that need the remark].
+     */
+    private function withRemarkMissingPairs($pendingPairs, $rowIds, $activityId): array
+    {
+        $missing = TempUserActivityAnswersData::whereIn('row_id', $rowIds)
+            ->where('activity_id', $activityId)
+            ->whereIn('status', [4, 5])
+            ->where(function ($q) {
+                $q->where('remark', 'other')
+                    ->orWhere(function ($q2) {
+                        $q2->whereRaw("remark REGEXP '^[0-9]+$'")
+                            ->whereNotExists(function ($s) {
+                                $s->selectRaw('1')->from('remark_masters')
+                                    ->whereColumn('remark_masters.id', 'temp_user_activity_answers_data.remark');
+                            });
+                    });
+            })
+            ->select('row_id', 'activity_sequence')
+            ->distinct()
+            ->get();
+
+        $missingKeys = [];
+        $all = collect($pendingPairs)->keyBy(fn($p) => $p->row_id . ':' . (int) ($p->activity_sequence ?? 0));
+        foreach ($missing as $p) {
+            $key = $p->row_id . ':' . (int) ($p->activity_sequence ?? 0);
+            $missingKeys[$key] = true;
+            $all->put($key, $all->get($key, $p));
+        }
+
+        $sorted = $all->sortBy(fn($p) => sprintf('%012d:%06d', $p->row_id, (int) ($p->activity_sequence ?? 0)))->values();
+        return [$sorted, $missingKeys];
     }
 
     public function checkAndCreateDirectory($directory)
@@ -222,11 +264,13 @@ class VerifierController extends Controller
 
         $template_name_values = [];
         $json_data = json_decode($related_values->template_data_json);
+        $documents = TemplateDocuments::forRow($related_values);   // file columns: the stored file
         foreach ($json_data as $key => $value) {
             $templateHeadName = TemplateNameHead::find($key);
             $template_name_values[] = [
                 'name' => $templateHeadName->template_head_name,
                 'value' => $value,
+                'document' => $documents[$key] ?? null,
             ];
         }
 
@@ -253,6 +297,15 @@ class VerifierController extends Controller
             'subQuestions.childQuestion.subQuestions.childQuestion.getOptions',
             'subQuestions.childQuestion.subQuestions.childQuestion.subQuestions.childQuestion.getOptions',
         ])->where('activity_id', $activity_check->id)->orderBy('question_sequence', 'asc')->get();
+
+        // Skip orphaned sub-questions, same as the app (TaskController::getAllQuestion): flagged
+        // as a sub-question (is_parent = 0) but linked to no parent, e.g. left behind by an Excel
+        // upload. The app never shows them, so they must not appear here as standalone questions.
+        $linkedChildIds = QuestionSubQuestion::whereIn('child_question_id', $related_questions->pluck('id'))
+            ->pluck('child_question_id')->all();
+        $related_questions = $related_questions->reject(fn($q) => (int) $q->is_parent === 0
+            && empty($q->parent_question_id)
+            && !in_array($q->id, $linkedChildIds))->values();
 
         // BFS: collect ALL sub-question child IDs across all levels
         $sub_question_child_ids = [];
@@ -331,7 +384,12 @@ class VerifierController extends Controller
                 'edited_at' => $edits->last()->created_at,
             ]);
 
-        return view('masters.verifiers.verify', compact('auditDateTime', 'agencyData', 'auditorData', 'related_values', 'activity_check', 'related_questions', 'sub_question_child_ids', 'user_responses', 'activity_group_info', 'remarks', 'userLatLongData', 'activity_sequence', 'instance_label', 'activitySignature', 'answerEdits'));
+        // Verified earlier but the remark never got saved ("other" without text, or a deleted remark)
+        $existingRemarkIds = RemarkMaster::pluck('id')->map(fn($id) => (string) $id)->flip();
+        $remarkMissing = $user_responses->contains(fn($r) => in_array((int) $r->status, [4, 5], true)
+            && ($r->remark === 'other' || (ctype_digit((string) $r->remark) && !$existingRemarkIds->has((string) $r->remark))));
+
+        return view('masters.verifiers.verify', compact('auditDateTime', 'agencyData', 'auditorData', 'related_values', 'activity_check', 'related_questions', 'sub_question_child_ids', 'user_responses', 'activity_group_info', 'remarks', 'userLatLongData', 'activity_sequence', 'instance_label', 'activitySignature', 'answerEdits', 'remarkMissing'));
         // }
         // else{
         //     return redirect()->back()->with('message', 'OTP Verification is pending for this audit');
@@ -382,8 +440,9 @@ class VerifierController extends Controller
 
         $verifier_remark = $request->remark == 'other' && isset($request->other_remark) ? $request->other_remark : $request->remark;
         //khushboo 10-06-25
-        if ($request->remark == 'other' && isset($request->other_remark) && empty($request->other_remark)) {
-            redirect()->back()->with('error', 'Please Add Other Remark Text');
+        // "Other Remark" needs its text; without the return here the word "other" was saved as the remark.
+        if ($request->remark == 'other' && trim((string) $request->other_remark) === '' && !$request->has('send_back')) {
+            return redirect()->back()->with('error', 'Please add the Other Remark text.')->withInput();
         }
         //khushboo 10-06-25
 
@@ -418,19 +477,18 @@ class VerifierController extends Controller
 
         //khushboo 10-06-25 (create new remark)
 
-        if ($request->has('other_remark') && !empty($request->other_remark)) {
-
-            $checkifRemarkExist = RemarkMaster::where('project_id', $projectId)->where('remark', 'LIKE', $request->other_remark)->exists();
-            if (!$checkifRemarkExist) {
-
-                $newRemark = RemarkMaster::create([
-                    'remark' => $request->other_remark,
+        if ($request->remark == 'other' && trim((string) $request->other_remark) !== '') {
+            // Answers store the remark's id (reports look it up by id): reuse the project's
+            // remark with the same text, otherwise add it to the project's remarks.
+            $otherText = trim((string) $request->other_remark);
+            $existingRemark = RemarkMaster::where('project_id', $projectId)->where('remark', $otherText)->first();
+            $verifier_remark = $existingRemark
+                ? $existingRemark->id
+                : RemarkMaster::create([
+                    'remark' => $otherText,
                     'status' => 1,
                     'project_id' => $projectId,
-                ]);
-
-                $verifier_remark = $newRemark->id;
-            }
+                ])->id;
         }
         $auditDate = null;
 
@@ -633,6 +691,52 @@ class VerifierController extends Controller
                 }
             }
         }
+
+        // Multi Response sub-question answers (and their conditional children): the page names them
+        // by answer row (answer_row[id]) because one question can have several stored entries, and a
+        // blank one by its group (mr_answer[group][question]). Saved on Approve only, like the rest.
+        if ($isApprove) {
+            foreach ((array) $request->input('answer_row', []) as $answerId => $value) {
+                if (!is_numeric($answerId) || is_array($value)) continue;
+                $answer = TempUserActivityAnswersData::where('id', (int) $answerId)
+                    ->where('row_id', $row_id)->where('activity_id', $a_id)->where($seqFilter)->first();
+                $question = $answer ? Question::find($answer->question_id) : null;
+                $value = trim((string) $value);
+                if (!$answer || $value === '' || !$this->verifierAnswerChanged($question->question_type ?? '', $answer->user_answer, $value)) continue;
+
+                $oldAnswer = $answer->user_answer;
+                $answer->user_answer = $value;
+                $answer->edited_by_verifier = 1;
+                $answer->status = $new_status;
+                $answer->remark = $verifier_remark;
+                $answer->verified_by = $userId;
+                $answer->save();
+                $this->logVerifierEdit($answer, $oldAnswer, $value, $userId);
+            }
+
+            foreach ((array) $request->input('mr_answer', []) as $mrParentId => $byQuestion) {
+                foreach ((array) $byQuestion as $questionId => $value) {
+                    $value = trim((string) $value);
+                    if ($value === '' || !is_numeric($mrParentId) || !is_numeric($questionId)) continue;
+                    $isSubQuestion = QuestionSubQuestion::where('parent_question_id', (int) $mrParentId)
+                        ->where('child_question_id', (int) $questionId)->exists();
+                    $alreadyAnswered = TempUserActivityAnswersData::where($answerScope)->where('question_id', (int) $questionId)
+                        ->where('parent_context_id', (int) $mrParentId)->exists();
+                    if (!$isSubQuestion || $alreadyAnswered) continue;
+
+                    $answer = $this->newVerifierAnswer($row_id, $a_id, $activity_sequence, $g_id, (int) $questionId);
+                    $answer->parent_context_id = (int) $mrParentId;
+                    $answer->user_answer = $value;
+                    $answer->edited_by_verifier = 1;
+                    $answer->status = $new_status;
+                    $answer->remark = $verifier_remark;
+                    $answer->verified_by = $userId;
+                    $answer->save();
+                    $this->logVerifierEdit($answer, null, $value, $userId);
+                }
+            }
+        }
+
         // dd($new_status);
         foreach ($related_questions as $re_quest) {
 
@@ -1061,7 +1165,7 @@ class VerifierController extends Controller
         $remarks = RemarkMaster::where('project_id', $projectTemplateData->project_id)->where('status', 1)->get();
 
         $activity_check = Activity::find($a);
-        $related_questions = Question::where('activity_id', $activity_check->id)
+        $related_questions = Question::where('activity_id', $activity_check->id)->withoutOrphans()
             ->orderBy('question_sequence', 'asc')
             ->with(['subQuestions.childQuestion.subQuestions.childQuestion', 'subQuestions.childQuestion.getOptions'])
             ->get();
@@ -1190,7 +1294,7 @@ class VerifierController extends Controller
             $activity_group_info = ActivityGroup::findOrFail($g);
         }
 
-        $related_questions = Question::where('activity_id', $activity_check->id)->orderBy('question_sequence', 'asc')->get();
+        $related_questions = Question::where('activity_id', $activity_check->id)->withoutOrphans()->orderBy('question_sequence', 'asc')->get();
         //        dd($related_questions);
 
         $user_responses = TempUserActivityAnswersData::with('getUser')
@@ -1251,7 +1355,7 @@ class VerifierController extends Controller
         $remarks = RemarkMaster::where('project_id', $projectTemplateData->project_id)->where('status', 1)->get();
 
         $activity_check   = Activity::find($a);
-        $related_questions = Question::where('activity_id', $activity_check->id)
+        $related_questions = Question::where('activity_id', $activity_check->id)->withoutOrphans()
             ->orderBy('question_sequence', 'asc')
             ->with(['subQuestions.childQuestion.subQuestions.childQuestion', 'subQuestions.childQuestion.getOptions'])
             ->get();
@@ -1363,7 +1467,7 @@ class VerifierController extends Controller
             ->where('id', $related_values[0]->project_template_id)->first();
         $remarks             = RemarkMaster::where('project_id', $projectTemplateData->project_id)->where('status', 1)->get();
         $activity_check      = Activity::find($a);
-        $related_questions   = Question::where('activity_id', $activity_check->id)
+        $related_questions   = Question::where('activity_id', $activity_check->id)->withoutOrphans()
             ->orderBy('question_sequence', 'asc')
             ->with(['subQuestions.childQuestion.subQuestions.childQuestion', 'subQuestions.childQuestion.getOptions'])
             ->get();
@@ -1496,7 +1600,7 @@ class VerifierController extends Controller
             $activity = $pivot->getActivityInfo;
             if (!$activity) continue;
 
-            $relatedQuestions = Question::where('activity_id', $activity->id)
+            $relatedQuestions = Question::where('activity_id', $activity->id)->withoutOrphans()
                 ->orderBy('question_sequence', 'asc')
                 ->with(['subQuestions.childQuestion.subQuestions.childQuestion', 'subQuestions.childQuestion.getOptions'])
                 ->get();

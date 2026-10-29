@@ -29,6 +29,7 @@
                                                 <div class="col-xl-6 col-12">
                                                     <label class="form-label" for="heads_excel">Data Head Excel File<span class="txt-danger"></span></label>
                                                     <input class="form-control" id="heads_excel" name="heads_excel" type="file" required="" placeholder="">
+                                                    <small class="text-muted d-block mt-1">Type = File: that column's cells hold one file name (e.g. abc.pdf) or one link. The files are uploaded later on Template Documents, or downloaded from the links.</small>
                                                     @error('heads_excel')
                                                     <p class="text-red-500 text-xs mt-1">
                                                         {{$message}}

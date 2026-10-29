@@ -6,6 +6,7 @@ use App\Http\Controllers\API\DashboardController;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Api\QuestionAnsController;
 use App\Http\Controllers\API\TaskController;
+use App\Http\Controllers\API\TemplateDocumentController;
 use Illuminate\Support\Facades\Route;
  
 // Public routes
@@ -17,6 +18,9 @@ Route::post('authentication', [AuthenticationController::class, 'authentication'
 Route::post('forgotPassword',          [AuthenticationController::class, 'forgotPassword']);
 Route::post('verifyForgotPasswordOtp', [AuthenticationController::class, 'verifyForgotPasswordOtp']);
 Route::post('resetForgotPassword',     [AuthenticationController::class, 'resetForgotPassword']);
+
+// Template document download links given by the app APIs (signed and time-limited, no token needed)
+Route::get('documentDownload/{id}/{expires}/{signature}', [TemplateDocumentController::class, 'download'])->name('api.document_download');
 
 // Protected routes — require Bearer token (Sanctum)
 Route::middleware(['auth:sanctum'])->group(function () {
@@ -79,6 +83,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('storeTemplateData', [TaskController::class, 'storeTemplateHeaderValues'])->middleware('project.active');
     Route::get('getTemplateRowData/{row_id}', [TaskController::class, 'getTemplateRowData'])->middleware('project.active');
     Route::post('updateTemplateRowData', [TaskController::class, 'updateTemplateRowData'])->middleware('project.active');
+
+    // 12b. Files of a row's file columns, and a file itself
+    Route::get('rowDocuments/{row_id}', [TemplateDocumentController::class, 'rowDocuments'])->middleware('project.active');
+    Route::get('templateDocument/{id}', [TemplateDocumentController::class, 'file']);
 
     // 13. Repeat activity instances
     Route::post('activityInstances', [TaskController::class, 'activityInstances'])->middleware('project.active');

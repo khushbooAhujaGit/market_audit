@@ -53,6 +53,26 @@ class Question extends Model
         return $query->where('deleted_at', null);
     }
 
+    /**
+     * Leaves out orphaned sub-questions: flagged as a sub-question (is_parent = 0) but linked to
+     * no parent (no parent_question_id, not in question_sub_questions), e.g. left behind by an
+     * Excel upload. The app never shows them (TaskController::getAllQuestion), so screens and
+     * reports that list an activity's questions skip them too.
+     */
+    public function scopeWithoutOrphans($query)
+    {
+        $table = $query->getModel()->getTable();
+        return $query->where(function ($q) use ($table) {
+            $q->where("{$table}.is_parent", '!=', 0)
+                ->orWhereNull("{$table}.is_parent")
+                ->orWhereNotNull("{$table}.parent_question_id")
+                ->orWhereExists(function ($s) use ($table) {
+                    $s->selectRaw('1')->from('question_sub_questions')
+                        ->whereColumn('question_sub_questions.child_question_id', "{$table}.id");
+                });
+        });
+    }
+
     // Normalizes any spacing/casing variant of "yes/no" (Yes/No, yes /NO, YES / no, ...) to "Yes / No"
     public function getQuestionTypeAttribute($value)
     {

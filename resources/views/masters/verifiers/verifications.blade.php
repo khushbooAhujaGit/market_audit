@@ -14,6 +14,8 @@
                                             aria-expanded="false">{{ $activity_info->activity_name }}</button>
                                     <ul class="dropdown-menu dropdown-block">
                                         @foreach ($activity_group_info->get_group_activities as $group_activity)
+                                            {{-- Skip group entries whose activity was deleted (no activity to open) --}}
+                                            @continue(empty($group_activity->activityName))
                                             <li><a class="dropdown-item {{ $group_activity->activity_id == $activity_info->id ? 'active' : '' }}"
                                                    href="{{ route('activityGroup.verification.view', ['pt' => $projectTemplateInfo->id, 'g' => $activity_group_info->id, 's' => $group_activity->sequence, 'a' => $group_activity->activity_id]) }}">{{ $group_activity->activityName->activity_name }}</a>
                                             </li>
@@ -51,9 +53,19 @@
                                             @else
                                                 <span class="text-muted">Original</span>
                                             @endif
+                                            @if (!empty($projectdata->remark_missing))
+                                                <br><span class="badge bg-warning text-dark mt-1"
+                                                    title="Verified earlier but the remark was not saved. Open it, select the remark and Approve/Reject again.">Remark missing</span>
+                                            @endif
                                         </td>
                                         @foreach ($projectdata->templateNameValues as $project_row_data)
-                                            <td>{{ $project_row_data['value'] }}</td>
+                                            <td>
+                                                @if (!empty($project_row_data['document']))
+                                                    @include('masters.data_templates.partials.document_cell', ['doc' => $project_row_data['document']])
+                                                @else
+                                                    {{ $project_row_data['value'] }}
+                                                @endif
+                                            </td>
                                         @endforeach
                                     </tr>
                                 @endforeach

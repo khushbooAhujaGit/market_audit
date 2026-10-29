@@ -12,6 +12,26 @@
                             <a href="{{ route('project_template_data.export', $projectTemplate->id) }}">
                                 <button class="btn btn-primary ms-3 float-end">Export Data</button>
                             </a>
+
+                            {{-- Searches every page (server side), not only the rows shown --}}
+                            @php
+                                $searchKeep = request()->only(['company_id', 'zone_id', 'unit_id', 'project_id', 'template_name_id']);
+                                $searchTerm = trim((string) request('search', ''));
+                            @endphp
+                            <form method="GET" action="{{ url()->current() }}" class="d-flex flex-wrap align-items-center gap-2 mt-3">
+                                @foreach ($searchKeep as $keepName => $keepValue)
+                                    <input type="hidden" name="{{ $keepName }}" value="{{ $keepValue }}">
+                                @endforeach
+                                <input type="text" name="search" value="{{ $searchTerm }}" class="form-control" style="max-width:360px;"
+                                       placeholder="Search any column (e.g. outlet name, code, DB code)">
+                                <button type="submit" class="btn btn-primary">Search</button>
+                                @if ($searchTerm !== '')
+                                    <a href="{{ url()->current() . '?' . http_build_query($searchKeep) }}" class="btn btn-light">Clear</a>
+                                    <span class="text-muted small">
+                                        {{ number_format($projectTemplateDataGet->total()) }} {{ \Illuminate\Support\Str::plural('row', $projectTemplateDataGet->total()) }} found for "{{ $searchTerm }}"
+                                    </span>
+                                @endif
+                            </form>
                         @else
                             <h5>No Data Found</h5>
                         @endif
@@ -43,8 +63,12 @@
                                                     <i class="icon-pencil-alt fs-5"></i>
                                                 </a>
                                             </td>
-                                            @foreach ($projectTemplateData->decoded_json as $value)
-                                                <td>{{ $value }}</td>
+                                            @foreach ($projectTemplateData->decoded_json as $headId => $value)
+                                                @if (isset($fileHeadIds[$headId]) && \App\Services\TemplateDocuments::clean($value) !== '')
+                                                    <td>@include('masters.data_templates.partials.document_cell', ['doc' => \App\Services\TemplateDocuments::present($documents[\App\Services\TemplateDocuments::hashOf($value)] ?? null, $value)])</td>
+                                                @else
+                                                    <td>{{ $value }}</td>
+                                                @endif
                                             @endforeach
                                         </tr>
                                     @endforeach

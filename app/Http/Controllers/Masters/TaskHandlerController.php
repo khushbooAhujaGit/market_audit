@@ -1611,14 +1611,16 @@ class TaskHandlerController extends Controller
         }
 
         $row_data = ProjectTemplateNameValuesNew::find($row_id);
-        $getjsondata = json_decode($row_data->template_data_json);
+        $getjsondata = json_decode($row_data->template_data_json, true) ?: [];
+        $rowHeads = TemplateNameHead::whereIn('id', array_keys($getjsondata))->pluck('template_head_name', 'id');
+        // File columns: a link / thumbnail of the file instead of its name
+        $rowDocuments = \App\Services\TemplateDocuments::forRow($row_data);
         $template_name_values = [];
-        foreach ($getjsondata as $key => $data) {
-            $data = TemplateNameHead::find($key);
-            $value = $data;
+        foreach ($getjsondata as $key => $value) {
             $template_name_values[] = [
-                'template_head_name' => $data->template_head_name ?? "",
-                'value' => $data
+                'template_head_name' => $rowHeads[$key] ?? "",
+                'value' => $value,
+                'document' => $rowDocuments[$key] ?? null,
             ];
         }
 
@@ -3400,15 +3402,24 @@ class TaskHandlerController extends Controller
 
             DB::commit();
 
-            // Now safely reset status 3→0 for ALL records of every question
-            // that was part of this submission (whether value changed or not)
+            // A changed answer can hide a branch of conditional questions: their earlier answers go
+            $this->removeHiddenConditionalAnswers((int) $request->row_id, (int) $request->activity_id, $activitySequence);
+
+            // Submitted (status 1), same as the app's Submit: every draft of this activity
+            // instance (incl. auto-saved ones), and sent-back answers re-submitted in this form.
+            // Only submitted audits appear in the verifier queue.
+            TempUserActivityAnswersData::where('row_id', $request->row_id)
+                ->where('activity_id', $request->activity_id)
+                ->where($this->activitySequenceFilter($activitySequence))
+                ->where('status', 0)
+                ->update(['status' => 1]);
             if (!empty($processedQuestionIds)) {
                 TempUserActivityAnswersData::where('row_id', $request->row_id)
                     ->where('activity_id', $request->activity_id)
                     ->where($this->activitySequenceFilter($activitySequence))
                     ->whereIn('question_id', array_unique($processedQuestionIds))
                     ->where('status', 3)
-                    ->update(['status' => 0]);
+                    ->update(['status' => 1]);
             }
             // Process images in background
             if (!empty($imagesToProcess)) {
@@ -3508,6 +3519,56 @@ class TaskHandlerController extends Controller
 
 
     /**
+     * Removes saved answers of conditional questions that are no longer shown: their parent's
+     * answer (at any depth — a hidden parent hides its whole branch) no longer matches. Without
+     * this, changing e.g. Outlet Status from Open to Closed left the "Open" branch's answers in
+     * the verifier queue and reports. Only Yes / No and Dropdown parents (or "any answer") are
+     * judged; anything else is left as it is.
+     */
+    private function removeHiddenConditionalAnswers(int $rowId, int $activityId, int $activitySequence): void
+    {
+        $conditional = Question::where('activity_id', $activityId)
+            ->where('is_parent', 0)
+            ->whereNotNull('parent_question_id')
+            ->get(['id', 'parent_question_id', 'parent_value'])
+            ->keyBy('id');
+        if ($conditional->isEmpty()) return;
+
+        $parentTypes = Question::whereIn('id', $conditional->pluck('parent_question_id')->unique())->pluck('question_type', 'id');
+        $answerOf = TempUserActivityAnswersData::where('row_id', $rowId)
+            ->where('activity_id', $activityId)
+            ->where($this->activitySequenceFilter($activitySequence))
+            ->orderBy('id')
+            ->get(['question_id', 'user_answer'])
+            ->mapWithKeys(fn($a) => [$a->question_id => trim((string) $a->user_answer)]);   // latest per question
+
+        $shown = [];
+        $isShown = function ($questionId) use (&$isShown, &$shown, $conditional, $parentTypes, $answerOf) {
+            if (array_key_exists($questionId, $shown)) return $shown[$questionId];
+            $question = $conditional[$questionId] ?? null;
+            if (!$question) return $shown[$questionId] = true;   // not conditional: always shown
+            $shown[$questionId] = true;                            // guards a parent loop
+            $trigger = trim((string) $question->parent_value);
+            $parentType = $parentTypes[$question->parent_question_id] ?? null;
+            if ($trigger !== '__non_empty__' && !in_array($parentType, ['Yes / No', 'Dropdown'], true)) {
+                return $shown[$questionId] = true;                 // can't judge: keep
+            }
+            $parentAnswer = $answerOf[$question->parent_question_id] ?? '';
+            $matches = $trigger === '__non_empty__' ? $parentAnswer !== '' : ($parentAnswer !== '' && $parentAnswer === $trigger);
+            return $shown[$questionId] = $matches && $isShown($question->parent_question_id);
+        };
+
+        $hiddenIds = $conditional->keys()->reject(fn($id) => $isShown($id))->values()->all();
+        if ($hiddenIds) {
+            TempUserActivityAnswersData::where('row_id', $rowId)
+                ->where('activity_id', $activityId)
+                ->where($this->activitySequenceFilter($activitySequence))
+                ->whereIn('question_id', $hiddenIds)
+                ->delete();
+        }
+    }
+
+    /**
      * Returns a closure usable in ->where() that scopes a TempUserActivityAnswersData
      * query to a given "repeat instance" (activity_sequence).
      * 0 (default/original submission) matches both NULL and 0, since existing rows
@@ -3566,6 +3627,41 @@ class TaskHandlerController extends Controller
 
 
 
+
+    /**
+     * Outlet rows (candidates already limited to the user's assigned outlets) that belong to the
+     * distributor row: a value equal to the distributor value (as before), or the outlet's own
+     * reference head (e.g. DB Code) holding the distributor's master head value followed by extra
+     * text, e.g. "Disha Enteprises (SS)" (see OutletDistributorMatch).
+     */
+    private function outletsOfDistributorRow($candidateQuery, array $distributorRowData, $childTemplatesData, int $masterProjectTemplateId)
+    {
+        $distributorValues = array_values(array_filter(
+            array_map(fn($headId) => $distributorRowData[$headId] ?? null, $childTemplatesData->pluck('master_head_id')->filter()->unique()->all()),
+            fn($v) => trim((string) $v) !== ''
+        ));
+        $ownHeadById    = $childTemplatesData->pluck('own_reference_head_id', 'id');
+        $masterHeadById = $childTemplatesData->pluck('master_head_id', 'id');
+        $namesByHead = [];
+        foreach ($masterHeadById->filter()->unique() as $masterHeadId) {
+            $namesByHead[$masterHeadId] = \App\Services\OutletDistributorMatch::distributorValues($masterProjectTemplateId, $masterHeadId);
+        }
+
+        return $candidateQuery->get()->filter(function ($row) use ($distributorValues, $distributorRowData, $ownHeadById, $masterHeadById, $namesByHead) {
+            $json = json_decode($row->template_data_json, true) ?: [];
+            foreach ($distributorValues as $value) {
+                if (in_array($value, $json, true)) return true;
+            }
+            $ownHeadId    = $ownHeadById[$row->project_template_id] ?? null;
+            $masterHeadId = $masterHeadById[$row->project_template_id] ?? null;
+            if (!$ownHeadId || !$masterHeadId || !isset($distributorRowData[$masterHeadId])) return false;
+            return \App\Services\OutletDistributorMatch::belongsTo(
+                \App\Services\OutletDistributorMatch::headValue($json, $ownHeadId),
+                $distributorRowData[$masterHeadId],
+                $namesByHead[$masterHeadId] ?? []
+            );
+        })->values();
+    }
 
     public function userProjectActivityDistributorOutletData($row_id, $distributor_value)
     {
@@ -3726,17 +3822,10 @@ class TaskHandlerController extends Controller
             //     ->whereRaw("JSON_SEARCH(template_data_json, 'one', ?) IS NOT NULL", $distributors)
             //     ->get();
 
-            $outlet_items = ProjectTemplateNameValuesNew::whereIn('project_template_id', $childTemplatesIds)
-                ->whereIn('id', $getRowIds)
-                ->where(function ($query) use ($distributors) {
-                    foreach ($distributors as $value) {
-                        $query->orWhereRaw(
-                            "JSON_SEARCH(template_data_json, 'one', ?) IS NOT NULL",
-                            [$value]
-                        );
-                    }
-                })
-                ->get();
+            $outlet_items = $this->outletsOfDistributorRow(
+                ProjectTemplateNameValuesNew::whereIn('project_template_id', $childTemplatesIds)->whereIn('id', $getRowIds),
+                $templateData, $childTemplatesData, (int) $projectTemplate->id
+            );
 
             // dd($outlet_items, $childTemplatesIds, $getRowIds, $distributors, $row_id);
 
@@ -3757,17 +3846,10 @@ class TaskHandlerController extends Controller
             //     ->whereRaw("JSON_SEARCH(template_data_json, 'one', ?) IS NOT NULL", [$distributor_value])
             //     ->get();
 
-            $outlet_items = ProjectTemplateNameValuesNew::whereIn('project_template_id', $childTemplatesIds)
-                ->whereIn('id', $getRowIdsnew)
-                ->where(function ($query) use ($distributors) {
-                    foreach ($distributors as $value) {
-                        $query->orWhereRaw(
-                            "JSON_SEARCH(template_data_json, 'one', ?) IS NOT NULL",
-                            [$value]
-                        );
-                    }
-                })
-                ->get();
+            $outlet_items = $this->outletsOfDistributorRow(
+                ProjectTemplateNameValuesNew::whereIn('project_template_id', $childTemplatesIds)->whereIn('id', $getRowIdsnew),
+                $templateData, $childTemplatesData, (int) $projectTemplate->id
+            );
         }
 
 
@@ -3792,17 +3874,10 @@ class TaskHandlerController extends Controller
             //     ->whereRaw("JSON_SEARCH(template_data_json, 'one', ?) IS NOT NULL", [$distributor_value])
             //     ->get();
 
-            $outlet_items = ProjectTemplateNameValuesNew::whereIn('project_template_id', $childTemplatesIds)
-                ->whereIn('id', $getRowIds)
-                ->where(function ($query) use ($distributors) {
-                    foreach ($distributors as $value) {
-                        $query->orWhereRaw(
-                            "JSON_SEARCH(template_data_json, 'one', ?) IS NOT NULL",
-                            [$value]
-                        );
-                    }
-                })
-                ->get();
+            $outlet_items = $this->outletsOfDistributorRow(
+                ProjectTemplateNameValuesNew::whereIn('project_template_id', $childTemplatesIds)->whereIn('id', $getRowIds),
+                $templateData, $childTemplatesData, (int) $projectTemplate->id
+            );
         }
 
 

@@ -9,7 +9,7 @@ use App\Traits\HasEncryptedId;
 class TemplateNameHead extends Model
 {
     use HasFactory, HasEncryptedId;
-    protected $fillable = ['template_name_id', 'template_head_name', 'value_type', 'is_required'];
+    protected $fillable = ['template_name_id', 'template_head_name', 'value_type', 'is_required', 'is_file'];
 
      public function templatevalue(){
 

@@ -181,13 +181,72 @@ class DataAssignmentService
      * "Assign Outlets Also": give the auditor the child (outlet) template rows linked to
      * the given master rows, for every child template of the project.
      */
-    public static function assignOutletChildren($dataAssignId, $auditorId, ProjectTemplate $masterTemplate, array $masterRowIds, $activityGroupId, array $verifierIds = []): void
+    public static function assignOutletChildren($dataAssignId, $auditorId, ProjectTemplate $masterTemplate, array $masterRowIds, $activityGroupId, array $verifierIds = [], ?int $limitToVerifierId = null): void
+    {
+        foreach (self::outletChildren($masterTemplate, $masterRowIds) as $child) {
+            $childProject = $child['template'];
+            $childRowIds = $child['row_ids'];
+
+            // A verifier assigning their own auditors: only the outlet rows they were given
+            $allowed = function (int $activityId) use ($limitToVerifierId, $childProject, $childRowIds) {
+                return $limitToVerifierId === null
+                    ? $childRowIds
+                    : VerifierAssignment::ownRowIds($limitToVerifierId, (int) $childProject->id, $activityId, $childRowIds);
+            };
+            $withoutDataAllowed = $limitToVerifierId === null
+                || Verifier::where('user_id', $limitToVerifierId)->where('project_template_name_id', $childProject->id)->exists();
+
+            if ($childProject->activityType == 0) {
+                // Assign child template rows (same logic, different template)
+                $activityId = (int) $childProject->activity_group_name_id_or_activity_id;
+                if (!empty($childRowIds)) {
+                    self::assignRows($dataAssignId, $auditorId, $childProject->id, $activityId, $activityGroupId, $allowed($activityId), $verifierIds);
+                } else if ($childProject->with_data == 0 && $withoutDataAllowed) {
+                    self::assignWithoutData($dataAssignId, $auditorId, $childProject->id, $activityId, $activityGroupId, null, $verifierIds);
+                }
+            } else if ($childProject->activityType == 1) {
+                foreach ($child['activity_ids'] as $childActivityId) {
+                    if (!empty($childRowIds)) {
+                        self::assignRows($dataAssignId, $auditorId, $childProject->id, $childActivityId, $childProject->activity_group_name_id_or_activity_id, $allowed((int) $childActivityId), $verifierIds);
+                    } else if ($childProject->with_data == 0 && $withoutDataAllowed) {
+                        self::assignWithoutData($dataAssignId, $auditorId, $childProject->id, $childProject->activity_group_name_id_or_activity_id, $activityGroupId);
+                        // The call above records the group id as the activity; verifier links
+                        // need the real activity id that rows and the queue use.
+                        VerifierAssignment::linkAuditor($verifierIds, (int) $auditorId, (int) $childProject->id, (int) $childActivityId, true);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Verifier-only assignment: the verifiers get the rows (and, with outlets, the linked outlet
+     * rows) without an auditor; they assign their own auditors later.
+     */
+    public static function assignToVerifiersOnly(array $verifierIds, ProjectTemplate $projectTemplate, int $activityId, array $rowIds, bool $withOutlets): void
+    {
+        VerifierAssignment::assignRows($verifierIds, (int) $projectTemplate->id, $activityId, $rowIds);
+        if (!$withOutlets || empty($rowIds)) return;
+
+        foreach (self::outletChildren($projectTemplate, $rowIds) as $child) {
+            foreach ($child['activity_ids'] as $childActivityId) {
+                VerifierAssignment::assignRows($verifierIds, (int) $child['template']->id, (int) $childActivityId, $child['row_ids']);
+            }
+        }
+    }
+
+    /**
+     * Outlet (child) templates of a master template with the child rows linked to the given
+     * master rows: [['template' => row of project_templates, 'activity_ids' => [...], 'row_ids' => [...]], ...]
+     */
+    private static function outletChildren(ProjectTemplate $masterTemplate, array $masterRowIds): array
     {
         $childProjectTemplate = DB::table('project_templates')
             ->where('project_id', $masterTemplate->project_id)
             ->where('is_master', 0)
             ->get();
 
+        $children = [];
         foreach ($childProjectTemplate as $childProject) {
             //get master head id value
             $getHeadValues = DB::table('project_template_name_values_new')
@@ -197,38 +256,46 @@ class DataAssignmentService
                 )
                 ->toArray();
 
-            $childdatacheck = DB::table('project_template_name_values_new')
+            // Outlets of these distributors: a value equal to the distributor value (as before), or
+            // the outlet's own reference head (e.g. DB Code) holding the distributor value followed
+            // by extra text, e.g. "Disha Enteprises (SS)" (see OutletDistributorMatch).
+            $getHeadValues = array_values(array_filter($getHeadValues, fn($v) => trim((string) $v) !== ''));
+            $ownHeadId = $childProject->own_reference_head_id;
+            $distributorNames = OutletDistributorMatch::distributorValues((int) $masterTemplate->id, $childProject->master_head_id);
+
+            $childdatacheck = empty($getHeadValues) ? collect() : DB::table('project_template_name_values_new')
                 ->where('project_template_id', $childProject->id)
-                ->where(function ($query) use ($getHeadValues) {
+                ->where(function ($query) use ($getHeadValues, $ownHeadId) {
                     foreach ($getHeadValues as $value) {
                         $query->orWhereRaw("JSON_SEARCH(template_data_json, 'one', ?) IS NOT NULL", [$value]);
+                        if ($ownHeadId) {
+                            $query->orWhereRaw(
+                                "LOWER(JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$ownHeadId}\"'))) LIKE ?",
+                                [addcslashes(OutletDistributorMatch::normalize($value), '%_\\') . '%']
+                            );
+                        }
                     }
-                })->get();
-
-            $childRowIds = $childdatacheck->pluck('id')->toArray();
-
-            if ($childProject->activityType == 0) {
-                // Assign child template rows (same logic, different template)
-                if (!$childdatacheck->isEmpty()) {
-                    self::assignRows($dataAssignId, $auditorId, $childProject->id, $childProject->activity_group_name_id_or_activity_id, $activityGroupId, $childRowIds, $verifierIds);
-                } else if ($childProject->with_data == 0) {
-                    self::assignWithoutData($dataAssignId, $auditorId, $childProject->id, $childProject->activity_group_name_id_or_activity_id, $activityGroupId, null, $verifierIds);
-                }
-            } else if ($childProject->activityType == 1) {
-                $getActivityIds = ActivityGroupPivot::where('activity_group_id', $childProject->activity_group_name_id_or_activity_id)
-                    ->pluck('activity_id')->toArray();
-
-                foreach ($getActivityIds as $childActivityId) {
-                    if (!$childdatacheck->isEmpty()) {
-                        self::assignRows($dataAssignId, $auditorId, $childProject->id, $childActivityId, $childProject->activity_group_name_id_or_activity_id, $childRowIds, $verifierIds);
-                    } else if ($childProject->with_data == 0) {
-                        self::assignWithoutData($dataAssignId, $auditorId, $childProject->id, $childProject->activity_group_name_id_or_activity_id, $activityGroupId);
-                        // The call above records the group id as the activity; verifier links
-                        // need the real activity id that rows and the queue use.
-                        VerifierAssignment::linkAuditor($verifierIds, (int) $auditorId, (int) $childProject->id, (int) $childActivityId, true);
+                })->get()
+                ->filter(function ($row) use ($getHeadValues, $ownHeadId, $distributorNames) {
+                    $values = json_decode($row->template_data_json, true) ?: [];
+                    $ownValue = OutletDistributorMatch::headValue($values, $ownHeadId);
+                    foreach ($getHeadValues as $value) {
+                        if (in_array($value, $values, true)
+                            || ($ownHeadId && OutletDistributorMatch::belongsTo($ownValue, $value, $distributorNames))) {
+                            return true;
+                        }
                     }
-                }
-            }
+                    return false;
+                })->values();
+
+            $children[] = [
+                'template'     => $childProject,
+                'activity_ids' => $childProject->activityType == 1
+                    ? ActivityGroupPivot::where('activity_group_id', $childProject->activity_group_name_id_or_activity_id)->pluck('activity_id')->toArray()
+                    : [$childProject->activity_group_name_id_or_activity_id],
+                'row_ids'      => $childdatacheck->pluck('id')->toArray(),
+            ];
         }
+        return $children;
     }
 }

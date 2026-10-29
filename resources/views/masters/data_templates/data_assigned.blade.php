@@ -103,7 +103,6 @@
                                             <th>Template Head</th>
                                             <th>Assigned On</th>
                                             <th>Auditors</th>
-                                            <th class="d-none">Verify Users</th>
                                             <th>Action</th>
                                         </tr>
                                     </thead>
@@ -142,17 +141,25 @@
                                                     style="cursor:pointer;">
                                                     {{ $group->auditor_count }}
                                                 </td>
-                                                <td></td>
                                                 <td>
-                                                    <ul class="action">
-                                                        {{-- Deletes the template's assignment for every date, not only this one --}}
-                                                        <li class="delete"
-                                                            data-activity-ids="{{ json_encode($group->template_activity_ids) }}"
-                                                            data-project-template-id="{{ $group->project_template_id }}"
-                                                            title="Delete assignment for all activities and dates of this template"><i
-                                                                class="icon-trash"></i>
-                                                        </li>
-                                                    </ul>
+                                                    {{-- Verifier: rows given to them that none of their auditors has yet (on the template's newest line) --}}
+                                                    @if ($isVerifier && $group->pending && $project)
+                                                        <a class="btn btn-sm btn-primary"
+                                                            href="{{ route('assign_data.create') . '?prefill_project=' . $project->id . '&prefill_template=' . $group->project_template_id }}"
+                                                            title="{{ $group->pending['with_data'] ? $group->pending['rows'] . ' ' . \Illuminate\Support\Str::plural('row', $group->pending['rows']) . ' without your auditor' : 'No auditor of yours yet' }}">Assign
+                                                            Auditors</a>
+                                                    @endif
+                                                    @unless ($isVerifier)
+                                                        <ul class="action">
+                                                            {{-- Deletes the template's assignment for every date, not only this one --}}
+                                                            <li class="delete"
+                                                                data-activity-ids="{{ json_encode($group->template_activity_ids) }}"
+                                                                data-project-template-id="{{ $group->project_template_id }}"
+                                                                title="Delete assignment for all activities and dates of this template"><i
+                                                                    class="icon-trash"></i>
+                                                            </li>
+                                                        </ul>
+                                                    @endunless
                                                 </td>
                                             </tr>
                                         @endforeach
@@ -328,12 +335,15 @@
                         .filter(v => v)
                     )].join(', ');
 
-                    // Removes the auditor's assignment for this line's rows
-                    const deleteBtn = (line.audits || []).length
+                    // Removes the auditor's assignment for this line's rows (not on rows still waiting for an auditor)
+                    const deleteBtn = (line.audits || []).length && !line.pending
                         ? `<a class="text-danger open-delete-modal" data-line="${i}">
                                <i class="icon-trash"></i>
                            </a>`
                         : '';
+                    const userCell = line.pending
+                        ? '<span class="badge bg-warning text-dark">No auditor yet</span>'
+                        : escapeHtml(line.user_name);
 
                     const verifierCell = !line.verifier_name
                         ? '—'
@@ -343,12 +353,17 @@
 
                     const activityCell = (line.activity_names || []).map(escapeHtml).join(', ');
 
+                    // Outlet rows given with "Assign Outlets Also" are on their own line, labelled with their template
+                    const outletLabel = line.outlet_template
+                        ? `<span class="badge bg-info text-dark mb-1">Outlets · ${escapeHtml(line.outlet_template)}</span><br>`
+                        : '';
+
                     dt.row.add([
                         i + 1,
-                        escapeHtml(line.user_name),
+                        userCell,
                         activityCell,
                         verifierCell,
-                        combinedHeadValues ? escapeHtml(combinedHeadValues) : (line.verifier_name ? '<span class="text-muted">No rows yet</span>' : ''),
+                        outletLabel + (combinedHeadValues ? escapeHtml(combinedHeadValues) : (line.verifier_name ? '<span class="text-muted">No rows yet</span>' : '')),
                         deleteBtn
                     ]);
 
@@ -370,7 +385,7 @@
                 let options = '';
 
                 userAudits.forEach(v => {
-                    options += `<option value="${v.row_id}">${v.head_value}</option>`;
+                    options += `<option value="${escapeHtml(v.row_id)}">${escapeHtml(v.head_value)}</option>`;
                 });
 
                 $("#delete_audit_select").html(options).trigger('change');

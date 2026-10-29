@@ -20,6 +20,7 @@ use App\Http\Controllers\Masters\RemarkController;
 use App\Http\Controllers\Masters\SubjectDropdownController;
 use App\Http\Controllers\Masters\SubjectiveQuestionController;
 use App\Http\Controllers\Masters\TaskHandlerController;
+use App\Http\Controllers\Masters\TemplateDocumentController;
 use App\Http\Controllers\Masters\TemplateNameController;
 use App\Http\Controllers\Masters\UnitController;
 use App\Http\Controllers\Masters\VerifierController;
@@ -293,6 +294,7 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
         Route::post('/projects/toggle-complete',             'toggleComplete')->name('project.toggle_complete');
         Route::get('/upload/data',                           'upload_data_view')->name('projectData.upload');
         Route::post('projectData/store',                     'upload_project_template_data')->name('projectData.store');
+        Route::get('projectData/upload_errors/{token}',      'downloadDataUploadErrors')->name('projectData.uploadErrors');
         Route::post('projectData/add',                       'add_project_template_data')->name('projectData.add');
         Route::get('project_view/data',                      'project_upload_data_view')->name('project_template_uploaded_data.view');
         Route::match(['get','post'], 'project_template_render_uploaded/data', 'render_project_upload_data_view')->name('project_template_data.view');
@@ -326,6 +328,20 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
         Route::get('/export_data',                           'exportProjectData')->name('project.export');
         Route::get('/export_template_data/{projectTemplateID}', 'exportProjectTemplateData')->name('project_template_data.export');
         Route::get('/get_all_template_data',                 'getNewProjectTemplateValues')->name('get_all_template_data');
+    });
+
+    // ── Template Documents (files named / linked in file columns) ─────────────
+    Route::prefix('template_documents')->controller(TemplateDocumentController::class)->group(function () {
+        Route::middleware('permission:Upload Project Data')->group(function () {
+            Route::get('/',          'index')->name('template_documents.index');
+            Route::get('/templates', 'templates')->name('template_documents.templates');
+            Route::get('/list',      'list')->name('template_documents.list');
+            Route::post('/upload',   'upload')->name('template_documents.upload');
+            Route::post('/retry',  'retry')->name('template_documents.retry');
+        });
+        // Opening a file: admins, and auditors / verifiers of the template (checked in the controller)
+        Route::get('/file/{document}', 'file')->name('template_documents.file');
+        Route::get('/row_zip/{row}',   'rowZip')->name('template_documents.row_zip');
     });
 
     // ── Project Templates ─────────────────────────────────────────────────────

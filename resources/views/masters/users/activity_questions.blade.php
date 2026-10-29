@@ -366,6 +366,24 @@
                                     </div>
                                 </div>
 
+                                {{-- Files of this row's file columns (uploaded by admin or downloaded from links) --}}
+                                @php $rowDocs = collect($template_name_values)->filter(fn($v) => !empty($v['document'])); @endphp
+                                @if ($rowDocs->isNotEmpty())
+                                    <div class="col-12 mb-3">
+                                        <div class="border rounded p-2">
+                                            <div class="fw-semibold mb-2">Documents</div>
+                                            <div class="d-flex flex-wrap gap-3">
+                                                @foreach ($rowDocs as $row_val)
+                                                    <div>
+                                                        <div class="small text-muted">{{ $row_val['template_head_name'] }}</div>
+                                                        @include('masters.data_templates.partials.document_cell', ['doc' => $row_val['document']])
+                                                    </div>
+                                                @endforeach
+                                            </div>
+                                        </div>
+                                    </div>
+                                @endif
+
                                 <div class="col-12 col-md-12 col-lg-6 mb-3">
                                     <div class="card">
                                         <div class="table-card table-responsive">
@@ -530,9 +548,31 @@
                                                     $subCodeMap = [];
                                                     $parentSeq = 0;
 
-                                                    $subLinksByParent = $related_questions
-                                                        ->flatMap(fn($q) => $q->subQuestions ?? collect())
+                                                    // Sub-question links of every Multi Response of the activity, child
+                                                    // Multi Responses included (their links aren't on the top-level models)
+                                                    $subLinksByParent = \App\Models\QuestionSubQuestion::with('childQuestion')
+                                                        ->whereIn('parent_question_id', $related_questions->pluck('id'))
+                                                        ->orderBy('sequence')
+                                                        ->get()
                                                         ->groupBy('parent_question_id');
+
+                                                    // A Multi Response's sub-questions: letters (Q004a, Q004b); a child Multi
+                                                    // Response's sub-questions: numbers (Q004d1, Q004d2)
+                                                    $assignSubCodes = function ($groupId, $groupCode, $level) use (&$assignSubCodes, &$subCodeMap, &$questionCodeMap, $subLinksByParent) {
+                                                        $n = 0;
+                                                        foreach ($subLinksByParent[$groupId] ?? collect() as $_sl) {
+                                                            $child = $_sl->childQuestion ?? null;
+                                                            if (!$child) continue;
+                                                            $n++; // only for sub-questions that actually exist
+                                                            $code = $groupCode . ($level === 1 ? chr(96 + $n) : $n);
+                                                            // Per-parent code: the same question can sit in several Multi Responses
+                                                            $subCodeMap[$groupId][$child->id] = $code;
+                                                            $questionCodeMap[$child->id] ??= $code;
+                                                            if ($child->question_type === 'Multi Response') {
+                                                                $assignSubCodes($child->id, $code, $level + 1);
+                                                            }
+                                                        }
+                                                    };
 
                                                     foreach ($related_questions as $_cq) {
                                                         if ($_cq->is_parent != 1) continue;
@@ -540,30 +580,25 @@
                                                         $parentSeq++;
                                                         $parentCode = 'Q' . str_pad($parentSeq, 3, '0', STR_PAD_LEFT);
                                                         $questionCodeMap[$_cq->id] = $parentCode;
+                                                        $assignSubCodes($_cq->id, $parentCode, 1);
+                                                    }
 
-                                                        $alpha = 0;
-                                                        foreach (($subLinksByParent[$_cq->id] ?? collect())->sortBy('sequence') as $_sl) {
-                                                            $child = $_sl->childQuestion ?? null;
-                                                            if ($child) {
-                                                                $alpha++; // only increment for sub-questions that actually exist
-                                                                // Per-parent code: each MR parent gets its own codes for its sub-questions
-                                                                $subCodeMap[$_cq->id][$child->id] = $parentCode . chr(96 + $alpha);
-                                                                // Also store in flat map for first occurrence (fallback for non-shared questions)
-                                                                if (!isset($questionCodeMap[$child->id])) {
-                                                                    $questionCodeMap[$child->id] = $parentCode . chr(96 + $alpha);
-                                                                }
+                                                    // Conditional questions (is_parent=0 with parent_question_id): the next letter
+                                                    // under their parent (Q003a, Q003b …), at every level — repeated until a
+                                                    // conditional question under another conditional one has its parent's code
+                                                    $conditionalCount = [];
+                                                    do {
+                                                        $assigned = false;
+                                                        foreach ($related_questions as $_cq) {
+                                                            if (isset($questionCodeMap[$_cq->id])) continue;
+                                                            if ($_cq->is_parent == 0 && $_cq->parent_question_id && isset($questionCodeMap[$_cq->parent_question_id])) {
+                                                                $parentId = $_cq->parent_question_id;
+                                                                $conditionalCount[$parentId] = ($conditionalCount[$parentId] ?? 0) + 1;
+                                                                $questionCodeMap[$_cq->id] = $questionCodeMap[$parentId] . chr(96 + $conditionalCount[$parentId]);
+                                                                $assigned = true;
                                                             }
                                                         }
-                                                    }
-                                                    // Conditional children (is_parent=0 with parent_question_id) that aren't MR sub-questions
-                                                    foreach ($related_questions as $_cq) {
-                                                        if (isset($questionCodeMap[$_cq->id])) continue;
-                                                        if ($_cq->is_parent == 0 && $_cq->parent_question_id && isset($questionCodeMap[$_cq->parent_question_id])) {
-                                                            $baseCode = $questionCodeMap[$_cq->parent_question_id];
-                                                            $alpha = count($subLinksByParent[$_cq->parent_question_id] ?? collect()) + 1;
-                                                            $questionCodeMap[$_cq->id] = $baseCode . chr(96 + $alpha);
-                                                        }
-                                                    }
+                                                    } while ($assigned);
                                                 @endphp
 
                                                 <table class="table mb-0">
@@ -2258,9 +2293,16 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                 return;
             }
 
+            // Image question shown on the page: not inside a hidden block, e.g. a conditional
+            // question whose answer wasn't chosen (the file input itself is always d-none)
+            function isImageQuestionShown(el) {
+                return $(el).parent().closest('.d-none').length === 0;
+            }
+
             // 2a. Validate required single-image (Camera/Gallery) slots
             var missingSingle = false;
             $form.find('.single-img-input[data-img-required="true"]').each(function () {
+                if (!isImageQuestionShown(this)) return;
                 var hasFile   = this.files && this.files[0];
                 var hasHidden = $form.find('input[name="' + $(this).attr('name') + '_existing"]').length > 0;
                 if (!hasFile && !hasHidden) missingSingle = true;
@@ -2273,6 +2315,7 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
             // 2b. Validate required multi-image slots
             var missingImg = false;
             $form.find('.multi-image-required').each(function () {
+                if (!isImageQuestionShown(this)) return;
                 var qid = $(this).data('qid');
                 var wrapper = $form.find('.multi-image-wrapper[data-qid="' + qid + '"]');
                 var hasSaved = wrapper.find('input[name="multi_images_' + qid + '[]"]').length > 0;

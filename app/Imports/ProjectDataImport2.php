@@ -68,8 +68,10 @@ class ProjectDataImport2
         $templateHeads = DB::table('template_name_heads')
             ->where('template_name_id', $templateInfo->id)
             ->orderBy('id')
-            ->select('id', 'template_head_name')
+            ->select('id', 'template_head_name', 'is_file')
             ->get();
+        // File columns keep their slashes and colons (links); see TemplateDocuments::clean()
+        $fileHeadIds = $templateHeads->where('is_file', 1)->pluck('id')->flip();
 
         // Compare headers ignoring stray/double spaces and invisible characters (BOM,
         // non-breaking space) on BOTH sides: template column names often keep the
@@ -117,6 +119,9 @@ class ProjectDataImport2
         $rows          = [];
         $chunkSize     = 500;
         $totalInserted = 0;
+        // Rows identical (all columns) to one already in the template, or earlier in this file, are skipped
+        $seenKeys          = \App\Services\TemplateRowDuplicates::existingKeys($projectTemplateId, $templateHeadIds);
+        $duplicatesSkipped = 0;
 
         try {
             while (($data = fgetcsv($inHandle)) !== false) {
@@ -129,9 +134,18 @@ class ProjectDataImport2
                 $templateJson = [];
                 foreach ($data as $i => $value) {
                     if (!isset($templateHeadIds[$i])) continue;
-                    $value = $this->sanitizeCsvValue($value);
+                    $value = $fileHeadIds->has($templateHeadIds[$i])
+                        ? \App\Services\TemplateDocuments::clean($value)
+                        : $this->sanitizeCsvValue($value);
                     $templateJson[$templateHeadIds[$i]] = $value;
                 }
+
+                $rowKey = \App\Services\TemplateRowDuplicates::key($templateJson, $templateHeadIds);
+                if (isset($seenKeys[$rowKey])) {
+                    $duplicatesSkipped++;
+                    continue;
+                }
+                $seenKeys[$rowKey] = true;
 
                 // Match against master values for Distributor -> Outlet mapping
                 $matchedMasterId = null;
@@ -142,6 +156,14 @@ class ProjectDataImport2
                             $matchedMasterId = $found['id'];
                             break;
                         }
+                    }
+                    // Own reference head holding the distributor value plus extra text, e.g. "Disha Enteprises (SS)"
+                    if (!$matchedMasterId && !empty($projectTemplateInfo->own_reference_head_id)) {
+                        $best = \App\Services\OutletDistributorMatch::bestMatch(
+                            $templateJson[$projectTemplateInfo->own_reference_head_id] ?? null,
+                            collect($masterTemplateValuesData)->pluck('value')->filter()->unique()
+                        );
+                        $matchedMasterId = $best !== null ? (collect($masterTemplateValuesData)->firstWhere('value', $best)['id'] ?? null) : null;
                     }
                 }
 
@@ -186,11 +208,12 @@ class ProjectDataImport2
         fclose($inHandle);
 
         $duration = microtime(true) - $startTime;
-        Log::info('import done - ' . $totalInserted . ' rows in ' . round($duration, 2) . 's');
+        Log::info('import done - ' . $totalInserted . ' rows in ' . round($duration, 2) . 's, ' . $duplicatesSkipped . ' duplicates skipped');
 
         return [
             'success' => true,
-            'message' => "Successfully uploaded {$totalInserted} rows in " . round($duration, 2) . " seconds",
+            'message' => "Successfully uploaded {$totalInserted} rows in " . round($duration, 2) . " seconds"
+                . ($duplicatesSkipped ? ". Skipped {$duplicatesSkipped} duplicate " . ($duplicatesSkipped === 1 ? 'row' : 'rows') . " (same data in every column as a row already uploaded or earlier in the file)." : ''),
         ];
     }
 

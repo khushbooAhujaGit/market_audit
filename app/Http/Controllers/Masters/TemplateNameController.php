@@ -38,13 +38,16 @@ class TemplateNameController extends Controller
                 'mimetypes:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // Ensure the file is an XLSX
             ],
         ]);
-        $newTemplate = TemplateName::create($formFields);
+        $dataArray = [];
         if ($request->hasFile('heads_excel')) {
-            $file = $request->file('heads_excel');
-            $data = Excel::toCollection(Excel::class, $file)->first();
-            $dataArray = $data->toArray();
+            $dataArray = Excel::toCollection(Excel::class, $request->file('heads_excel'))->first()->toArray();
             // Remove the first element from the array
             array_shift($dataArray);
+            $dataArray = array_values(array_filter($dataArray, fn($row) => trim((string) ($row[1] ?? '')) !== ''));
+        }
+
+        $newTemplate = TemplateName::create($formFields);
+        if ($request->hasFile('heads_excel')) {
             //khushboo 12-05-25
             // Create the two new arrays
             // $newArray1 = ['add_key1', 'key_code'];
@@ -64,8 +67,9 @@ class TemplateNameController extends Controller
             // //khushboo 17-05-25
             
             foreach ($dataArray as $template_head) {
-                // Columns 2 (Type), 3 (Options), and 4 (Required) are all optional — older-format
+                // Columns 2 (Type), 3 (Options) and 4 (Required) are all optional — older-format
                 // uploads with only Sr/Name still work unchanged: free text, no options, not required.
+                // Type "File" marks a file column (stored as free text with is_file).
                 $valueType  = $this->normalizeHeadValueType($template_head[2] ?? null);
                 $isRequired = $this->normalizeHeadRequired($template_head[4] ?? null);
 
@@ -74,6 +78,7 @@ class TemplateNameController extends Controller
                     'template_head_name' => $template_head[1],
                     'value_type'         => $valueType,
                     'is_required'        => $isRequired,
+                    'is_file'            => $this->isFileType($template_head[2] ?? null),
                 ]);
 
                 if ($valueType === 'dropdown') {
@@ -114,6 +119,14 @@ class TemplateNameController extends Controller
     {
         $t = strtolower(trim((string) $rawRequired));
         return in_array($t, ['yes', 'y', 'true', '1', 'required'], true);
+    }
+
+    /**
+     * Type "File" in the heads sheet: the column's cells hold one file name (e.g. abc.pdf) or one link.
+     */
+    private function isFileType($rawType): bool
+    {
+        return in_array(strtolower(trim((string) $rawType)), ['file', 'files', 'file column'], true);
     }
 
     public function edit($id)
@@ -162,6 +175,18 @@ class TemplateNameController extends Controller
         foreach ($heads as $ci => $head) {
             $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($ci + 1);
             $sheet->setCellValue($col . '1', $head->template_head_name);
+
+            // File column: a tip on each cell (one file name or one link)
+            if ($head->is_file) {
+                for ($row = 2; $row <= 500; $row++) {
+                    $tip = $sheet->getCell($col . $row)->getDataValidation();
+                    $tip->setType(DataValidation::TYPE_NONE);
+                    $tip->setShowInputMessage(true);
+                    $tip->setPromptTitle('File column');
+                    $tip->setPrompt('One file name (e.g. abc.pdf) or one http(s) link. Allowed: ' . implode(', ', \App\Services\TemplateDocuments::EXTENSIONS) . ', up to 25 MB.');
+                }
+                continue;
+            }
 
             if (!in_array($head->value_type, ['dropdown', 'yes_no'])) {
                 continue;

@@ -29,8 +29,12 @@ class AuditorAssignedDataController extends Controller
         $currentUserRole = $currentUser->getRoleNames()->first();
 
         $scope = DataAssign::query();
+        $verifierId = $currentUserRole == 'Verifier' ? (int) $currentUser->id : null;
         if (in_array($currentUserRole, ['Super Admin', 'Admin'])) {
             // Full visibility
+        } elseif ($verifierId) {
+            // Assignments an admin gave the verifier (with or without auditors) and the ones they made
+            $scope->whereIn('id', DB::table('verifier_data_assigns')->where('verifier_id', $verifierId)->select('data_assign_id'));
         } elseif ($currentUserRole == 'Agency') {
             $getProjectDataWithAgency = Project::where('is_agency_required', 1)->first();
             if (!empty($getProjectDataWithAgency)) {
@@ -49,7 +53,7 @@ class AuditorAssignedDataController extends Controller
         // One list row per assigned project template and assignment date (newest date first),
         // showing the activities and auditors assigned on that date.
         $data_assigned_values = DB::query()
-            ->fromSub($this->assignmentEvents()->whereIn('d.id', (clone $scope)->select('id')), 'e')
+            ->fromSub($this->assignmentEvents((clone $scope)->select('id'), $verifierId), 'e')
             ->select(
                 'project_template_id',
                 'assigned_on',
@@ -80,8 +84,44 @@ class AuditorAssignedDataController extends Controller
         $activityNames = \App\Models\Activity::whereIn('id', $assignsByTemplate->flatten()->pluck('activity_id')->unique())
             ->pluck('activity_name', 'id');
 
-        $data_assigned_values->getCollection()->transform(function ($group) use ($firstAssigns, $assignsByTemplate, $activityNames) {
-            $group->setRelation('assign', $firstAssigns->get($group->first_id));
+        // Rows given to verifiers that no auditor has yet, per template (shown on the template's newest line)
+        $pendingByTemplate = [];
+        $withoutData = DB::table('project_templates')->whereIn('id', $templateIds)->where('with_data', 0)->pluck('id')->flip();
+        foreach ($templateIds as $templateId) {
+            $assigns = $assignsByTemplate->get($templateId) ?? collect();
+            $activityIds = $assigns->pluck('activity_id')->map(fn($id) => (int) $id)->unique()->values()->all();
+            $holders = DB::table('verifier_data_assigns')->whereIn('data_assign_id', $assigns->pluck('id'))
+                ->when($verifierId, fn($q) => $q->where('verifier_id', $verifierId))
+                ->distinct()->pluck('verifier_id')->map(fn($id) => (int) $id)->all();
+
+            $byVerifier = [];
+            if ($withoutData->has($templateId)) {
+                foreach ($holders as $holder) {
+                    if (\App\Services\VerifierAssignment::activitiesWithoutAuditor($holder, (int) $templateId, $activityIds)) $byVerifier[$holder] = 0;
+                }
+            } else {
+                foreach (\App\Services\VerifierAssignment::pendingRowsByVerifier((int) $templateId, $activityIds, $holders) as $holder => $rowsByActivity) {
+                    $byVerifier[$holder] = collect($rowsByActivity)->flatten()->unique()->count();
+                }
+            }
+            if ($byVerifier) {
+                $pendingByTemplate[$templateId] = [
+                    'rows'      => array_sum($byVerifier),
+                    'with_data' => !$withoutData->has($templateId),
+                    'verifiers' => User::whereIn('id', array_keys($byVerifier))->orderBy('name')->pluck('name')->all(),
+                ];
+            }
+        }
+        $shownPending = [];
+
+        $data_assigned_values->getCollection()->transform(function ($group) use ($firstAssigns, $assignsByTemplate, $activityNames, $pendingByTemplate, &$shownPending) {
+            $group->pending = null;
+            if (isset($pendingByTemplate[$group->project_template_id]) && !isset($shownPending[$group->project_template_id])) {
+                $group->pending = $pendingByTemplate[$group->project_template_id];
+                $shownPending[$group->project_template_id] = true;
+            }
+            // Plain query rows (grouped by template + date), not models: set the first assignment as a property
+            $group->assign = $firstAssigns->get($group->first_id);
             $dateActivityIds = array_map('intval', explode(',', (string) $group->activity_ids));
             $group->activities = ($assignsByTemplate->get($group->project_template_id) ?? collect())
                 ->pluck('activity_id')
@@ -94,7 +134,8 @@ class AuditorAssignedDataController extends Controller
             return $group;
         });
 
-        return view('masters.data_templates.data_assigned', compact('data_assigned_values'));
+        $isVerifier = (bool) $verifierId;
+        return view('masters.data_templates.data_assigned', compact('data_assigned_values', 'isVerifier'));
     }
 
     /**
@@ -102,18 +143,39 @@ class AuditorAssignedDataController extends Controller
      * activity_id, user_id, common_id, row_id, assigned_on). An auditor without rows yet, and a
      * data assignment without auditors, appear once with a NULL row_id. Rows of a template without
      * data are created by the auditor, so they count from the date the auditor was assigned.
+     * Giving an assignment to a verifier (with or without auditors) also counts on that date.
+     * $verifierId: only that verifier's auditors (verifier_auditor_links) and assignments.
      */
-    private function assignmentEvents()
+    private function assignmentEvents($dataAssignIds, ?int $verifierId = null)
     {
-        return DB::table('data_assigns as d')
+        $rows = DB::table('data_assigns as d')
             ->leftJoin('user_activity_data_assigns as u', 'u.data_assign_id', '=', 'd.id')
             ->leftJoin('project_templates as pt', 'pt.id', '=', 'u.project_template_id')
             ->leftJoin('user_audit_assigns as a', 'a.common_id', '=', 'u.common_id')
+            ->whereIn('d.id', $dataAssignIds)
+            ->when($verifierId, fn($q) => $q->where(fn($w) => $w->whereNull('u.user_id')->orWhereExists(fn($e) => $e
+                ->select(DB::raw(1))
+                ->from('verifier_auditor_links as l')
+                ->where('l.verifier_id', $verifierId)
+                ->whereColumn('l.auditor_id', 'u.user_id')
+                ->whereColumn('l.project_template_id', 'u.project_template_id')
+                ->whereColumn('l.activity_id', 'u.activity_id'))))
             ->select('d.id as data_assign_id', 'd.project_template_id', 'd.activity_id', 'u.user_id', 'u.common_id', 'a.row_id')
             ->selectRaw('DATE(CASE
                 WHEN u.id IS NULL THEN d.created_at
                 WHEN a.id IS NULL OR pt.with_data = 0 THEN u.created_at
                 ELSE a.created_at END) as assigned_on');
+
+        // Assignments recorded before verifiers were tracked per assignment have no assigned_by
+        $givenToVerifiers = DB::table('verifier_data_assigns as vd')
+            ->join('data_assigns as d', 'd.id', '=', 'vd.data_assign_id')
+            ->whereIn('d.id', $dataAssignIds)
+            ->whereNotNull('vd.assigned_by')
+            ->when($verifierId, fn($q) => $q->where('vd.verifier_id', $verifierId))
+            ->select('d.id as data_assign_id', 'd.project_template_id', 'd.activity_id')
+            ->selectRaw('NULL as user_id, NULL as common_id, NULL as row_id, DATE(vd.updated_at) as assigned_on');
+
+        return $rows->unionAll($givenToVerifiers);
     }
 
     public function get_assigned_auditors(Request $request)
@@ -181,7 +243,7 @@ class AuditorAssignedDataController extends Controller
             $assignedOn = $request->input('assigned_on');
             if ($assignedOn && preg_match('/^\d{4}-\d{2}-\d{2}$/', $assignedOn)) {
                 $rowIdsByCommon = DB::query()
-                    ->fromSub($this->assignmentEvents()->whereIn('d.id', $siblingIds), 'e')
+                    ->fromSub($this->assignmentEvents($siblingIds), 'e')
                     ->where('assigned_on', $assignedOn)
                     ->whereNotNull('common_id')
                     ->get(['common_id', 'row_id'])
@@ -195,7 +257,7 @@ class AuditorAssignedDataController extends Controller
             /* Get all assigned records across all matching DataAssigns */
             $user_list = UserActivityDataAssign::whereIn('data_assign_id', $siblingIds)
                 ->when($rowIdsByCommon !== null, fn($q) => $q->whereIn('common_id', $rowIdsByCommon->keys()))
-                ->select('user_id', 'common_id', 'activity_id')
+                ->select('user_id', 'common_id', 'activity_id', 'project_template_id')
                 ->with('get_user_info')
                 ->get()
                 ->groupBy('user_id');
@@ -205,6 +267,13 @@ class AuditorAssignedDataController extends Controller
             $headId = $getAssignedData->template_name_head_id;
 
             $templateId = (int) $request->project_template_id;
+
+            // Main/Sub Header and name of every template of the project (rows can also be outlet rows)
+            $rowHeaders = DB::table('project_templates as pt')
+                ->leftJoin('template_names as tn', 'tn.id', '=', 'pt.template_name_id')
+                ->where('pt.project_id', DB::table('project_templates')->where('id', $templateId ?: $getAssignedData->project_template_id)->value('project_id'))
+                ->get(['pt.id', 'pt.main_header', 'pt.sub_header', 'tn.template_name'])
+                ->keyBy('id');
 
             $activityNames = \App\Models\Activity::whereIn('id', $user_list->flatten()->pluck('activity_id')->unique())
                 ->pluck('activity_name', 'id');
@@ -225,6 +294,9 @@ class AuditorAssignedDataController extends Controller
                 ->unique('user_id')
                 ->groupBy('legacy_max_row_id');
 
+            // A Verifier sees only the lines they verify
+            $viewerVerifierId = Auth::user()->hasRole('Verifier') ? (int) Auth::id() : null;
+
             // Lines are built per auditor + activity (one per row-wise verifier, one for the
             // template-wise verifiers, one for rows with no verifier), then lines identical
             // across activities are merged into one line listing all of those activities.
@@ -233,15 +305,7 @@ class AuditorAssignedDataController extends Controller
 
                 $allRowIds = $rowIdsFor($records->pluck('common_id')->unique());
 
-                $rows = DB::table('project_template_name_values_new')
-                    ->whereIn('id', $allRowIds)
-                    ->select(
-                        'id as row_id',
-                        'project_template_id',
-                        DB::raw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"{$headId}\"')) as head_value")
-                    )
-                    ->get()
-                    ->keyBy('row_id');
+                $rows = $this->rowLabels($allRowIds, $headId, $rowHeaders);
 
                 $merged = [];
                 foreach ($records->groupBy('activity_id') as $activityId => $activityRecords) {
@@ -255,6 +319,19 @@ class AuditorAssignedDataController extends Controller
                         ->distinct()
                         ->get()
                         ->groupBy('user_id');
+
+                    // Only this auditor's own verifiers: the same rows can also be given to another
+                    // verifier for their own auditors (e.g. on another date). Auditors with no verifier
+                    // links (older assignments) keep every verifier of their rows.
+                    $auditorVerifierIds = DB::table('verifier_auditor_links')
+                        ->where('auditor_id', $userId)
+                        ->whereIn('project_template_id', $activityRecords->pluck('project_template_id')->unique())
+                        ->where('activity_id', $activityId)
+                        ->pluck('verifier_id')
+                        ->all();
+                    if ($auditorVerifierIds) {
+                        $rowsByVerifier = $rowsByVerifier->only($auditorVerifierIds);
+                    }
 
                     // Verifiers linked to this auditor (template without data) before any rows exist.
                     $linkedVerifiers = DB::table('verifier_auditor_links as l')
@@ -290,11 +367,16 @@ class AuditorAssignedDataController extends Controller
                             'verifier_name' => $legacyVerifiers->pluck('name')->sort(SORT_NATURAL | SORT_FLAG_CASE)->implode(', '),
                             'template_wise' => true,
                             'row_ids'       => $legacyRowIds,
+                            'legacy_ids'    => $legacyVerifiers->pluck('user_id')->map(fn($id) => (int) $id)->all(),
                         ];
                     }
                     $unverifiedRowIds = array_values(array_diff($rowIds, $coveredRowIds));
                     if (!empty($unverifiedRowIds) || empty($lines)) {
                         $lines[] = ['verifier_id' => null, 'verifier_name' => null, 'template_wise' => false, 'row_ids' => $unverifiedRowIds];
+                    }
+                    if ($viewerVerifierId) {
+                        $lines = array_values(array_filter($lines, fn($line) => (int) $line['verifier_id'] === $viewerVerifierId
+                            || in_array($viewerVerifierId, $line['legacy_ids'] ?? [], true)));
                     }
 
                     foreach ($lines as $line) {
@@ -312,6 +394,7 @@ class AuditorAssignedDataController extends Controller
                     'verifier_id'    => $l['verifier_id'],
                     'verifier_name'  => $l['verifier_name'],
                     'template_wise'  => $l['template_wise'],
+                    'pending'        => false,
                     'activity_names' => collect($l['activity_ids'])->map(fn($id) => $activityNames[$id] ?? 'Activity #' . $id)->unique()->values(),
                     'audits'         => $rows->only($l['row_ids'])->values(),
                 ], array_values($merged));
@@ -319,10 +402,17 @@ class AuditorAssignedDataController extends Controller
                 // Row-wise verifiers first, then template-wise, then rows with no verifier
                 $rank = fn($l) => $l['template_wise'] ? 1 : ($l['verifier_name'] === null ? 2 : 0);
                 usort($lines, fn($a, $b) => [$rank($a), strtolower((string) $a['verifier_name'])] <=> [$rank($b), strtolower((string) $b['verifier_name'])]);
-                array_push($assignedValues, ...$lines);
+                array_push($assignedValues, ...$this->splitOutletLines($lines, $templateId ?: (int) $getAssignedData->project_template_id, $rowHeaders));
             }
 
             usort($assignedValues, fn($a, $b) => strcasecmp((string) $a['user_name'], (string) $b['user_name']));
+
+            // Rows given to a verifier that no auditor has yet, after the auditors' lines
+            array_push($assignedValues, ...$this->splitOutletLines(
+                $this->pendingLines($siblingIds, $templateId, $headId, $rowHeaders, $viewerVerifierId),
+                $templateId ?: (int) $getAssignedData->project_template_id,
+                $rowHeaders
+            ));
         }
         return response()->json([
             'message'        => "Success",
@@ -332,8 +422,105 @@ class AuditorAssignedDataController extends Controller
     }
 
 
+    /**
+     * Each row shown by its own template's Main Header (and Sub Header), e.g. the outlet name: the
+     * column the assignment was made on (e.g. "Status") is often the same for every row and can't
+     * tell rows apart. Keyed by row id.
+     */
+    private function rowLabels(array $rowIds, $headId, $rowHeaders)
+    {
+        return DB::table('project_template_name_values_new')
+            ->whereIn('id', $rowIds)
+            ->get(['id', 'project_template_id', 'template_data_json'])
+            ->map(function ($row) use ($headId, $rowHeaders) {
+                $data   = json_decode($row->template_data_json, true) ?: [];
+                $pt     = $rowHeaders[$row->project_template_id] ?? null;
+                $main   = trim((string) ($pt ? ($data[$pt->main_header] ?? '') : ''));
+                $sub    = trim((string) ($pt ? ($data[$pt->sub_header] ?? '') : ''));
+                $chosen = trim((string) ($data[$headId] ?? ''));
+                $label  = $main !== '' ? $main . ($sub !== '' && $sub !== $main ? " ({$sub})" : '') : ($chosen !== '' ? $chosen : "Row {$row->id}");
+                return (object) [
+                    'row_id'              => $row->id,
+                    'project_template_id' => $row->project_template_id,
+                    'head_value'          => $label,
+                    'assigned_value'      => $chosen,
+                ];
+            })
+            ->keyBy('row_id');
+    }
+
+    /**
+     * Outlet rows ("Assign Outlets Also") are stored under the distributor's assignment: each popup line
+     * is split by template, the distributor rows first, then one line per outlet template (outlet_template
+     * = its name; null on the distributor line).
+     */
+    private function splitOutletLines(array $lines, int $templateId, $rowHeaders): array
+    {
+        $out = [];
+        foreach ($lines as $line) {
+            $byTemplate = collect($line['audits'])->groupBy(fn($audit) => (int) $audit->project_template_id);
+            if ($byTemplate->keys()->diff([$templateId])->isEmpty()) {
+                $out[] = $line + ['outlet_template' => null];
+                continue;
+            }
+            $order = $byTemplate->keys()->sortBy(fn($id) => [$id === $templateId ? 0 : 1, (string) ($rowHeaders[$id]->template_name ?? '')]);
+            foreach ($order as $id) {
+                $out[] = array_merge($line, [
+                    'audits'          => $byTemplate[$id]->values(),
+                    'outlet_template' => $id === $templateId ? null : ($rowHeaders[$id]->template_name ?? 'Template #' . $id),
+                ]);
+            }
+        }
+        return $out;
+    }
+
+    /** Popup lines for rows given to verifiers of these assignments that no auditor has yet. */
+    private function pendingLines(array $dataAssignIds, int $templateId, $headId, $rowHeaders, ?int $verifierId): array
+    {
+        $activityIds = DataAssign::whereIn('id', $dataAssignIds)->pluck('activity_id')->map(fn($id) => (int) $id)->unique()->values()->all();
+        $holders = DB::table('verifier_data_assigns')->whereIn('data_assign_id', $dataAssignIds)
+            ->when($verifierId, fn($q) => $q->where('verifier_id', $verifierId))
+            ->distinct()->pluck('verifier_id')->map(fn($id) => (int) $id)->all();
+        if (!$holders || !$activityIds) return [];
+
+        $withData = (int) DB::table('project_templates')->where('id', $templateId)->value('with_data') !== 0;
+        $names = User::whereIn('id', $holders)->pluck('name', 'id');
+        $activityNames = \App\Models\Activity::whereIn('id', $activityIds)->pluck('activity_name', 'id');
+        $activityLabels = fn($ids) => collect($ids)->map(fn($id) => $activityNames[$id] ?? 'Activity #' . $id)->unique()->values();
+
+        $lines = [];
+        if ($withData) {
+            foreach (\App\Services\VerifierAssignment::pendingRowsByVerifier($templateId, $activityIds, $holders) as $holder => $rowsByActivity) {
+                $rowIds = collect($rowsByActivity)->flatten()->unique()->values()->all();
+                $lines[] = [
+                    'user_id' => null, 'user_name' => null, 'pending' => true,
+                    'verifier_id' => $holder, 'verifier_name' => $names[$holder] ?? null, 'template_wise' => false,
+                    'activity_names' => $activityLabels(array_keys($rowsByActivity)),
+                    'audits' => $this->rowLabels($rowIds, $headId, $rowHeaders)->values(),
+                ];
+            }
+        } else {
+            foreach ($holders as $holder) {
+                $missing = \App\Services\VerifierAssignment::activitiesWithoutAuditor($holder, $templateId, $activityIds);
+                if (!$missing) continue;
+                $lines[] = [
+                    'user_id' => null, 'user_name' => null, 'pending' => true,
+                    'verifier_id' => $holder, 'verifier_name' => $names[$holder] ?? null, 'template_wise' => false,
+                    'activity_names' => $activityLabels($missing),
+                    'audits' => [],
+                ];
+            }
+        }
+
+        usort($lines, fn($a, $b) => strcasecmp((string) $a['verifier_name'], (string) $b['verifier_name']));
+        return $lines;
+    }
+
     public function assignedDestroy(Request $request)
     {
+        // Deleting a whole template assignment is for admins; a verifier removes their auditors' rows in the popup
+        abort_if(Auth::user()->hasRole('Verifier'), 403, 'Verifiers cannot delete a whole assignment.');
+
         // activity_ids: every activity of the template (list row delete);
         // activity_id: a single activity (original request format).
         $request->validate([
@@ -396,6 +583,7 @@ class AuditorAssignedDataController extends Controller
             \App\Services\VerifierAssignment::forgetActivity((int) $pair->project_template_id, (int) $pair->activity_id);
         }
 
+        DB::table('verifier_data_assigns')->whereIn('data_assign_id', $dataAssignIds)->delete();
         DataAssign::whereIn('id', $dataAssignIds)->delete();
 
         // Delete rows and activity answer data for THIS template only
@@ -464,6 +652,12 @@ class AuditorAssignedDataController extends Controller
 
             $rowIds = $request->row_ids;
             $userId = $request->user_id;
+
+            // A Verifier removes rows only from their own auditors
+            if (Auth::user()->hasRole('Verifier')
+                && !User::where('id', $userId)->where('verifier_user_id', Auth::id())->exists()) {
+                return response()->json(['status' => 'error', 'message' => 'You can remove rows only from your own auditors.']);
+            }
 
             // Get common_ids for that user
             $commonIds = UserActivityDataAssign::where('user_id', $userId)

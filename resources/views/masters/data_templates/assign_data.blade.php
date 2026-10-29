@@ -51,6 +51,13 @@
                             </h4>
                         </div>
                         <div class="card-body">
+                            @if ($errors->any())
+                                <div class="alert alert-danger" style="white-space:normal;">
+                                    @foreach ($errors->all() as $assignError)
+                                        <div>{{ $assignError }}</div>
+                                    @endforeach
+                                </div>
+                            @endif
                             <div class="horizontal-wizard-wrapper">
                                 <div class="row g-3">
                                     <div class="col-12">
@@ -205,7 +212,7 @@
                                                     {{-- //khushboo 31-03-2024 --}}
 
                                                     <div class="col-xl-3 col-sm-3">
-                                                        <label class="form-label" for="auditor_names">User
+                                                        <label class="form-label" for="auditor_names">Auditor
                                                             Name</label>
                                                         <select class="form-select" id="auditor_names"
                                                             name="auditor_names[]" required="" multiple="">
@@ -221,6 +228,10 @@
                                                                 @endif
                                                             @endforeach
                                                         </select>
+                                                        @if (!in_array($currentUserRole, ['Verifier', 'Agency']))
+                                                            <small class="text-muted d-block mt-1">Leave empty and pick a
+                                                                verifier to assign the data to the verifier only.</small>
+                                                        @endif
                                                         @error('auditor_names')
                                                             <p class="text-red-500 text-xs mt-1">
                                                                 {{ $message }}
@@ -232,7 +243,7 @@
                                                             Name</label>
                                                         <select class="form-select" id="verify_users_names"
                                                             name="verify_users_names[]" multiple="" required="">
-                                                            <option selected="" disabled="" value="">
+                                                            <option @if ($currentUserRole != 'Verifier') selected="" @endif disabled="" value="">
                                                                 Choose...
                                                             </option>
                                                             @if (empty($verifier_users))
@@ -247,7 +258,7 @@
                                                             @else
                                                                 @foreach ($verifier_users as $user)
                                                                     <option value="{{ $user->id }}"
-                                                                        @if (is_array(old('verify_users_names')) && in_array($user->id, old('verify_users_names'))) selected @endif>
+                                                                        @if ($currentUserRole == 'Verifier' || (is_array(old('verify_users_names')) && in_array($user->id, old('verify_users_names')))) selected @endif>
                                                                         {{ $user->name }}
                                                                     </option>
                                                                 @endforeach
@@ -316,6 +327,17 @@
     <script>
         const currentUserRole = "{{ $currentUserRole }}";
         console.log(currentUserRole);
+        // Verifier: activities of the template an admin assigned to them (null for other roles)
+        let verifierActivityIds = null;
+        // "Assign Auditors" from the Data Assigned List: project, template and pending values to preselect
+        const assignPrefill = (function() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('prefill_project') ? {
+                project: params.get('prefill_project'),
+                template: params.get('prefill_template'),
+                pending: true
+            } : null;
+        })();
 
         $('#project_id').select2();
 
@@ -347,6 +369,7 @@
                             "id": template_name_head_id,
                             "project_id": project_id,
                             "template_name_id": template_name_id,
+                            "for_assign": 1,
                         },
                         success: function(response) {
                             console.log(response)
@@ -360,6 +383,10 @@
                                     $('#template_name_head_values').attr('required', true);
                                 }
                                 render_head_values(response.related_head_values);
+                                if (assignPrefill && assignPrefill.pending) {
+                                    $('#template_name_head_values').val(response.pending_head_values || []).trigger('change');
+                                    assignPrefill.pending = false;
+                                }
                             }
                         }
                     })
@@ -419,18 +446,15 @@
                     success: function(response) {
                         console.log(response);
                         document.querySelector('.loader-backdrop').style.display = 'none';
-                        if (response.auditor_user_list == '' && response.verifier_users == '') {
-                            alert('Data Already Assigned for Selected Agency Users');
-                            return;
-                        }
+                        // No popup when the agency has no users left to show: the boxes say so instead
                         $('#verify_users_names').html('');
                         if (response.message) {
-                            $('#verify_users_names').html(response.verifier_users);
-                            $('#auditor_names').html(response.auditor_user_list);
+                            $('#verify_users_names').html(response.verifier_users || '<option disabled value="">No verifiers available</option>');
+                            $('#auditor_names').html(response.auditor_user_list || '<option disabled value="">No auditors available</option>');
                             $('#auditor_names').prop('required', false);
                             $('#verify_users_names').prop('required', false);
                         } else {
-                            $$("#error_message").html(`${response.message}`);
+                            $("#error_message").html(`${response.message}`);
                             $("#errorMessage_modal").modal('show');
                             $('#auditor_names').prop('required', true);
                             $('#verify_users_names').prop('required', true);
@@ -483,13 +507,15 @@
                         data: {
                             "_token": "{{ csrf_token() }}", // Add the CSRF token to the data
                             "t_id": template_name_id,
-                            "p_id": project_id
+                            "p_id": project_id,
+                            "for_assign": 1
                         },
                         success: function(response) {
                             console.log(response);
                             document.querySelector('.loader-backdrop').style.display = 'none';
                             if (response.message == "success") {
                                 const pro_temp = response.projectTemplate;
+                                verifierActivityIds = response.verifier_activity_ids || null;
                                 //for empty data check
                                 if (pro_temp['with_data'] == 0 && !response.head_data_exists) {
                                     $('#template_head_values').addClass('d-none');
@@ -540,7 +566,7 @@
                                     $('#template_name_head_id').val(assignedData
                                         .template_name_head_id);
                                     // Instead of disabling, make it readonly
-                                    if (currentUserRole == 'Agency') {
+                                    if (currentUserRole == 'Agency' || currentUserRole == 'Verifier') {
                                         if ($('#template_name_head_id').val() == '') {
 
                                             $('#template_name_head_id').prop('readonly', false);
@@ -617,6 +643,8 @@
                 let activity_idArr = [];
 
                 $.each(activities, function(index1, group_activity) {
+                    // A Verifier gets only the activities assigned to them
+                    if (verifierActivityIds && $.inArray(Number(group_activity.activity_id), verifierActivityIds) === -1) return;
                     activity_idArr.push(group_activity.activity_id);
                 });
 
@@ -784,6 +812,10 @@
                         .attr('data-id', projectTemplate.id) // Add your desired data-id here
                     );
                 });
+                if (assignPrefill && assignPrefill.template) {
+                    template_name_select.find(`option[data-id="${assignPrefill.template}"]`).prop('selected', true);
+                    assignPrefill.template = null;
+                }
                 $("#template_name_id").trigger('change');
             }
 
@@ -798,7 +830,8 @@
                         type: "POST",
                         data: {
                             "_token": "{{ csrf_token() }}", // Add the CSRF token to the data
-                            "id": selectedProjectId
+                            "id": selectedProjectId,
+                            "for_assign": 1
                         },
                         success: function(response) {
                             // document.querySelector('.loader-backdrop').style.display = 'none';
@@ -865,7 +898,9 @@
                 }
             })
 
-
+            if (assignPrefill) {
+                $('#project_id').val(assignPrefill.project).trigger('change');
+            }
 
 
         })

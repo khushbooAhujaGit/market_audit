@@ -159,7 +159,16 @@ class UserController extends Controller
         $currentUser = User::find(Auth::user()->id);
         $currentUserRole = $currentUser->getRoleNames()->first();
         $agencies = User::role('agency')->get();
-        return view('role-permission.user.edit', compact('agencies', 'user', 'roles', 'currentUserRole'));
+        // Admin-side users can map an Auditor to a Verifier (shows on that Verifier's user list)
+        $canMapVerifier = self::canMapVerifier($currentUserRole);
+        $verifiers = $canMapVerifier ? User::role('Verifier')->orderBy('name')->get(['id', 'name', 'email']) : collect();
+        return view('role-permission.user.edit', compact('agencies', 'user', 'roles', 'currentUserRole', 'canMapVerifier', 'verifiers'));
+    }
+
+    /** Verifiers and agencies can't reassign users to a verifier; admin-side roles can. */
+    private static function canMapVerifier(?string $currentUserRole): bool
+    {
+        return !in_array($currentUserRole, ['Verifier', 'Agency'], true);
     }
 
     public function update(Request $request, User $user)
@@ -185,7 +194,18 @@ class UserController extends Controller
             'state' => "nullable|string|max:255",
             'pincode' => ['nullable', 'digits:6', 'numeric'],
             'roles' => 'required',
+            'verifier_select' => 'nullable|integer|exists:users,id',
         ]);
+
+        $currentUserRole = User::find(Auth::id())->getRoleNames()->first();
+        if ($request->filled('verifier_select') && !User::role('Verifier')->whereKey($request->verifier_select)->exists()) {
+            return redirect()->back()->withErrors(['verifier_select' => 'Please select a valid verifier.'])->withInput();
+        }
+        // Same role limits as Add User: a Verifier can't make a Super Admin, an Agency only Auditor/Verifier
+        if (($currentUserRole == 'Verifier' && $request->roles == 'Super Admin')
+            || ($currentUserRole == 'Agency' && !in_array($request->roles, ['Auditor', 'Verifier'], true))) {
+            return redirect()->back()->withErrors(['roles' => 'You are not allowed to give this role.'])->withInput();
+        }
 
         //khushboo 29-05-25
         $agency_user_id = null;
@@ -215,6 +235,11 @@ class UserController extends Controller
                 'password' => Hash::make($request->password),
                 'password_info' => $request->password,
             ];
+        }
+        // Verifier mapping (Auditors only, set from the admin side). Clearing the dropdown removes
+        // the mapping; for other roles, or when edited by a Verifier/Agency, it is left unchanged.
+        if (self::canMapVerifier($currentUserRole) && $request->roles == 'Auditor' && $request->has('verifier_select')) {
+            $data['verifier_user_id'] = $request->filled('verifier_select') ? (int) $request->verifier_select : null;
         }
         $user->update($data);
         $user->syncRoles($request->roles);
@@ -447,49 +472,113 @@ class UserController extends Controller
             ]);
         }
 
+        // Assigning on an outlet (child) template directly: every selected outlet must belong to a
+        // parent row (own template head value matching a master template head value), otherwise
+        // nothing is assigned.
+        if ($projectTemplate_info->is_master == 0 && !empty($request->template_name_head_values)) {
+            $selectedRowIds = [];
+            foreach ((array) $request->template_name_head_values as $template_name_head_v) {
+                $selectedRowIds = array_merge($selectedRowIds, DB::table('project_template_name_values_new')
+                    ->where('project_template_id', $projectTemplate_info->id)
+                    ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"$request->template_name_head_id\"')) = ?", [trim($template_name_head_v)])
+                    ->pluck('id')->all());
+            }
+            $parentCheck = \App\Services\OutletDistributorMatch::rowsWithoutParent($projectTemplate_info, array_unique($selectedRowIds));
+            if (!empty($parentCheck['missing'])) {
+                return redirect()->back()
+                    ->withErrors(['assign' => \App\Services\OutletDistributorMatch::missingParentMessage($parentCheck)])
+                    ->withInput();
+            }
+        }
+
         // Verifiers get the same rows as the auditors assigned in this submission, and are
         // linked to those auditors for rows the auditors create later.
         $verifierIds = array_values(array_filter(array_map('intval', (array) $request->verify_users_names)));
+        $isVerifier = Auth::user()->hasRole('Verifier');
+        // A Verifier assigning data is always its only verifier, and can assign only the auditors it created.
+        if ($isVerifier) {
+            $verifierIds = [Auth::id()];
+            $ownAuditorIds = User::where('verifier_user_id', Auth::id())->role('Auditor')->pluck('id')->all();
+            $request->merge(['auditor_names' => array_values(array_intersect(array_map('intval', (array) $request->auditor_names), $ownAuditorIds))]);
+        }
+        $auditorIds = array_values(array_filter(array_map('intval', (array) $request->auditor_names)));
 
-        DataAssignmentService::ensureTemplateVerifiers($verifierIds, $projectTemplate_info, $is_outlet_assinged == 1);
+        // Without auditors (admin only) the data goes to the selected verifiers; they assign their auditors later.
+        $isAgency = Auth::user()->hasRole('Agency');
+        if (empty($auditorIds) && ($isVerifier || $isAgency || empty($verifierIds))) {
+            return redirect()->back()->withErrors(['auditor_names' => $isVerifier || $isAgency
+                ? 'Select at least one auditor.'
+                : 'Select at least one auditor, or only a verifier to assign the data to the verifier.'])->withInput();
+        }
 
         $project_info = Project::findOrFail($request->project_id);
         $act_group_id = $request->activity_group_name_id ?? null;
         $project_template_id = $projectTemplate_info;
         $companyUserId = $request->has('company_user') ? $request->company_user : null;
         $agencyId = $request->has('agency_list') ? $request->agency_list : null;
+        $activityIds = array_values(array_unique(array_map('intval', (array) $request->activity_id)));
 
-        foreach ($request->activity_id as $selected_activities) {
+        $rowIdsOfValue = fn($value) => DB::table('project_template_name_values_new')
+            ->where('project_template_id', $project_template_id->id)
+            ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"$request->template_name_head_id\"')) = ?", [trim($value)])
+            ->pluck('id')
+            ->toArray();
+
+        // A Verifier assigns only inside what an admin gave them: that template, its activities and rows.
+        if ($isVerifier) {
+            $given = \App\Services\VerifierAssignment::assignedDataAssigns(Auth::id())->where('project_template_id', $project_template_id->id);
+            $activityIds = array_values(array_intersect($activityIds, $given->pluck('activity_id')->map(fn($id) => (int) $id)->all()));
+            if ($given->isEmpty() || empty($activityIds)) {
+                return redirect()->back()->withErrors(['assign' => 'This project, template or activity has not been assigned to you.'])->withInput();
+            }
+            if (!empty($request->template_name_head_values)) {
+                $selectedRowIds = collect($request->template_name_head_values)->flatMap($rowIdsOfValue)->unique()->values()->all();
+                $ownRows = collect($activityIds)->flatMap(fn($activityId) => \App\Services\VerifierAssignment::ownRowIds(Auth::id(), $project_template_id->id, $activityId, $selectedRowIds));
+                if ($ownRows->isEmpty()) {
+                    return redirect()->back()->withErrors(['assign' => 'None of the selected values are assigned to you.'])->withInput();
+                }
+            }
+            // Same agency / company user as the admin's assignment
+            $agencyId = $agencyId ?: $given->first()->agency_id;
+            $companyUserId = $companyUserId ?: $given->first()->company_user_id;
+        }
+
+        DataAssignmentService::ensureTemplateVerifiers($verifierIds, $projectTemplate_info, $is_outlet_assinged == 1);
+
+        foreach ($activityIds as $selected_activities) {
             $dataAssign = DataAssignmentService::findOrCreateDataAssign(
                 $project_info, (int) $selected_activities, $act_group_id ? (int) $act_group_id : null,
                 (int) $request->template_name_id, $project_template_id->id, $request->template_name_head_id,
                 $is_outlet_assinged, $companyUserId, $agencyId
             );
+            \App\Services\VerifierAssignment::recordDataAssign($verifierIds, $dataAssign->id, Auth::id());
 
             if (isset($request->template_name_head_values) && !empty($request->template_name_head_values)) {
                 foreach ($request->template_name_head_values as $template_name_head_v) {
-                    if (!empty($request->auditor_names)) {
-                        $rowIds = DB::table('project_template_name_values_new')
-                            ->where('project_template_id', $project_template_id->id)
-                            ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(template_data_json, '$.\"$request->template_name_head_id\"')) = ?", [trim($template_name_head_v)])
-                            ->pluck('id')
-                            ->toArray();
+                    $rowIds = $rowIdsOfValue($template_name_head_v);
+                    if ($isVerifier) {
+                        $rowIds = \App\Services\VerifierAssignment::ownRowIds(Auth::id(), $project_template_id->id, (int) $selected_activities, $rowIds);
+                    }
 
-                        foreach ($request->auditor_names as $auditor_id) {
-                            DataAssignmentService::assignRows($dataAssign->id, $auditor_id, $project_template_id->id, $selected_activities, $act_group_id, $rowIds, $verifierIds);
+                    if (empty($auditorIds)) {
+                        DataAssignmentService::assignToVerifiersOnly($verifierIds, $project_template_id, (int) $selected_activities, $rowIds, $is_outlet_assinged == 1);
+                        continue;
+                    }
 
-                            // If outlet assigned → also the child (outlet) template rows
-                            if ($is_outlet_assinged == 1) {
-                                DataAssignmentService::assignOutletChildren($dataAssign->id, $auditor_id, $project_template_id, $rowIds, $act_group_id, $verifierIds);
-                            }
+                    foreach ($auditorIds as $auditor_id) {
+                        DataAssignmentService::assignRows($dataAssign->id, $auditor_id, $project_template_id->id, $selected_activities, $act_group_id, $rowIds, $verifierIds);
+
+                        // If outlet assigned → also the child (outlet) template rows
+                        if ($is_outlet_assinged == 1) {
+                            DataAssignmentService::assignOutletChildren($dataAssign->id, $auditor_id, $project_template_id, $rowIds, $act_group_id, $verifierIds, $isVerifier ? Auth::id() : null);
                         }
                     }
                 }
             }
             else if ($projectTemplate_info->with_data == 0) {
                 //if template data not uploaded
-                if (!empty($request->auditor_names)) {
-                    foreach ($request->auditor_names as $auditor_id) {
+                if (!empty($auditorIds)) {
+                    foreach ($auditorIds as $auditor_id) {
                         DataAssignmentService::assignWithoutData($dataAssign->id, $auditor_id, $project_template_id->id, $selected_activities, $act_group_id, null, $verifierIds);
                         if ($is_outlet_assinged == 1) {
                             $childProjectTemplate = DB::table('project_templates')

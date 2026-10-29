@@ -121,7 +121,13 @@
                                                     <tr>
                                                         <td class="fw-medium">
                                                             {{ $r_values['name'] }}</td>
-                                                        <td>{{ $r_values['value'] }}</td>
+                                                        <td>
+                                                            @if (!empty($r_values['document']))
+                                                                @include('masters.data_templates.partials.document_cell', ['doc' => $r_values['document']])
+                                                            @else
+                                                                {{ $r_values['value'] }}
+                                                            @endif
+                                                        </td>
                                                     </tr>
                                                 @endforeach
 
@@ -177,6 +183,12 @@
                                                     <span class="badge bg-secondary fs-6" style="cursor:pointer;" id="edit_answers">Edit</span>
                                                 </span>
                                             </h5>
+                                            @if (!empty($remarkMissing))
+                                                <div class="alert alert-warning py-2 px-3 mx-2 mb-2 small">
+                                                    <strong>Remark missing:</strong> this audit was already verified, but its Verifier Remark was not saved.
+                                                    Select the remark below (or type it under "Other Remark") and click Approve or Reject again.
+                                                </div>
+                                            @endif
                                             <div id="edit_answers_hint" class="alert alert-warning py-2 px-3 mx-2 mb-2 small d-none">
                                                 Editing answers: your changes are saved only when you click <strong>Approve</strong>.
                                                 Reject and Sendback keep the auditor's answers. The auditor's original answer is kept and shown under each edited question.
@@ -1660,9 +1672,10 @@
 
         $('#verify_remark').on('change', function() {
             if ($('#verify_remark').val() == 'other') {
-                $('#other_remark').removeClass('d-none');
+                // "Other Remark" needs its text (otherwise the word "other" would be saved)
+                $('#other_remark').removeClass('d-none').prop('required', true);
             } else {
-                $('#other_remark').addClass('d-none');
+                $('#other_remark').addClass('d-none').prop('required', false);
                 $('#other_remark').val('');
             }
         })
@@ -2368,6 +2381,9 @@
                     timer: 1500
                 });
             @endif
+            @if (session()->has('error'))
+                Swal.fire({ icon: "error", title: @json(session('error')) });
+            @endif
 
             const multiSelects = @json($selectArrIds);
             $.each(multiSelects, function(index, select_id) {
@@ -2387,6 +2403,7 @@
                 // Enable all file and date inputs by removing disabled
                 $('input[disabled], select[disabled]').removeAttr('disabled');
                 $(".subjective_ques").removeClass('d-none');
+                $(".verifier-blank-answer").removeClass('d-none');
                 $("#edit_answers_hint").removeClass('d-none');
             })
 

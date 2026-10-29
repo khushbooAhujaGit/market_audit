@@ -138,6 +138,7 @@
                                 @endcan
                                 @can('Upload Project Data')
                                     <li><a href="{{ route('projectData.upload') }}">Upload</a></li>
+                                    <li><a href="{{ route('template_documents.index') }}">Template Documents</a></li>
                                 @endcan
                                 @can('View Project Data')
                                     <li><a href="{{ route('project_template_uploaded_data.view') }}">View Project data</a>
