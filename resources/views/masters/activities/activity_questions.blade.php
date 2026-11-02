@@ -346,7 +346,7 @@
                 $orderedRows[] = [
                     'q'         => $pq, 'code' => $code, 'depth' => 0,
                     'kind'      => $isMR ? 'mr' : 'parent', 'sub_count' => $subCount,
-                    'seq'       => $pq->question_sequence ?? $codeSeq,
+                    'seq'       => filter_var(env('SEQ_ALWAYS_SEQUENTIAL', true), FILTER_VALIDATE_BOOLEAN) ? $codeSeq : ($pq->question_sequence ?? $codeSeq),
                 ];
 
                 $appendChildren($pq, $code, 1);
@@ -967,6 +967,10 @@
                 var pid = {{ (int)$cq->parent_question_id }};
                 var qid = {{ (int)$cq->id }};
                 var val = @json($cq->parent_value); // safe JSON encoding
+                // Several sub-questions may share the same trigger value of a parent. Revert to
+                // "one sub-question per trigger value" by setting ALLOW_SHARED_TRIGGER_VALUES=false
+                // in .env (or restore activity_questions.blade.php.bak_before_shared_triggers).
+                if (@json(filter_var(env('ALLOW_SHARED_TRIGGER_VALUES', true), FILTER_VALIDATE_BOOLEAN))) return;
                 if (!_usedTriggerValues[pid]) _usedTriggerValues[pid] = [];
                 _usedTriggerValues[pid].push({ qid: qid, val: val });
             })();
@@ -1291,7 +1295,8 @@
                 res.links.forEach(function (link) {
                     var row = $('<div class="d-flex align-items-center gap-2 mb-1 border rounded p-2 bg-light trigger-row">')
                         .attr('data-parent-id', link.parent_id)
-                        .attr('data-trigger-value', link.trigger_value || '');
+                        .attr('data-trigger-value', link.trigger_value || '')
+                        .attr('data-ptype', link.parent_type || '');
                     row.append('<span class="flex-grow-1 small"><strong>' + $('<div>').text(link.parent_name).html() + '</strong></span>');
                     row.append('<span class="badge bg-info text-dark small" style="min-width:90px;">' +
                         (link.trigger_value ? 'When: ' + $('<div>').text(link.trigger_value).html() : 'Always') + '</span>');
@@ -2177,6 +2182,9 @@
         $('#parent_triggers_list .trigger-row').each(function() {
             var pid = $(this).data('parent-id');
             var tv  = $(this).data('trigger-value');
+            // Condition toggled off: drop loaded Yes/No / Dropdown conditional rows (MR rows are kept).
+            var _pt = $(this).attr('data-ptype');
+            if (isEdit && !_depOn && @json(filter_var(env('UNCONDITION_RESTORES_PARENT', true), FILTER_VALIDATE_BOOLEAN)) && (_pt === 'Yes / No' || _pt === 'Dropdown')) return;
             if (pid) parent_triggers.push({ parent_id: pid, trigger_value: (tv !== undefined && tv !== '') ? tv : null });
         });
 
@@ -2221,6 +2229,7 @@
             data.id = editingId;
             data.question_sequence = null; // keep existing sequence
             data.parent_triggers = parent_triggers;
+            if (!_depOn) data.clear_conditional = 1;
             ajaxConfig = {
                 url:  '{{ route("question.update") }}',
                 type: 'PUT',
@@ -2310,6 +2319,12 @@
                 }).then(function(r) { return r.json(); })
                   .then(function(d) {
                       if (d.status !== 'success') console.warn('Reorder failed', d);
+                      if (d.seq) {
+                          table.querySelectorAll('tbody.q-group').forEach(function(tbody) {
+                              var c = tbody.querySelector('tr:first-child td:nth-child(2)');
+                              if (c && d.seq[tbody.dataset.id]) c.textContent = d.seq[tbody.dataset.id];
+                          });
+                      }
                   }).catch(function(e) { console.error('Reorder error', e); });
             }
         });

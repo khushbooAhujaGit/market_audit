@@ -1931,7 +1931,15 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                 }
             });
 
-            // &#226;&#8221;&#8364;&#226;&#8221;&#8364; New-style sub-question trigger visibility &#226;&#8221;&#8364;&#226;&#8221;&#8364;
+            // "Any answer" children of a text/number/date parent: show again for a parent that
+            // already has an answer (reopened or sent-back form), since every child was hidden above
+            $('.non-empty-parent').each(function() {
+                if (!$(this).closest('tr').hasClass('d-none')) {
+                    $(this).trigger('change');
+                }
+            });
+
+            //&#226;&#8221;&#8364;&#226;&#8221;&#8364; New-style sub-question trigger visibility &#226;&#8221;&#8364;&#226;&#8221;&#8364;
             // For sub-question rows with data-trigger-value, show only when their parent matches
             evaluateSubQuestionTriggers();
         }
@@ -2452,6 +2460,20 @@ if (window.innerWidth <= 767 || /iPhone|iPad|iPod|Android/i.test(navigator.userA
                         formData.append(this.name, this.value);
                     });
                 }
+
+                // Files and recordings are not auto-saved, so they go with the Save: File Upload
+                // (and other file) questions, and Audio / Video recordings held as data URLs.
+                // Only questions on screen — a hidden conditional question's file is not saved.
+                $form.find('input[type="file"]').not('.single-img-input, .multi-image-file-input').each(function() {
+                    if (this.name && this.files && this.files[0] && $(this).closest('.d-none').length === 0) {
+                        formData.append(this.name, this.files[0]);
+                    }
+                });
+                $form.find('input.audio-data, input.video-data').each(function() {
+                    if (this.name && this.value && $(this).closest('tr.d-none').length === 0) {
+                        formData.append(this.name, this.value);
+                    }
+                });
 
                 Swal.update({ title: 'Saving\u2026', text: 'Please keep the app open.' });
 

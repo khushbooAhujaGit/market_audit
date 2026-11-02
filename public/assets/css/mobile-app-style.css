@@ -1764,7 +1764,11 @@
      FIX: page-body bottom padding — ensure last card + pagination
      is always visible above fixed bottom nav
      ================================================================ */
-  .page-body {
+  /* Same specificity as the theme's phone rule in responsive.css (max-width 575.98px:
+     ".page-wrapper .page-body-wrapper .page-body { padding: 0 !important }"), which otherwise
+     wins and lets the bottom nav cover the pagination on phones */
+  .page-body,
+  .page-wrapper .page-body-wrapper .page-body {
     padding-bottom: 80px !important;
     /* bottom nav ~58px + breathing room */
   }

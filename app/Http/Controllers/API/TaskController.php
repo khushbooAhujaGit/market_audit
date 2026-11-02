@@ -1681,123 +1681,149 @@ class TaskController extends Controller
         $rootQuestions  = $allQuestions->whereNull('parent_question_id')->values();
         $childQuestions = $allQuestions->whereNotNull('parent_question_id');
 
-        // Build map: parent_id => [children grouped by parent_value]
-        $childrenByParent = $childQuestions->groupBy('parent_question_id');
+        // Conditional children per parent, in form order
+        $childrenByParent = $childQuestions->sortBy([['question_sequence', 'asc'], ['id', 'asc']])->groupBy('parent_question_id');
 
-        // Build id => question name map for parent_question_name lookups
-        $questionNameMap = $allQuestions->pluck('question', 'id');
-
-        // Attach conditional_questions and parent_question_name
-        $related_questions = $rootQuestions->map(function ($question) use ($childrenByParent, $subQParentMap, $questionNameMap) {
-            // Conditional children only — questions linked via questions.parent_question_id column.
-            // These are triggered by a specific parent answer (yes/no value, dropdown value, or __non_empty__).
-            // MR sub-questions are NOT included here; they already appear via the sub_questions relation.
-            $children = $childrenByParent->get($question->id, collect());
-
-            // true when any conditional child uses __non_empty__ logic (show as soon as parent has any answer)
-            $question->on_click = $children->contains('parent_value', '__non_empty__');
-
-            $conditionalQuestions = [];
-            foreach ($children as $child) {
-                $childArr = $child->toArray();
-                $childArr['trigger_value']        = $child->parent_value;   // specific value, or '__non_empty__'
-                $childArr['parent_question_name'] = $questionNameMap->get($child->parent_question_id);
-                $conditionalQuestions[] = $childArr;
-            }
-            $question->conditional_questions = $conditionalQuestions;
-
-
-            // Fill parent_question_id + parent_question_name for MR sub-question children
-            if (is_null($question->parent_question_id) && $subQParentMap->has($question->id)) {
-                $question->parent_question_id   = $subQParentMap->get($question->id);
-                $question->parent_question_name = $questionNameMap->get($question->parent_question_id);
-            } elseif (!is_null($question->parent_question_id)) {
-                $question->parent_question_name = $questionNameMap->get($question->parent_question_id);
-            } else {
-                $question->parent_question_name = null;
-            }
-
-            return $question;
-        });
+        // Sub-question links of every Multi Response (child groups included), in group order
+        $typeOf = $allQuestions->pluck('question_type', 'id')->all();
+        $linksByGroup = DB::table('question_sub_questions')
+            ->whereIn('parent_question_id', $allQuestions->pluck('id'))
+            ->orderBy('sequence')->orderBy('id')
+            ->get(['parent_question_id', 'child_question_id'])
+            ->groupBy('parent_question_id')
+            ->map(fn($links) => $links->pluck('child_question_id')->map(fn($id) => (int) $id)->all());
+        $outsideIds = array_diff($linksByGroup->flatten()->unique()->all(), array_keys($typeOf));
+        if ($outsideIds) {
+            $typeOf += Question::whereIn('id', $outsideIds)->pluck('question_type', 'id')->all();
+        }
 
         // IDs of all conditional children (so app knows these are not standalone root questions)
         $sub_question_child_ids = $childQuestions->pluck('id')->toArray();
 
-        // ── Build question codes; only root questions go into data ────────────
-        // Collect sub-question links per MR parent (ordered by pivot sequence)
-        $subLinksByParent = [];
-        foreach ($related_questions as $_rq) {
-            foreach ($_rq->subQuestions ?? [] as $_sl) {
-                $subLinksByParent[$_rq->id][] = $_sl;
-            }
-        }
+        // Root questions: not conditional and not inside a Multi Response
+        $roots = $rootQuestions->reject(fn($q) => $subQParentMap->has($q->id))->sortBy('question_sequence')->values();
 
-        $questionCodeMap = [];
-        $displaySeq      = 0;
-        $rootData        = [];   // only top-level questions; children stay nested
-
-        foreach ($related_questions->sortBy('question_sequence') as $_rq) {
-            // Skip any question that is a child of something else:
-            // - MR sub-question child (parent_question_id was filled from pivot in the map above)
-            // - Conditional child (parent_question_id set in the questions table)
-            if (!is_null($_rq->parent_question_id)) continue;
-
-            $displaySeq++;
-            $code = 'Q' . str_pad($displaySeq, 3, '0', STR_PAD_LEFT);
-            $questionCodeMap[$_rq->id] = $code;
-            $_rq->question_code    = $code;
-            $_rq->display_sequence = $displaySeq;
-
-            // Generate sub-Q codes and set them directly on the child model objects
-            // so they appear inside sub_questions.child_question when serialised
-            if ($_rq->question_type === 'Multi Response') {
-                $_rq->answer_type = 0; // MR parent is a section header, never directly answered
-
-                // A sub-question that is conditional on a sibling sub-question (its own
-                // parent_question_id + parent_value point at that sibling) is sent inside the
-                // sibling's conditional_questions — same shape as root-level conditional
-                // questions — instead of as an always-visible member of the group.
-                $groupLinks    = collect($subLinksByParent[$_rq->id] ?? []);
-                $groupChildIds = $groupLinks->pluck('child_question_id')->all();
-                $visibleLinks  = $groupLinks
-                    ->reject(function ($_sl) use ($_rq, $groupChildIds) {
-                        $child = $_sl->childQuestion ?? null;
-                        return $child
-                            && !is_null($child->parent_question_id)
-                            && $child->parent_question_id != $_rq->id
-                            && in_array($child->parent_question_id, $groupChildIds);
-                    })
-                    ->sortBy('sequence')
-                    ->values();
-                $_rq->setRelation('subQuestions', $visibleLinks);
-
-                $alpha = 0;
-                foreach ($visibleLinks as $_sl) {
-                    $child = $_sl->childQuestion ?? null;
-                    if (!$child) continue;
-                    $alpha++;
-                    $childCode = $code . chr(96 + $alpha);
-                    $questionCodeMap[$child->id] = $childCode;
-                    $child->question_code        = $childCode;
-                    $child->display_sequence     = $displaySeq + $alpha;
-                    $child->parent_question_id   = $_rq->id;
-                    $child->parent_question_name = $_rq->question;
-
-                    $condChildren = $childrenByParent->get($child->id, collect());
-                    $child->on_click = $condChildren->contains('parent_value', '__non_empty__');
-                    // Same shape as root-level conditional_questions
-                    $conditional = [];
-                    foreach ($condChildren as $condChild) {
-                        $condArr = $condChild->toArray();
-                        $condArr['trigger_value']        = $condChild->parent_value; // specific value, or '__non_empty__'
-                        $condArr['parent_question_name'] = $child->question;
-                        $conditional[] = $condArr;
-                    }
-                    $child->conditional_questions = $conditional;
+        // ── Question codes, the same as on the auditor web form ──────────────
+        // Root Q001; a group's sub-questions Q004a, Q004b (a child group's: Q004d1, Q004d2);
+        // a conditional question its parent's code plus the next letter (Q003a, Q004d2a)
+        $questionCodeMap = [];   // question id → its (first) code
+        $subCodeMap      = [];   // group id → [child id → code within that group]
+        $assignSubCodes  = function ($groupId, $groupCode, $level) use (&$assignSubCodes, &$questionCodeMap, &$subCodeMap, $linksByGroup, $typeOf) {
+            $n = 0;
+            foreach ($linksByGroup[$groupId] ?? [] as $childId) {
+                if (!isset($typeOf[$childId])) continue; // deleted question
+                $n++;
+                $code = $groupCode . ($level === 1 ? chr(96 + $n) : $n);
+                $subCodeMap[$groupId][$childId] = $code;
+                $questionCodeMap[$childId] ??= $code;
+                if ($typeOf[$childId] === 'Multi Response' && $level < 4) {
+                    $assignSubCodes($childId, $code, $level + 1);
                 }
             }
+        };
+        foreach ($roots as $index => $root) {
+            $questionCodeMap[$root->id] = 'Q' . str_pad($index + 1, 3, '0', STR_PAD_LEFT);
+            $assignSubCodes($root->id, $questionCodeMap[$root->id], 1);
+        }
+        // Repeated until a conditional question under another conditional one has its parent's code
+        $conditionalCount = [];
+        do {
+            $assigned = false;
+            foreach ($allQuestions as $q) {
+                if (isset($questionCodeMap[$q->id]) || $q->is_parent != 0 || !$q->parent_question_id) continue;
+                $parentId = $q->parent_question_id;
+                if (!isset($questionCodeMap[$parentId])) continue;
+                $conditionalCount[$parentId] = ($conditionalCount[$parentId] ?? 0) + 1;
+                $questionCodeMap[$q->id] = $questionCodeMap[$parentId] . chr(96 + $conditionalCount[$parentId]);
+                $assigned = true;
+            }
+        } while ($assigned);
 
-            $rootData[] = $_rq;
+        // ── Question tree: every supported nesting level ─────────────────────
+        // Each question also carries what the app needs to draw and save it at any depth:
+        //   level              1 = root … 4 (the deepest allowed nesting)
+        //   parent_context_id  the context its answer is saved under: null for a root question,
+        //                      the group for a sub-question, the parent for a conditional question
+        //   answer_key         the saveAnswer / answerSubmit key: "{id}" or "{id}_pctx_{parent_context_id}"
+        $place = function ($q, int $level, ?int $contextId, ?string $code) {
+            $q->question_code     = $code;
+            $q->level             = $level;
+            $q->parent_context_id = $contextId;
+            $q->answer_key        = $contextId ? $q->id . '_pctx_' . $contextId : (string) $q->id;
+        };
+        $hasAnyAnswerChild = fn($questionId) => $childrenByParent->get($questionId, collect())->contains('parent_value', '__non_empty__');
+
+        // Conditional questions of $parent, each with its own conditional questions (cases 1, 2, 4, 5, 6, 8).
+        // Triggered by a specific parent answer (Yes/No or Dropdown value) or '__non_empty__'.
+        $conditionalNodes = function ($parent, int $level) use (&$conditionalNodes, $childrenByParent, $questionCodeMap, $linksByGroup, $place, $hasAnyAnswerChild) {
+            $nodes = [];
+            if ($level > 6) return $nodes; // guards a parent loop in bad data
+            foreach ($childrenByParent->get($parent->id, collect()) as $child) {
+                // Linked into the group it points at: a member of that group, not conditional
+                if (in_array((int) $child->id, $linksByGroup[$parent->id] ?? [], true)) continue;
+                $place($child, $level, (int) $parent->id, $questionCodeMap[$child->id] ?? null);
+                $child->on_click              = $hasAnyAnswerChild($child->id);
+                $child->conditional_questions = $conditionalNodes($child, $level + 1);
+                $childArr = $child->toArray();
+                $childArr['trigger_value']        = $child->parent_value; // specific value, or '__non_empty__'
+                $childArr['parent_question_name'] = $parent->question;
+                $nodes[] = $childArr;
+            }
+            return $nodes;
+        };
+
+        // Members of a Multi Response group, a child group's members included (cases 3, 4, 7, 8)
+        $groupNodes = function ($group, int $level) use (&$groupNodes, $subCodeMap, $conditionalNodes, $place, $hasAnyAnswerChild) {
+            $group->answer_type = 0; // a group is a section header, never answered itself
+
+            // A sub-question that is conditional on a sibling sub-question (its own
+            // parent_question_id + parent_value point at that sibling) is sent inside the
+            // sibling's conditional_questions instead of as an always-visible member of the group.
+            $links      = collect($group->subQuestions ?? [])->filter(fn($l) => $l->childQuestion);
+            $siblingIds = $links->pluck('child_question_id')->all();
+            $visible    = $links
+                ->reject(function ($l) use ($group, $siblingIds) {
+                    $p = $l->childQuestion->parent_question_id;
+                    return !is_null($p) && $p != $group->id && in_array($p, $siblingIds);
+                })
+                ->sortBy('sequence')
+                ->values();
+            $group->setRelation('subQuestions', $visible);
+
+            foreach ($visible as $link) {
+                $child = $link->childQuestion;
+                $place($child, $level, (int) $group->id, $subCodeMap[$group->id][$child->id] ?? null);
+                $child->parent_question_id   = $group->id;
+                $child->parent_question_name = $group->question;
+                if ($child->question_type === 'Multi Response' && $level < 4) {
+                    $groupNodes($child, $level + 1);
+                    $child->on_click              = false;
+                    $child->conditional_questions = [];
+                } else {
+                    $child->on_click              = $hasAnyAnswerChild($child->id);
+                    $child->conditional_questions = $conditionalNodes($child, $level + 1);
+                }
+            }
+        };
+
+        $rootData = [];   // only top-level questions; children stay nested
+        foreach ($roots as $index => $root) {
+            $displaySeq = $index + 1;
+            $place($root, 1, null, $questionCodeMap[$root->id]);
+            $root->display_sequence     = $displaySeq;
+            $root->parent_question_name = null;
+
+            if ($root->question_type === 'Multi Response') {
+                $groupNodes($root, 2);
+                foreach ($root->subQuestions as $alpha => $link) {
+                    $link->childQuestion->display_sequence = $displaySeq + $alpha + 1;
+                }
+            }
+            // true when any conditional child uses __non_empty__ logic (show as soon as parent has any answer)
+            $root->on_click              = $hasAnyAnswerChild($root->id);
+            $root->conditional_questions = $conditionalNodes($root, 2);
+
+            $rootData[] = $root;
         }
         // ─────────────────────────────────────────────────────────────────────
 
@@ -2013,10 +2039,12 @@ class TaskController extends Controller
             'all_instances'          => $all_instances,
             'repeat_instance'        => $repeat_instance,
             'group_session_id'       => $group_info,
+            // Files of the row's file columns, same shape as getAllActivity's "documents"
+            'documents'              => \App\Services\TemplateDocuments::forRowsApi([$row_id])[$row_id] ?? [],
         ]);
     }
 
-    
+
     public function myProjectsDistributorOutletsData(Request $request, $rowId, $distributor_value = null)
     {
         // Route param may be URL-encoded (%20 → space); also allow passing via query string
@@ -2621,57 +2649,46 @@ class TaskController extends Controller
                 ->except($excludedKeys)
                 ->reject(fn($v, $k) => str_starts_with((string)$k, 'multi_images_'));
 
-            // For _pctx_ keys the format is {mr_parent_qid}_pctx_{child_qid}.
-            // Extract the child question ID (after _pctx_) so validation sees the real answer key.
-            $submittedQuestionIds = $questionAnswers->keys()->map(function ($k) {
-                if (preg_match('/_pctx_(\d+)$/', (string)$k, $m)) {
-                    return (int)$m[1]; // sub-question / child ID
-                }
-                return (int)preg_replace('/\D.*/', '', (string)$k);
-            })->filter()->unique()->values()->toArray();
-
             // --- 3. Load ALL questions for this activity in ONE query ---
             $allQuestions = Question::where('activity_id', $request->activity_id)
                 ->get()
                 ->keyBy('id'); // keyed by id for O(1) lookup below
 
-            // --- 4. Validate required questions ---
-            // Load sub-question child IDs (MR children answered via _pctx_ keys, never as standalone)
-            $subQChildIds = DB::table('question_sub_questions')
-                ->whereIn('parent_question_id', $allQuestions->pluck('id')->toArray())
-                ->pluck('child_question_id')->toArray();
+            // Question + parent context of every key ("{id}", "{id}_pctx_{context}", or the reversed
+            // "{group/parent}_pctx_{id}")
+            $keyParts = $questionAnswers->keys()->mapWithKeys(fn($k) => [$k => $this->answerKeyParts((string) $k, $allQuestions)]);
+            $submittedQuestionIds = $keyParts->pluck(0)
+                ->merge(collect(array_keys($request->all()))
+                    ->filter(fn($k) => str_starts_with((string) $k, 'multi_images_'))
+                    ->map(fn($k) => (int) substr((string) $k, strlen('multi_images_'))))
+                ->filter()->unique()->values()->toArray();
 
-            // Load parent answers to determine which conditional children are active
-            $parentAnswersForValidation = TempUserActivityAnswersData::where('row_id', $request->row_id)
+            // --- 4. Validate required questions ---
+            // Conditional questions count only while their whole parent chain is shown, judged on the
+            // saved answers with this submission's values on top
+            $answersForValidation = TempUserActivityAnswersData::where('row_id', $request->row_id)
                 ->where('activity_id', $request->activity_id)
-                ->where('user_id', $request->user()->id)
-                ->where(fn($q) => $q->whereNull('activity_sequence')->orWhere('activity_sequence', (int)($request->activity_sequence ?? 0)))
-                ->pluck('user_answer', 'question_id');
+                ->where($this->apiActivitySequenceFilter($activitySequence))
+                ->orderBy('id')
+                ->get(['question_id', 'user_answer'])
+                ->map(fn($a) => (object) ['question_id' => (int) $a->question_id, 'user_answer' => $a->user_answer]);
+            foreach ($questionAnswers as $k => $v) {
+                $qid = $keyParts[$k][0];
+                if ($qid && !$request->hasFile($k)) {
+                    $answersForValidation->push((object) ['question_id' => $qid, 'user_answer' => is_array($v) ? implode(',', $v) : (string) $v]);
+                }
+            }
+            $subQChildIds = DB::table('question_sub_questions')
+                ->whereIn('parent_question_id', $allQuestions->keys())
+                ->pluck('child_question_id')->map(fn($id) => (int) $id)->all();
 
             $requiredMissing = [];
-            foreach ($allQuestions->where('answer_type', 1) as $q) {
-                // Skip Multi Response parent — it's a section header, never submitted
-                if ($q->question_type === 'Multi Response') continue;
-
-                // Sub-question (MR child) — answered via _pctx_ key; check by child ID
-                if (in_array($q->id, $subQChildIds)) {
-                    if (!in_array($q->id, $submittedQuestionIds)) {
-                        $requiredMissing[] = ['id' => $q->id, 'question' => $q->question, 'question_type' => $q->question_type, 'reason' => 'sub_question'];
-                    }
-                    continue;
-                }
-
-                // Conditional child — only required when parent condition is met
-                if (!is_null($q->parent_question_id)) {
-                    $parentAnswer = trim((string)($parentAnswersForValidation->get($q->parent_question_id) ?? ''));
-                    if ($parentAnswer === '') continue; // parent not answered → condition not met
-                    if ($q->parent_value !== '__non_empty__' && strcasecmp($parentAnswer, (string)$q->parent_value) !== 0) continue;
-                    // Condition IS met — fall through to check submission
-                }
-
-                if (!in_array($q->id, $submittedQuestionIds)) {
-                    $requiredMissing[] = ['id' => $q->id, 'question' => $q->question, 'question_type' => $q->question_type, 'reason' => is_null($q->parent_question_id) ? 'standalone' : 'conditional'];
-                }
+            foreach (\App\Services\ConditionalAnswers::requiredIds((int) $request->activity_id, $answersForValidation) as $requiredId) {
+                if (in_array($requiredId, $submittedQuestionIds, true)) continue;
+                $q = $allQuestions->get($requiredId);
+                $reason = in_array($requiredId, $subQChildIds, true) && is_null($q->parent_question_id) ? 'sub_question'
+                    : (is_null($q->parent_question_id) ? 'standalone' : 'conditional');
+                $requiredMissing[] = ['id' => $q->id, 'question' => $q->question, 'question_type' => $q->question_type, 'reason' => $reason];
             }
 
             if (!empty($requiredMissing)) {
@@ -2696,7 +2713,7 @@ class TaskController extends Controller
                         : $q->where(fn($q2) => $q2->whereNull('activity_sequence')->orWhere('activity_sequence', 0));
                 })
                 ->get()
-                ->groupBy('question_id'); // group for fast lookup
+                ->groupBy(fn($a) => $a->question_id . '|' . $a->parent_context_id); // question + context
 
             // --- 6. Get last sequence ONCE ---
             $last_sequence = TempUserActivityAnswersData::max('same_answer_id') + 1;
@@ -2707,10 +2724,7 @@ class TaskController extends Controller
             $now             = now()->toDateTimeString();
 
             foreach ($questionAnswers as $key => $value) {
-                preg_match('/^(\d+)([a-zA-Z]*)$/', $key, $matches);
-                $numberPart = $matches[1] ?? null;
-                $stringPart = $matches[2] ?? '';
-                $questionId = (int)($stringPart === '' ? $key : $numberPart);
+                [$questionId, $parentContextId] = $keyParts[$key];
 
                 // --- O(1) lookup from pre-loaded collection ---
                 $question = $allQuestions->get($questionId);
@@ -2795,13 +2809,9 @@ class TaskController extends Controller
                 }
 
                 // --- 7. Decide create vs update using pre-loaded collection ---
-                $existing = $existingAnswers->get($questionId);
-
-                // Parse _pctx_ suffix from key (e.g. "123_pctx_45")
-                $parentContextId = null;
-                if (preg_match('/_pctx_(\d+)/', (string)$key, $pm)) {
-                    $parentContextId = (int)$pm[1];
-                }
+                // (a nested answer saved earlier without its context is taken over)
+                $existing = $existingAnswers->get($questionId . '|' . $parentContextId)
+                    ?? ($parentContextId !== null ? $existingAnswers->get($questionId . '|') : null);
 
                 $payload = [
                     'user_id'                => $userId,
@@ -2838,13 +2848,14 @@ class TaskController extends Controller
                     if (!$existing || $existing->isEmpty()) {
                         $toCreate[] = $payload;
                     } else {
-                        $toUpdate[$questionId] = [
-                            'user_answer'    => $user_answer,
-                            'same_answer_id' => $last_sequence,
-                            'latitude'       => $latitude,
-                            'longitude'      => $longitude,
-                        ];
                         $answer = $existing->first();
+                        $toUpdate[$answer->id] = [
+                            'user_answer'       => $user_answer,
+                            'parent_context_id' => $parentContextId,
+                            'same_answer_id'    => $last_sequence,
+                            'latitude'          => $latitude,
+                            'longitude'         => $longitude,
+                        ];
                     }
                 }
 
@@ -2866,16 +2877,10 @@ class TaskController extends Controller
             // then send all paths as multi_images_{qid}[]  in this request.
             $multiImageKeys = array_filter(array_keys($request->all()), fn($k) => str_starts_with((string)$k, 'multi_images_'));
             foreach ($multiImageKeys as $multiKey) {
-                $suffix     = str_replace('multi_images_', '', $multiKey);
-                $qid        = (int)$suffix;
+                [$qid, $multiPctx] = $this->answerKeyParts(str_replace('multi_images_', '', $multiKey), $allQuestions);
                 if (!$qid) continue;
                 $question = $allQuestions->get($qid);
                 if (!$question || $question->question_type !== 'Image') continue;
-
-                $multiPctx = null;
-                if (preg_match('/_pctx_(\d+)/', $suffix, $pm)) {
-                    $multiPctx = (int)$pm[1];
-                }
 
                 // Accept JSON array string or repeated keys ([]): both decode to the same paths array
                 $rawPaths = $request->input($multiKey);
@@ -2921,23 +2926,19 @@ class TaskController extends Controller
             }
 
             // --- 10. Bulk insert + bulk update inside a single transaction ---
-            DB::transaction(function () use ($toCreate, $toUpdate, $request, $activitySequence) {
+            DB::transaction(function () use ($toCreate, $toUpdate) {
                 if (!empty($toCreate)) {
                     TempUserActivityAnswersData::insert($toCreate);
                 }
 
-                foreach ($toUpdate as $questionId => $updatePayload) {
-                    TempUserActivityAnswersData::where('row_id', $request->row_id)
-                        ->where('activity_id', $request->activity_id)
-                        ->where('question_id', $questionId)
-                        ->where(function ($q) use ($activitySequence) {
-                            $activitySequence > 0
-                                ? $q->where('activity_sequence', $activitySequence)
-                                : $q->where(fn($q2) => $q2->whereNull('activity_sequence')->orWhere('activity_sequence', 0));
-                        })
-                        ->update($updatePayload);
+                // One saved answer per question + context
+                foreach ($toUpdate as $answerId => $updatePayload) {
+                    TempUserActivityAnswersData::where('id', $answerId)->update($updatePayload);
                 }
             });
+
+            // A changed answer can hide a branch of conditional questions: their earlier answers go
+            \App\Services\ConditionalAnswers::removeHidden((int) $request->row_id, (int) $request->activity_id, $activitySequence);
 
             // --- 11. Geo-stamp this submission's images (uploaded files and pre-uploaded multi-image
             // paths) by their saved answers; a new answer's record only exists after the insert above
@@ -3550,6 +3551,24 @@ class TaskController extends Controller
      * Closure: scope a TempUserActivityAnswersData query to the correct repeat instance.
      * Mirrors TaskHandlerController::activitySequenceFilter().
      */
+    /**
+     * [question id, parent context id] of an answer key: "{id}" (also "{id}[]", or "{id}{letters}"
+     * for subjective attributes), "{id}_pctx_{context}", "0_pctx_{id}", or the reversed
+     * "{group or parent}_pctx_{id}" older app versions send. [null, null] when it isn't one.
+     */
+    private function answerKeyParts(string $key, $allQuestions): array
+    {
+        if (preg_match('/^(\d+)_pctx_(\d+)/', $key, $m)) {
+            [$first, $second] = [(int) $m[1], (int) $m[2]];
+            if ($first === 0) return [$second, null];
+            $reversed = QuestionSubQuestion::where('parent_question_id', $first)->where('child_question_id', $second)->exists()
+                || (int) optional($allQuestions->get($second))->parent_question_id === $first;
+            return $reversed ? [$second, $first] : [$first, $second];
+        }
+        $qid = (int) $key;
+        return [$qid ?: null, null];
+    }
+
     private function apiActivitySequenceFilter(int $seq): \Closure
     {
         return function ($q) use ($seq) {
@@ -3969,7 +3988,7 @@ class TaskController extends Controller
         $answerKey = null;
 
         $systemKeys = ['row_id', 'activity_id', 'latitude', 'longitude', 'activity_sequence',
-                       'group_id', 'subjective_attribute'];
+                       'group_id', 'subjective_attribute', 'parent_context_id'];
 
         // question_id may be sent as an explicit field (app pattern: question_id=734 + 0_pctx_734=value)
         $explicitQid = $request->filled('question_id') ? (int) $request->input('question_id') : null;
@@ -4045,6 +4064,22 @@ class TaskController extends Controller
                 $pctxId   = $question->id;
                 $question = $pctxQuestion;
             }
+        }
+
+        // Explicit parent_context_id (getAllQuestion sends it per question): the question's
+        // Multi Response group or its conditional parent. Overrides the one in the key.
+        if ($request->has('parent_context_id')) {
+            $explicitPctx = (int) $request->input('parent_context_id') ?: null;
+            if ($explicitPctx !== null
+                && (int) $question->parent_question_id !== $explicitPctx
+                && !QuestionSubQuestion::where('parent_question_id', $explicitPctx)->where('child_question_id', $qid)->exists()
+            ) {
+                return response()->json([
+                    'saved'   => false,
+                    'message' => "parent_context_id {$explicitPctx} is neither the group nor the parent of question {$qid}.",
+                ], 422);
+            }
+            $pctxId = $explicitPctx;
         }
 
         // ── Resolve project storage directory ──────────────────────────────
@@ -4235,12 +4270,27 @@ class TaskController extends Controller
 
         $existing = $query->first();
 
+        // Older app versions saved nested answers without a context: take that row over instead
+        // of keeping two answers to the same nested question
+        if (!$existing && $pctxId !== null
+            && ($question->parent_question_id || QuestionSubQuestion::where('child_question_id', $qid)->exists())
+        ) {
+            $existing = TempUserActivityAnswersData::where('row_id', $rowId)
+                ->where('activity_id', $actId)
+                ->where('question_id', $qid)
+                ->where($seqFilter)
+                ->whereNull('parent_context_id')
+                ->when($subjectiveParent !== null, fn($q) => $q->where('subjective_parent', $subjectiveParent))
+                ->first();
+        }
+
         if ($existing) {
             $existing->update([
-                'user_answer' => $userAnswer,
-                'latitude'    => $lat,
-                'longitude'   => $lng,
-                'updated_at'  => now(),
+                'user_answer'       => $userAnswer,
+                'parent_context_id' => $pctxId,
+                'latitude'          => $lat,
+                'longitude'         => $lng,
+                'updated_at'        => now(),
             ]);
             $savedRecord = $existing->fresh();
         } else {
@@ -4303,22 +4353,8 @@ class TaskController extends Controller
      */
     private function requiredQuestionIdsForAnswers(int $activityId, iterable $answers): array
     {
-        $required = DB::table('questions')
-            ->where('activity_id', $activityId)
-            ->where('answer_type', 1)
-            ->where('question_type', '!=', 'Multi Response')
-            ->whereNull('deleted_at')
-            ->get(['id', 'parent_question_id', 'parent_value']);
-
-        $answerByQuestion = collect($answers)->mapWithKeys(fn($a) => [(int) $a->question_id => trim((string) $a->user_answer)]);
-
-        return $required->filter(function ($q) use ($answerByQuestion) {
-            if (empty($q->parent_question_id)) return true;
-            $parentAnswer = $answerByQuestion->get((int) $q->parent_question_id, '');
-            if ($parentAnswer === '') return false;
-            if ($q->parent_value === '__non_empty__') return true;
-            return $q->parent_value !== null && strcasecmp($parentAnswer, (string) $q->parent_value) === 0;
-        })->pluck('id')->map(fn($id) => (int) $id)->values()->all();
+        // Every nesting level: a conditional question counts only while its whole parent chain is shown
+        return \App\Services\ConditionalAnswers::requiredIds($activityId, $answers);
     }
 
     /**
@@ -4380,9 +4416,8 @@ class TaskController extends Controller
         $project = optional($projectTemp->getProjectTemplateData)->getProject;
         $otpVerification = $project ? (bool) $project->is_otp_required : false;
 
-        // All questions for this activity
-        $allQuestions = Question::where('activity_id', $actId)->get()->keyBy('id');
-        $allQIds      = $allQuestions->keys()->toArray();
+        // A changed answer can hide a branch of conditional questions: their earlier answers go
+        \App\Services\ConditionalAnswers::removeHidden($rowId, $actId, $seq);
 
         // Saved answers for this instance
         $savedAnswers = TempUserActivityAnswersData::where('row_id', $rowId)
@@ -4390,50 +4425,15 @@ class TaskController extends Controller
             ->where($seqFilter)
             ->whereNotNull('user_answer')
             ->where('user_answer', '!=', '')
+            ->orderBy('id')
             ->get();
-        $answeredIds = $savedAnswers->pluck('question_id')->unique()->toArray();
+        $answeredIds = $savedAnswers->pluck('question_id')->map(fn($id) => (int) $id)->unique()->all();
 
-        // Sub-question child IDs (always-visible outlet sub-questions via question_sub_questions table)
-        $subChildIds = QuestionSubQuestion::whereIn('parent_question_id', $allQIds)
-            ->pluck('child_question_id')->toArray();
-
-        // Index saved answers by question_id (string key) for reliable lookup
-        $answeredMap = $savedAnswers->keyBy(fn($a) => (string) $a->question_id);
-
-        $missing = [];
-
-        foreach ($allQuestions as $qId => $question) {
-            if ($question->answer_type != 1) continue;
-            if ($question->question_type === 'Multi Response') continue;
-
-            $isSubChild = in_array((string) $qId, array_map('strval', $subChildIds));
-            $hasParent  = !empty($question->parent_question_id);
-
-            if ($hasParent) {
-                $parentId     = (string)(int) $question->parent_question_id;
-                $parentAnswer = $answeredMap->get($parentId);
-
-                // Parent not answered at all → skip this child
-                if (!$parentAnswer) continue;
-
-                // parent_value set → only required when parent answer matches
-                if (!empty($question->parent_value)) {
-                    $parentVal = strtolower(trim((string) $parentAnswer->user_answer));
-                    if ($parentVal !== strtolower(trim($question->parent_value))) {
-                        continue; // condition not met → skip
-                    }
-                } else {
-                    // parent_value not configured → cannot determine trigger condition → skip
-                    continue;
-                }
-            } elseif ($isSubChild) {
-                // Always-visible outlet sub-question — always required
-            }
-
-            if (!$answeredMap->has((string) $qId)) {
-                $missing[] = ['question_id' => $qId, 'question' => $question->question];
-            }
-        }
+        // Required questions at every level: roots, group sub-questions, and conditional
+        // questions whose whole parent chain is shown for these answers
+        $missingIds = array_diff(\App\Services\ConditionalAnswers::requiredIds($actId, $savedAnswers), $answeredIds);
+        $missing = Question::whereIn('id', $missingIds)->orderBy('question_sequence')->get(['id', 'question'])
+            ->map(fn($q) => ['question_id' => $q->id, 'question' => $q->question])->values()->all();
 
         if (!empty($missing)) {
             return response()->json([
@@ -4521,47 +4521,26 @@ class TaskController extends Controller
 
         $seqFilter = $this->apiActivitySequenceFilter($seq);
 
-        // ── Load all questions for this activity ───────────────────────────
-        $activityQuestionIds = Question::where('activity_id', $actId)->pluck('id')->toArray();
+        // ── A changed answer can hide a branch of conditional questions: their earlier answers go
+        \App\Services\ConditionalAnswers::removeHidden($rowId, $actId, $seq);
 
         // ── Load already-saved answers for this instance ──────────────────
         $savedAnswers = TempUserActivityAnswersData::where('row_id', $rowId)
             ->where('activity_id', $actId)
             ->where($seqFilter)
+            ->orderBy('id')
             ->get();
 
         $answeredIds = $savedAnswers
             ->where(fn($a) => $a->user_answer !== null && trim((string)$a->user_answer) !== '')
             ->pluck('question_id')
+            ->map(fn($id) => (int) $id)
             ->unique()
             ->toArray();
 
-        // ── Required parent/standalone questions ──────────────────────────
-        $requiredIds = Question::whereIn('id', $activityQuestionIds)
-            ->where('answer_type', 1)
-            ->where('question_type', '!=', 'Multi Response')
-            ->where('is_parent', 1)
-            ->pluck('id')->toArray();
-
-        // ── Required always-visible sub-question children ─────────────────
-        $allSubChildIds = [];
-        $toProcess = $activityQuestionIds;
-        while (!empty($toProcess)) {
-            $childBatch = QuestionSubQuestion::whereIn('parent_question_id', $toProcess)
-                ->pluck('child_question_id')->toArray();
-            $newIds = array_diff($childBatch, $allSubChildIds);
-            if (empty($newIds)) break;
-            $allSubChildIds = array_merge($allSubChildIds, $newIds);
-            $toProcess = array_values($newIds);
-        }
-        $requiredSubIds = Question::whereIn('id', $allSubChildIds)
-            ->where('answer_type', 1)
-            ->where('question_type', '!=', 'Multi Response')
-            ->whereNull('parent_question_id')
-            ->pluck('id')->toArray();
-
-        $allRequiredIds = array_unique(array_merge($requiredIds, $requiredSubIds));
-        $missingIds     = array_diff($allRequiredIds, $answeredIds);
+        // ── Required questions at every level: roots, group sub-questions, and conditional
+        // questions whose whole parent chain is shown for these answers
+        $missingIds = array_diff(\App\Services\ConditionalAnswers::requiredIds($actId, $savedAnswers), $answeredIds);
 
         if (!empty($missingIds)) {
             $missing = Question::whereIn('id', array_values($missingIds))

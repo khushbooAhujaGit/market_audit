@@ -11,7 +11,7 @@
 <link rel="stylesheet" type="text/css" href="{{url('assets/css/vendors/slick-theme.css')}}">
 <link rel="stylesheet" type="text/css" href="{{url('assets/css/vendors/scrollbar.css')}}">
 <link rel="stylesheet" type="text/css" href="{{url('assets/css/vendors/animate.css')}}">
-    <link rel="stylesheet" type="text/css" href="{{url('assets/css/style.css')}}">
+    <link rel="stylesheet" type="text/css" href="{{url('assets/css/style.css')}}?v={{ filemtime(public_path('assets/css/style.css')) }}">
 <link rel="stylesheet" type="text/css" href="{{url('assets/css/vendors/datatables.css')}}">
 <link rel="stylesheet" type="text/css" href="{{url('assets/css/vendors/photoswipe.css')}}">
 <link rel="stylesheet" type="text/css" href="{{url('assets/css/vendors/calendar.css')}}">

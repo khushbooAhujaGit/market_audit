@@ -233,7 +233,6 @@
                                 @can('Project Report')
                                     <li><a href="{{ route('project-report') }}">Project Report</a></li>
                                 @endcan
-                                <li><a href="{{ route('infiltration.index') }}">Infiltration Report</a></li>
                             </ul>
                         </li>
                     @endcan
@@ -259,6 +258,23 @@
                                 </svg><span>Company Verification</span></a></li>
                     @endcan
                     
+                    @role('Super Admin')
+                        @php $openSupportRequests = \App\Models\SupportRequest::where('status', 'open')->count(); @endphp
+                        <li class="sidebar-list"><i class="fa fa-thumb-tack"></i><a
+                                class="sidebar-link sidebar-title link-nav" href="{{ route('support_requests.index') }}">
+                                <svg class="stroke-icon">
+                                    <use href="../assets/svg/icon-sprite.svg#stroke-file"></use>
+                                </svg>
+                                <svg class="fill-icon">
+                                    <use href="../assets/svg/icon-sprite.svg#fill-file"></use>
+                                </svg><span>Support Requests</span>
+                                @if ($openSupportRequests)
+                                    <span class="badge rounded-pill bg-warning text-dark ms-auto">{{ $openSupportRequests }}</span>
+                                @endif
+                            </a>
+                        </li>
+                    @endrole
+
                     @can('PDF Download')
                         <li class="sidebar-list"><i class="fa fa-thumb-tack"></i><a
                                 class="sidebar-link sidebar-title link-nav" href="{{ route('report_page') }}">
@@ -291,6 +307,31 @@
                                     <use href="../assets/svg/icon-sprite.svg#fill-file"></use>
                                 </svg><span>My Projects</span></a></li>
                     @endcan
+                    @can('Custom Reports')
+                        <li class="sidebar-list"><i class="fa fa-thumb-tack"> </i><a class="sidebar-link sidebar-title"
+                                href="javascript:void(0)">
+                                <svg class="stroke-icon">
+                                    <use href="../assets/svg/icon-sprite.svg#stroke-project"></use>
+                                </svg>
+                                <svg class="fill-icon">
+                                    <use href="../assets/svg/icon-sprite.svg#fill-project"></use>
+                                </svg><span>Custom Reports</span></a>
+                            <ul class="sidebar-submenu">
+                                @can('Infiltration Report')
+                                    <li><a href="{{ route('infiltration.index') }}">Infiltration Report</a></li>
+                                @endcan
+                                @can('Gokul Report')
+                                    <li><a href="{{ route('gokul.index') }}">Gokul</a></li>
+                                @endcan
+                                @can('Godrej Report')
+                                    <li><a href="{{ route('godrej.index') }}">Godrej</a></li>
+                                @endcan
+                                @can('AWL Depo Audit Report')
+                                    <li><a href="{{ route('awl_depo_audit.index') }}">AWL DB Compliance</a></li>
+                                @endcan
+                            </ul>
+                        </li>
+                    @endcan
                 </ul>
             </div>
             <div class="right-arrow" id="right-arrow"><i data-feather="arrow-right"></i></div>
@@ -298,3 +339,19 @@
     </div>
 </div>
 <!-- Page Sidebar Ends-->
+@can('Custom Reports')
+<script>
+    // Expand-on-click: bring the whole Custom Reports submenu into view in the scrolling sidebar.
+    document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('.sidebar-links .sidebar-title').forEach(function (t) {
+            if (!t.textContent.includes('Custom Reports')) return;
+            t.addEventListener('click', function () {
+                setTimeout(function () {
+                    var items = t.parentElement.querySelectorAll('.sidebar-submenu > li');
+                    if (items.length) items[items.length - 1].scrollIntoView({behavior: 'smooth', block: 'nearest'});
+                }, 380);
+            });
+        });
+    });
+</script>
+@endcan

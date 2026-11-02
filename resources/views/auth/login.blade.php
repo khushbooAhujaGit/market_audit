@@ -115,6 +115,7 @@
                                 </a>
                             @endif
                         </div>
+                        <p class="mt-3 mb-0 text-center">Need help? <a class="ms-1" href="{{ route('support.show') }}">Contact support</a></p>
                         <p class="mt-2   mb-0 text-center d-none">Don't have account?<a class="ms-2"
                                                                                         href="sign-up.html">Create
                                 Account</a></p>

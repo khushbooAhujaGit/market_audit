@@ -133,6 +133,16 @@ class QuestionController extends Controller
         $oldStyleParentValue = null;
         $oldStyleDropdownId  = null;
 
+        // Condition switched off in the edit panel: remove leftover Yes/No / Dropdown conditional links.
+        if (!empty($form_data['clear_conditional']) && empty($parentTriggers)
+            && filter_var(env('UNCONDITION_RESTORES_PARENT', true), FILTER_VALIDATE_BOOLEAN)) {
+            QuestionSubQuestion::where('child_question_id', $question_info->id)
+                ->whereHas('parentQuestion', function ($q) {
+                    $q->whereIn('question_type', ['Yes / No', 'Dropdown']);
+                })
+                ->delete();
+        }
+
         if (!empty($parentTriggers)) {
             // Only delete Yes/No and Dropdown conditional links.
             // Multi Response sub-question links are managed via the sub-questions page
@@ -198,6 +208,29 @@ class QuestionController extends Controller
         // If the conditional parent is cleared, leave is_parent unchanged — the question may
         // still be a sub-question of an MR group (managed via question_sub_questions).
         $isParentUpdate = $oldStyleParentId ? 0 : $question_info->is_parent;
+
+        // Condition switched off: a question that is neither a root (is_parent=1), nor conditional
+        // (parent_question_id), nor an MR sub-question would be invisible to auditors. Make it a
+        // normal independent question again. Revertible via .env UNCONDITION_RESTORES_PARENT=false.
+        if (!$oldStyleParentId
+            && !$isParentUpdate
+            && filter_var(env('UNCONDITION_RESTORES_PARENT', true), FILTER_VALIDATE_BOOLEAN)
+            && !QuestionSubQuestion::where('child_question_id', $question_info->id)->exists()
+        ) {
+            $isParentUpdate = 1;
+            // Place it right after the root question it was nested under (below that root's other
+            // nested questions) instead of leaving a NULL sequence, which sorts to the top.
+            $anc = $question_info->parent_question_id ? Question::find($question_info->parent_question_id) : null;
+            for ($g = 0; $anc && $anc->parent_question_id && $g < 10; $g++) {
+                $anc = Question::find($anc->parent_question_id) ?: null;
+            }
+            if ($anc && $anc->question_sequence !== null) {
+                $newSeq = (int) $anc->question_sequence + 1;
+                Question::where('activity_id', $question_info->activity_id)->where('is_parent', 1)
+                    ->where('question_sequence', '>=', $newSeq)->increment('question_sequence');
+                $form_data['question_sequence'] = $newSeq;
+            }
+        }
 
         $question_info->update([
             'question'              => $form_data['question'],

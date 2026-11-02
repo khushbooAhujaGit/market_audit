@@ -21,7 +21,7 @@
 
     @include('template.layouts.simple.css')
     <!-- Mobile app overrides — loaded LAST so !important rules win over style.css/responsive.css -->
-    <link rel="stylesheet" href="{{ asset('assets/css/mobile-app-style.css') }}">
+    <link rel="stylesheet" href="{{ asset('assets/css/mobile-app-style.css') }}?v={{ filemtime(public_path('assets/css/mobile-app-style.css')) }}">
     @yield('style')
 </head>
 

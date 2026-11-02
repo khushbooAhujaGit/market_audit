@@ -190,178 +190,118 @@ class ReportController extends Controller
     
 
     /**
-     * Recursively build report column headers and collect question IDs.
-     * Outlet-type questions have no stored answer — they are skipped as a column
-     * and their sub-questions are added instead (prefixed with the Outlet name).
+     * Every answerable question of an activity in form order, at any nesting depth: Multi Response
+     * sub-questions (also inside a child Multi Response) and conditional questions (also a
+     * conditional of a conditional). Multi Response groups have no answer of their own, so they
+     * only show up in the relation of their sub-questions.
      *
-     * @param Question $question
-     * @param array    &$headers      flat list of column header strings
-     * @param array    &$questionIds  flat list of question IDs whose answers are fetched
-     * @param string   $prefix        e.g. "Outlet Section Name"  (empty for top-level)
+     * Each item: ['question' => Question, 'pctx' => parent_context_id the answer is saved with
+     * (the Multi Response group for a sub-question, the parent question for a conditional one,
+     * null at the top level), 'relation' => path from the top question down to this one, e.g.
+     * "Outlet status [Open] → Asset available? [Yes] → Asset photo" ('' for top-level questions),
+     * 'legacy' => the one-line header the report used before the relation row ("Parent → child",
+     * "Group → sub [value] → conditional"), which the Infiltration and Godrej reports look up].
      */
-    /**
-     * Recursively flatten questions including Outlet sub-questions into a flat array.
-     * Each entry: ['question' => Question, 'prefix' => string, 'is_outlet' => bool]
-     * Used by project_distributor_report (vertical layout).
-     */
-    private function addOutletSubQuestionsFlat(Question $parent, array &$list, string $prefix, ?int $mrParentId = null): void
+    private function flattenActivityQuestions($questions): array
     {
-        // Track the top-level Multi Response parent ID so answer lookup can use the correct pctx
-        $topMrId = $mrParentId ?? ($parent->question_type === 'Multi Response' ? $parent->getKey() : null);
+        $questions = collect($questions);
+        $ids = $questions->pluck('id')->all();
 
-        $subLinks = QuestionSubQuestion::where('parent_question_id', $parent->getKey())
-            ->orderBy('sequence')
-            ->with('childQuestion')
-            ->get();
-        foreach ($subLinks as $link) {
-            if (!$link->childQuestion) continue;
-            $child = $link->childQuestion;
-            if ($child->question_type === 'Multi Response') {
-                $this->addOutletSubQuestionsFlat($child, $list, $prefix . ' → ' . $child->question, $topMrId);
-            } else {
-                $list[] = [
-                    'question'     => $child,
-                    'prefix'       => $prefix,
-                    'is_outlet'    => false,
-                    'mr_parent_id' => $topMrId,
+        $subLinks = QuestionSubQuestion::whereIn('parent_question_id', $ids)->orderBy('sequence')->orderBy('id')->with('childQuestion')->get();
+        $subLinksByParent = $subLinks->groupBy('parent_question_id');
+        $subChildIds = $subLinks->pluck('child_question_id')->flip();
+        $condByParent = Question::whereIn('parent_question_id', array_merge($ids, $subLinks->pluck('child_question_id')->all()))
+            ->orderBy('question_sequence')->orderBy('id')->get()->groupBy('parent_question_id');
+
+        // Ids whose sub-question links / conditional children were preloaded (even when there are none)
+        $linksLoaded = array_flip($ids);
+        $condsLoaded = $linksLoaded + $subChildIds->all();
+
+        // A question's name in a relation, without its own question type when the name ends with
+        // it ("Asset 1 (Multi Response)", "Cooler checks (child Multi Response)" → "Asset 1", "Cooler checks")
+        $relationName = function (Question $question): string {
+            $type = preg_quote((string) $question->question_type, '/');
+            $name = $type === '' ? $question->question : preg_replace('/\s*\((?:child\s+)?' . $type . '\)\s*$/i', '', $question->question);
+            return $name !== '' ? $name : $question->question;
+        };
+
+        $items = [];
+        $walk = function (Question $question, ?int $pctx, array $path, array $legacy)
+            use (&$walk, &$items, $subLinksByParent, $condByParent, $linksLoaded, $condsLoaded, $subChildIds, $relationName) {
+            $id = (int) $question->getKey();
+            if (isset($path[$id]) || count($path) > 8) return; // a question set up as its own ancestor
+
+            $isGroup = $question->question_type === 'Multi Response';
+            if (!$isGroup) {
+                $items[] = [
+                    'question' => $question,
+                    'pctx'     => $pctx,
+                    'relation' => $path ? implode(' → ', array_merge($path, [$relationName($question)])) : '',
+                    'legacy'   => implode(' → ', array_merge($legacy, [$question->question])),
                 ];
-                // Conditional children of this sub-question (stored with null pctx)
-                $condChildren2 = Question::where('parent_question_id', $child->getKey())->get();
-                foreach ($condChildren2 as $condChild2) {
-                    $list[] = [
-                        'question'     => $condChild2,
-                        'prefix'       => $prefix . ' → ' . $child->question . ' [' . ($condChild2->parent_value ?? 'if answered') . ']',
-                        'is_outlet'    => false,
-                        'mr_parent_id' => null, // stored with parent_context_id = null
-                    ];
+            }
+
+            // Child questions of a sub-question that comes from another activity are not preloaded
+            $links = isset($linksLoaded[$id])
+                ? ($subLinksByParent[$id] ?? collect())
+                : QuestionSubQuestion::where('parent_question_id', $id)->orderBy('sequence')->orderBy('id')->with('childQuestion')->get();
+            $siblingIds = collect($links)->pluck('child_question_id')->map(fn($v) => (int) $v)->flip();
+            foreach ($links as $link) {
+                $child = $link->childQuestion;
+                // A sub-question that is also a conditional of a sibling sub-question is saved
+                // under that sibling: it is listed there instead
+                if ($child && !isset($siblingIds[(int) $child->parent_question_id])) {
+                    $walk($child, $id, $path + [$id => $relationName($question)], $legacy + [$id => $question->question]);
                 }
             }
-        }
-    }
 
+            $conditionals = isset($condsLoaded[$id])
+                ? ($condByParent[$id] ?? [])
+                : Question::where('parent_question_id', $id)->orderBy('question_sequence')->orderBy('id')->get();
+            foreach ($conditionals as $child) {
+                // A Multi Response group has no answer to show a question on; when such a
+                // "conditional" is also linked as a sub-question it is listed as that
+                if ($isGroup && isset($subChildIds[$child->id])) continue;
+                $trigger = in_array((string) $child->parent_value, ['', '__non_empty__'], true) ? 'any answer' : $child->parent_value;
+                // The old header named the trigger value only below a sub-question
+                $legacyName = $pctx !== null ? $question->question . ' [' . ($child->parent_value ?? 'if answered') . ']' : $question->question;
+                $walk($child, $id, $path + [$id => $relationName($question) . ' [' . $trigger . ']'], $legacy + [$id => $legacyName]);
+            }
+        };
+
+        foreach ($questions as $question) {
+            if ($question->parent_question_id === null && !isset($subChildIds[$question->id])) {
+                $walk($question, null, [], []);
+            }
+        }
+        return $items;
+    }
 
     /**
-     * Recursively build questionSets entries for a Multi Response question's sub-questions.
-     * Uses compound keys "{child_id}|pctx|{mr_parent_id}" so the report reads the
-     * pctx-specific answer (submitted as a sub-question) rather than the standalone answer.
+     * The answer to show for a question in one context. A sub/conditional question's answer is
+     * normally saved with its parent as parent_context_id; the app saves some with no context.
+     * $otherContexts are the contexts of the same question's other columns, whose answers must
+     * not fill this one.
      */
-    private function buildMultiResponseQuestionSet(
-        Question $mrQuestion,
-        string $prefix,
-        int $activityIndex,
-        array &$questionSets,
-        array &$questionDisplayNames,
-        array &$allQuestionIds
-    ): void {
-        $mrId = $mrQuestion->getKey(); // raw numeric PK of the Multi Response parent
-        $displayPrefix = $prefix ?: $mrQuestion->question;
-
-        $subLinks = QuestionSubQuestion::where('parent_question_id', $mrId)
-            ->orderBy('sequence')
-            ->with('childQuestion')
-            ->get();
-
-        foreach ($subLinks as $link) {
-            $child = $link->childQuestion;
-            if (!$child) continue;
-
-            $childRawId  = $link->child_question_id; // raw FK, always numeric
-            $displayName = $displayPrefix . ' → ' . $child->question;
-
-            if ($child->question_type === 'Multi Response') {
-                // Nested Multi Response — recurse with updated prefix
-                $this->buildMultiResponseQuestionSet(
-                    $child, $displayName, $activityIndex,
-                    $questionSets, $questionDisplayNames, $allQuestionIds
-                );
-            } else {
-                // Compound key: answer was submitted with parent_context_id = $mrId
-                $compoundKey = $childRawId . '|pctx|' . $mrId;
-                $questionSets[$activityIndex][]              = $compoundKey;
-                $questionDisplayNames[$activityIndex][$compoundKey] = $displayName;
-                if (!in_array($childRawId, $allQuestionIds)) {
-                    $allQuestionIds[] = $childRawId;
-                }
-
-                // Also include conditional children of this sub-question.
-                // These are stored with parent_context_id = null (submitted as standalone fields).
-                $condChildren = Question::where('parent_question_id', $childRawId)->get();
-                foreach ($condChildren as $condChild) {
-                    $condId          = $condChild->id;
-                    $condDisplayName = $displayName . ' [' . ($condChild->parent_value ?? 'if answered') . '] → ' . $condChild->question;
-                    // Plain key: no pctx (answer stored with parent_context_id = null)
-                    if (!in_array($condId, $questionSets[$activityIndex] ?? [])) {
-                        $questionSets[$activityIndex][]               = $condId;
-                        $questionDisplayNames[$activityIndex][$condId] = $condDisplayName;
-                    }
-                    if (!in_array($condId, $allQuestionIds)) {
-                        $allQuestionIds[] = $condId;
-                    }
-                }
-            }
-        }
-    }
-
-    private function buildOutletQuestionHeaders(Question $question, array &$headers, array &$questionIds, string $prefix = ''): void
+    private function pickContextAnswer($pool, ?int $pctx, array $otherContexts = [])
     {
-        $displayName = $prefix ? $prefix . ' → ' . $question->question : $question->question;
-
-        if ($question->question_type === 'Multi Response') {
-            // Outlet itself has no stored answer — recurse into its sub-questions
-            $subLinks = QuestionSubQuestion::where('parent_question_id', $question->id)
-                ->orderBy('sequence')
-                ->with('childQuestion')
-                ->get();
-            foreach ($subLinks as $link) {
-                if ($link->childQuestion) {
-                    $this->buildOutletQuestionHeaders($link->childQuestion, $headers, $questionIds, $displayName);
-                }
-            }
-        } else {
-            // Regular question — add as a column
-            $headers[]     = $displayName;
-            $questionIds[] = $question->getKey(); // raw numeric PK
-
-            // Also add headers for conditional children of this sub-question
-            // (stored with parent_context_id = null, not as MR pctx answers)
-            $condChildren = Question::where('parent_question_id', $question->getKey())
-                ->orderBy('question_sequence')
-                ->get();
-            foreach ($condChildren as $condChild) {
-                $condHeader = $displayName . ' [' . ($condChild->parent_value ?? 'if answered') . '] → ' . $condChild->question;
-                $headers[]     = $condHeader;
-                $questionIds[] = $condChild->getKey();
-            }
+        $pool = collect($pool);
+        if ($pctx === null) {
+            return $pool->first(fn($a) => $a->parent_context_id === null) ?? $pool->first();
         }
+        return $pool->first(fn($a) => (int) $a->parent_context_id === $pctx)
+            ?? $pool->first(fn($a) => $a->parent_context_id === null)
+            ?? $pool->first(fn($a) => !in_array((int) $a->parent_context_id, $otherContexts, true));
     }
 
-    /**
-     * Recursively add a question (and all its parent_question_id children) to report headers.
-     * Skips Multi Response questions (they are section labels, not answer columns).
-     * Dropdown sub-questions that have their own children are shown with full hierarchical prefix.
-     */
-    private function buildReportHeaders(
-        ?Question $question,
-        string $prefix,
-        array &$combinedHeaders,
-        array &$activities_questions_id
-    ): void {
-        if (!$question) return;
-
-        $displayName = $prefix ? $prefix . ' → ' . $question->question : $question->question;
-
-        if ($question->question_type !== 'Multi Response') {
-            $combinedHeaders[]        = $displayName;
-            $activities_questions_id[] = $question->id;
+    /** Per question id, the contexts its columns use (see pickContextAnswer). */
+    private function contextsByQuestion(array $flatItems): array
+    {
+        $contexts = [];
+        foreach ($flatItems as $item) {
+            if ($item['pctx'] !== null) $contexts[(int) $item['question']->getKey()][] = $item['pctx'];
         }
-
-        // Recurse into parent_question_id children at all levels
-        $children = Question::where('parent_question_id', $question->id)
-            ->orderBy('question_sequence')
-            ->get();
-        foreach ($children as $child) {
-            $this->buildReportHeaders($child, $displayName, $combinedHeaders, $activities_questions_id);
-        }
+        return $contexts;
     }
 
     /**
@@ -369,11 +309,39 @@ class ReportController extends Controller
      * produced by buildReportFile()'s $allGroupIds: either a new-style activity_sequence
      * (int, 0 = original) or an old-style same_answer_id group (['sid' => id]).
      */
+    /** "Open Location" column after latitude/longitude. Gated by .env OPEN_LOCATION_COLUMN. */
+    private function openLocationEnabled(): bool
+    {
+        return filter_var(env('OPEN_LOCATION_COLUMN', true), FILTER_VALIDATE_BOOLEAN);
+    }
+
+    /** Show "City, State" as the Open Location text (off for the copies the Infiltration/Godrej tools read). */
+    private bool $mapsCityLabels = false;
+
+    /**
+     * Google Maps link for a lat/long pair ('' when missing); the Excel writer makes it clickable.
+     * With $mapsCityLabels the cell shows "City, State" (CityState, cached; at most
+     * OPEN_LOCATION_LOOKUPS_PER_REPORT new spots looked up per report) and "Open Location" until it is known.
+     */
+    private function mapsLink($lat, $lng): string
+    {
+        if (!is_numeric($lat) || !is_numeric($lng) || ((float) $lat === 0.0 && (float) $lng === 0.0)) {
+            return '';
+        }
+        $url = 'https://www.google.com/maps?q=' . trim((string) $lat) . ',' . trim((string) $lng);
+        if (!$this->mapsCityLabels) {
+            return $url;
+        }
+        $label = \App\Services\CityState::label($lat, $lng, (int) env('OPEN_LOCATION_LOOKUPS_PER_REPORT', 60));
+        return \App\Services\FastXlsxWriter::mapsValue($url, $label !== '' ? $label : 'Open Location');
+    }
+
     /**
      * Verifier remark text for an answer. Answers normally store a remark id (remark_masters);
      * older ones may hold the typed text, or the bare word "other" (saved when "Other Remark"
      * was chosen without text), which has no remark to show.
      */
+
     private function verificationRemarkText($answer, $remarkMap = null): string
     {
         $remark = trim((string) ($answer->remark ?? ''));
@@ -399,10 +367,18 @@ class ReportController extends Controller
      * Shared report builder — called by both get_report() (direct download) and GenerateReportJob (mail).
      * Returns ['path' => <temp xlsx file path>, 'file_name' => <suggested download name>].
      */
-    public function buildReportFile(Request $request, array $validated): array
+    /**
+     * $withRelationRow: a second header row with each sub/conditional question's relation (data
+     * starts on row 3), and the report header block above them. Off for the tools that read this
+     * report (Infiltration, Godrej): they read row 1 as the headers and every row after it as data,
+     * and look columns up by the old one-line headers ("Parent → child"), which they then get.
+     */
+    public function buildReportFile(Request $request, array $validated, bool $withRelationRow = true): array
     {
         $start_date = $validated['from_date'];
         $end_date   = $validated['to_date'];
+        $this->mapsCityLabels = $withRelationRow;
+        \App\Services\CityState::resetLookups();
         $additionalHeaders = [];
         $show_auditor = 0;
         $show_user = 0;
@@ -454,175 +430,72 @@ class ReportController extends Controller
         $questionDisplayNames = []; // display names per activity set (same order as $questionSets)
         $scanExpectedHeaders  = []; // question_id => configured expected headers, for Barcode/QR Code/RFID
 
-        // Preload DataAssign rows for all activities in one query
-        $dataAssignMap = DataAssign::where('project_template_id', $projectTemplate->id)
-            ->whereIn('activity_id', $request->activity_id)
-            ->with(['activityName.questions'])
-            ->get()
-            ->keyBy('activity_id');
-
         // Preload ALL Questions for all activities in one query and index by activity_id
         $allActivityQuestions = \App\Models\Question::whereIn('activity_id', $request->activity_id)
             ->withoutOrphans()
-            ->with(['subQuestions.childQuestion'])
             ->orderBy('question_sequence')
             ->get()
             ->groupBy('activity_id');
 
-        // Preload ALL QuestionSubQuestion links for these activity questions
-        $allQIds = \App\Models\Question::whereIn('activity_id', $request->activity_id)->pluck('id')->toArray();
-        $allSubLinks = \App\Models\QuestionSubQuestion::whereIn('parent_question_id', $allQIds)
-            ->orWhereIn('child_question_id', $allQIds)
-            ->get();
-        $subLinksByParent = $allSubLinks->groupBy('parent_question_id');
-        // Index of all child IDs so we can quickly check "is this a sub-child?"
-        $allSubChildIds = $allSubLinks->pluck('child_question_id')->unique()->flip()->toArray();
+        // One column per answerable question at any depth (see flattenActivityQuestions). Keys:
+        // "{qid}" at the top level, "{qid}|pctx|{parent}" for a sub/conditional question, plus
+        // "|scanhead|{header}" / "|scanextra" for the columns of a Barcode/QR Code/RFID question.
+        $columnInfo    = []; // per activity set: key => ['qid', 'pctx', 'scan' => null|'head'|'extra', 'scan_header', 'relation']
+        $relationHeads = array_fill(0, $templateColCount, ''); // second header row, parallel to $projectTemplateHeads
+        $contextsByQ   = []; // question id => contexts of its columns (see pickContextAnswer)
+
+        $addColumn = function (int $activityIndex, string $key, array $info, string $name, string $relation, string $legacy)
+            use (&$projectTemplateHeads, &$relationHeads, &$questionSets, &$questionDisplayNames, &$columnInfo, &$allQuestionIds, $withRelationRow) {
+            // Without the relation row the header is the old one-line header (parents joined in)
+            $header = $withRelationRow ? $name : $legacy;
+            $projectTemplateHeads[] = $header;
+            $relationHeads[]        = $relation;
+            $questionSets[$activityIndex][]              = $key;
+            $questionDisplayNames[$activityIndex][$key]  = $header;
+            $columnInfo[$activityIndex][$key]            = $info + ['relation' => $relation];
+            $allQuestionIds[] = $info['qid'];
+        };
 
         foreach ($request->activity_id as $activityIndex => $activity) {
-            $checkingInDataAssigned = $dataAssignMap[(int)$activity] ?? null;
-
-            if ($checkingInDataAssigned !== null && isset($checkingInDataAssigned->activityName) &&
-                $checkingInDataAssigned->activityName !== null && isset($checkingInDataAssigned->activityName->questions)) {
-                $activity_questions = $checkingInDataAssigned->activityName->questions;
-            } else {
-                $activityInfo = Activity::find($activity);
-                $activity_questions = $activityInfo->questions;
-            }
-
-            $questionsArray = $activity_questions->toArray();
             $questionSets[$activityIndex]        = [];
             $questionDisplayNames[$activityIndex] = [];
+            $columnInfo[$activityIndex]           = [];
 
-            // Build headers and collect question IDs
-            foreach ($questionsArray as $index => $question) {
-                if (!empty($question)) {
-                    // For the first question of each activity, add metadata headers
-                    if ($index == 0) {
-                        // Add all metadata headers for this question set
-                        if ($show_auditor == 1) {
-                            $projectTemplateHeads[] = 'Auditor Name';
-                            $projectTemplateHeads[] = 'Auditor Contact No.';
-                        }
-                        $projectTemplateHeads[] = 'Verifier Name';
-                        $projectTemplateHeads[] = 'Status';
-                        $projectTemplateHeads[] = 'Remark';
-                        $projectTemplateHeads[] = 'Verification Date & Time';
-                        $projectTemplateHeads[] = 'latitude';
-                        $projectTemplateHeads[] = 'longitude';
+            // Metadata columns lead each activity's block (the data rows fill them for every activity)
+            $metaHeads = $show_auditor == 1 ? ['Auditor Name', 'Auditor Contact No.'] : [];
+            array_push($metaHeads, 'Verifier Name', 'Status', 'Remark', 'Verification Date & Time', 'latitude', 'longitude');
+            if ($this->openLocationEnabled()) $metaHeads[] = 'Open Location';
+            if ($show_user) $metaHeads[] = 'User';
+            if ($show_date || $show_time) $metaHeads[] = 'Date';
+            foreach ($metaHeads as $metaHead) {
+                $projectTemplateHeads[] = $metaHead;
+                $relationHeads[]        = '';
+            }
 
-                        if ($show_user) {
-                            $projectTemplateHeads[] = 'User';
-                        }
+            $flatItems = $this->flattenActivityQuestions($allActivityQuestions[(int) $activity] ?? collect());
+            foreach ($this->contextsByQuestion($flatItems) as $qid => $contexts) {
+                $contextsByQ[$qid] = array_values(array_unique(array_merge($contextsByQ[$qid] ?? [], $contexts)));
+            }
 
-                        if ($show_date || $show_time) {
-                            $projectTemplateHeads[] = 'Date';
-                        }
+            foreach ($flatItems as $item) {
+                $question = $item['question'];
+                $qid      = (int) $question->getKey();
+                $base     = $item['pctx'] === null ? (string) $qid : $qid . '|pctx|' . $item['pctx'];
+                $info     = ['qid' => $qid, 'pctx' => $item['pctx'], 'scan' => null, 'scan_header' => null];
+
+                if (in_array($question->question_type, ['Barcode', 'QR Code', 'RFID'])) {
+                    // Scan question: one column per configured expected header (matched scan data)
+                    // + one column for anything scanned that matches none of them
+                    $scanHeaders = $scanExpectedHeaders[$qid] ??= \App\Models\QuestionDropdown::where('question_id', $qid)
+                        ->pluck('option')->map('trim')->filter()->values()->all();
+                    foreach ($scanHeaders as $scanHeader) {
+                        $addColumn($activityIndex, $base . '|scanhead|' . $scanHeader, ['scan' => 'head', 'scan_header' => $scanHeader] + $info,
+                            $question->question . ' → ' . $scanHeader, $item['relation'] !== '' ? $item['relation'] . ' → ' . $scanHeader : '',
+                            $item['legacy'] . ' → ' . $scanHeader);
                     }
-
-                    // Skip questions that are sub-children (already covered by their parent)
-                    // using the preloaded $allSubChildIds index — no per-question DB queries.
-                    $outletSubChildIds = array_keys($allSubChildIds); // numeric IDs of all known sub-children
-
-                    // Handle question headers
-                    if ($question['is_parent'] == 1 && !in_array($question['id'], $outletSubChildIds)) {
-                        // Use preloaded Question model instead of Question::find($id)
-                        $questionModel = ($allActivityQuestions[(int)$activity] ?? collect())
-                            ->firstWhere('id', $question['id'])
-                            ?? Question::find($question['id']); // last resort only
-
-                        if ($question['question_type'] === 'Multi Response') {
-                            // Multi Response: no answer column itself — recurse into sub-questions.
-                            // Sub-questions are answered with parent_context_id = Multi Response parent ID,
-                            // so we use compound keys "{child_id}|pctx|{parent_id}" in questionSets.
-                            // This ensures the report reads the pctx-specific answer, not the standalone one.
-                            $this->buildOutletQuestionHeaders($questionModel, $projectTemplateHeads, $allQuestionIds);
-
-                            // Build compound keys for questionSets using direct sub-question links
-                            $this->buildMultiResponseQuestionSet(
-                                $questionModel,
-                                $question['question'],
-                                $activityIndex,
-                                $questionSets,
-                                $questionDisplayNames,
-                                $allQuestionIds
-                            );
-                        } elseif (in_array($question['question_type'], ['Barcode', 'QR Code', 'RFID'])) {
-                            // Scan-type question: one column per configured expected header
-                            // (matched scan data) + one "extra" column for anything scanned
-                            // that doesn't match a configured header. Compound keys
-                            // "{qid}|scanhead|{header}" / "{qid}|scanextra" are resolved
-                            // against the actual answer during row-building below.
-                            $scanHeaders = \App\Models\QuestionDropdown::where('question_id', $question['id'])
-                                ->pluck('option')->map('trim')->filter()->values()->all();
-                            $scanExpectedHeaders[$question['id']] = $scanHeaders;
-
-                            foreach ($scanHeaders as $scanHeader) {
-                                $scanKey = $question['id'] . '|scanhead|' . $scanHeader;
-                                $displayName = $question['question'] . ' → ' . $scanHeader;
-                                $projectTemplateHeads[] = $displayName;
-                                $allQuestionIds[] = $question['id'];
-                                $questionSets[$activityIndex][] = $scanKey;
-                                $questionDisplayNames[$activityIndex][$scanKey] = $displayName;
-                            }
-
-                            $extraKey = $question['id'] . '|scanextra';
-                            $projectTemplateHeads[] = $question['question'];
-                            $allQuestionIds[] = $question['id'];
-                            $questionSets[$activityIndex][] = $extraKey;
-                            $questionDisplayNames[$activityIndex][$extraKey] = $question['question'];
-                        } else {
-                            // Normal parent question
-                            $projectTemplateHeads[] = $question['question'];
-                            $allQuestionIds[] = $question['id'];
-                            $questionSets[$activityIndex][] = $question['id'];
-                            $questionDisplayNames[$activityIndex][$question['id']] = $question['question'];
-
-                            // Old-flow child questions — use preloaded index instead of DB query per parent
-                            $parentRawId   = $question['id'];
-                            $childQuestions = ($allActivityQuestions[(int)$activity] ?? collect())
-                                ->where('parent_question_id', $parentRawId);
-                            foreach ($childQuestions as $child) {
-                                $childKey    = $child->getKey();
-                                $compoundKey = $childKey . '|pctx|' . $parentRawId;
-                                $displayName = $question['question'] . ' → ' . $child->question;
-                                $projectTemplateHeads[] = $displayName;
-                                $allQuestionIds[] = $childKey;
-                                $questionSets[$activityIndex][] = $compoundKey;
-                                $questionDisplayNames[$activityIndex][$compoundKey] = $displayName;
-
-                                if ($child->question_type == 'Subjective') {
-                                    $dependentQuestions = ($allActivityQuestions[(int)$activity] ?? collect())
-                                        ->where('parent_question_id', $childKey);
-                                    foreach ($dependentQuestions as $dependent) {
-                                        $depKey      = $dependent->getKey();
-                                        $depCompound = $depKey . '|pctx|' . $childKey;
-                                        $depName     = $displayName . ' → ' . $dependent->question;
-                                        $projectTemplateHeads[] = $depName;
-                                        $allQuestionIds[] = $depKey;
-                                        $questionSets[$activityIndex][] = $depCompound;
-                                        $questionDisplayNames[$activityIndex][$depCompound] = $depName;
-                                    }
-                                }
-                            }
-
-                            // New-flow: shared sub-questions via question_sub_questions table.
-                            // Use preloaded $subLinksByParent instead of per-question DB query.
-                            $subLinks = ($subLinksByParent[$question['id']] ?? collect())
-                                ->sortBy('sequence');
-                            foreach ($subLinks as $subLink) {
-                                if (!$subLink->childQuestion) continue;
-                                $child    = $subLink->childQuestion;
-                                $childRawId  = $subLink->child_question_id;
-                                $parentRawId = $question['id'];
-                                $compoundKey = $childRawId . '|pctx|' . $parentRawId;
-                                $displayName = $question['question'] . ' → ' . $child->question;
-                                $projectTemplateHeads[] = $displayName;
-                                $allQuestionIds[]       = $childRawId;
-                                $questionSets[$activityIndex][] = $compoundKey;
-                                $questionDisplayNames[$activityIndex][$compoundKey] = $displayName;
-                            }
-                        }
-                    }
+                    $addColumn($activityIndex, $base . '|scanextra', ['scan' => 'extra'] + $info, $question->question, $item['relation'], $item['legacy']);
+                } else {
+                    $addColumn($activityIndex, $base, $info, $question->question, $item['relation'], $item['legacy']);
                 }
             }
         }
@@ -632,10 +505,12 @@ class ReportController extends Controller
         $projectTemplateRowIds = $projectTemplate->getProjectTemplateData->pluck('id')->unique()->values()->toArray();
         $activityIds = $request->activity_id;
 
-        // Main sheet: single activity block (original/first instance only — no horizontal repeat)
-        $activityBlockHeads = array_slice($projectTemplateHeads, $templateColCount);
-        $templateOnlyHeads  = array_slice($projectTemplateHeads, 0, $templateColCount);
-        $header_data = [array_merge($templateOnlyHeads, $activityBlockHeads)];
+        // Main sheet: single activity block (original/first instance only — no horizontal repeat).
+        // Row 1 = question names, row 2 = how each sub/conditional question hangs from its parents.
+        $header_data = [$projectTemplateHeads];
+        if ($withRelationRow) {
+            $header_data[] = $relationHeads;
+        }
 
         // Eager load all answers
         // Load answers — filter by date range and optionally by verification status.
@@ -675,30 +550,28 @@ class ReportController extends Controller
         $allAnswersNoFilter = !empty($mediaQuestionIds) && !empty($filledRowIds)
             ? TempUserActivityAnswersData::whereIn('row_id', $filledRowIds)
                 ->whereIn('question_id', $mediaQuestionIds)
-                ->select(['id','row_id','question_id','activity_id','user_answer',
-                          'same_answer_id','parent_context_id','activity_sequence','updated_at'])
+                ->select(['id','row_id','question_id','activity_id','user_id','user_answer',
+                          'same_answer_id','parent_context_id','activity_sequence','status','verified_by',
+                          'remark','updated_at','created_at','latitude','longitude'])
                 ->orderByDesc('updated_at')
                 ->get()
                 ->groupBy('row_id')
             : collect();
 
-        // Preload pctx answers (sub-question answers) — replaces per-row-per-question DB queries
-        // for compound-key columns ("{child_id}|pctx|{parent_id}"). Also collects parent ids: a
-        // save-path bug (fixed separately) stored some Multi Response sub-answers with question_id
-        // and parent_context_id swapped, so those rows only turn up under the parent's id.
-        $pctxChildIds = [];
-        $pctxParentIds = [];
-        foreach ($questionSets as $questionSet) {
-            foreach ($questionSet as $qId) {
-                if (str_contains((string)$qId, '|pctx|')) {
-                    [$cid, , $pid] = explode('|', (string)$qId);
-                    $pctxChildIds[] = (int)$cid;
-                    $pctxParentIds[] = (int)$pid;
+        // Preload pctx answers (sub/conditional question answers, any context) — replaces
+        // per-row-per-question DB queries for "{child_id}|pctx|{parent_id}" columns. Also loads the
+        // parent ids: a save-path bug (fixed separately) stored some Multi Response sub-answers with
+        // question_id and parent_context_id swapped, so those rows only turn up under the parent's id.
+        $pctxQuestionIds = [];
+        foreach ($columnInfo as $setColumns) {
+            foreach ($setColumns as $col) {
+                if ($col['pctx'] !== null) {
+                    $pctxQuestionIds[$col['qid']] = true;
+                    $pctxQuestionIds[$col['pctx']] = true;
                 }
             }
         }
-        $pctxChildIds  = array_unique($pctxChildIds);
-        $pctxQuestionIds = array_unique(array_merge($pctxChildIds, $pctxParentIds));
+        $pctxQuestionIds = array_keys($pctxQuestionIds);
 
         $allPctxAnswers = !empty($pctxQuestionIds)
             ? TempUserActivityAnswersData::whereIn('row_id', $projectTemplateRowIds)
@@ -708,12 +581,24 @@ class ReportController extends Controller
                 ->when(isset($statusMap[$verificationStatusFilter]),
                     fn($q) => $q->whereIn('status', $statusMap[$verificationStatusFilter])
                 )
-                ->select(['id','row_id','question_id','parent_context_id','same_answer_id',
-                          'activity_sequence','user_answer','updated_at'])
+                ->select(['id','row_id','question_id','activity_id','user_id','user_answer',
+                          'same_answer_id','parent_context_id','activity_sequence','status','verified_by',
+                          'remark','updated_at','created_at','latitude','longitude'])
                 ->get()
-                // Index: [row_id][question_id|parent_context_id] = answer
-                ->groupBy(fn($a) => $a->row_id . '|' . $a->question_id . '|' . $a->parent_context_id)
+                // Index: [row_id][question_id] = answers (every context)
+                ->groupBy('row_id')
+                ->map(fn($g) => $g->groupBy('question_id'))
             : collect();
+
+        // One sub/conditional answer from a row's pctx answers, limited to one instance group
+        $pickPctxAnswer = function ($rowPctx, array $col, $gid) use ($contextsByQ) {
+            $qid = $col['qid'];
+            return $this->pickContextAnswer(
+                    $this->filterAnswersByInstanceGroup($rowPctx[$qid] ?? [], $gid), $col['pctx'], $contextsByQ[$qid] ?? [])
+                // Swapped storage (question_id = parent, parent_context_id = this question)
+                ?? $this->filterAnswersByInstanceGroup($rowPctx[$col['pctx']] ?? [], $gid)
+                    ->first(fn($a) => (int) $a->parent_context_id === $qid);
+        };
 
         // Preload distinct activity_sequence values (new-style repeat instances) per row+activity —
         // this is the actual mechanism the app currently uses for multiple instances (sequence 0 =
@@ -843,9 +728,7 @@ class ReportController extends Controller
             // Build row-level indexes ONCE per row (not once per activity per row)
             $rowByQ           = $rowAnswers->groupBy('question_id');
             $noFilterRowAll   = $allAnswersNoFilter[$projectTemplate_data->id] ?? collect();
-            $rowPctxAnswers   = $allPctxAnswers->filter(
-                fn($g, $key) => str_starts_with($key, $projectTemplate_data->id . '|')
-            );
+            $rowPctx          = $allPctxAnswers[$projectTemplate_data->id] ?? collect();
 
             // Main sheet: fill ORIGINAL (first) instance only for each activity
             foreach ($questionSets as $setIndex => $questionSet) {
@@ -863,30 +746,31 @@ class ReportController extends Controller
                 $noFilterRow = $noFilterRowAll->where('activity_id', $actId)->groupBy('question_id');
 
                 $setAnswers = [];
-                foreach ($questionSet as $qId) {
-                    if (str_contains((string)$qId, '|pctx|')) continue;
+                foreach ($questionSet as $key) {
+                    $col = $columnInfo[$setIndex][$key];
+                    $qid = $col['qid'];
 
-                    $pool  = $visitByQ[(int)$qId] ?? collect();
-                    $pool2 = $rowByQ[(int)$qId]   ?? collect();
+                    if ($col['pctx'] !== null) {
+                        $ans = $pickPctxAnswer($rowPctx, $col, $gid);
+                    } else {
+                        $ans = $this->pickContextAnswer($visitByQ[$qid] ?? [], null)
+                            ?? $this->pickContextAnswer($rowByQ[$qid] ?? [], null);
 
-                    $ans = $pool->whereStrict('parent_context_id', null)->first()
-                        ?? $pool->first()
-                        ?? $pool2->whereStrict('parent_context_id', null)->first()
-                        ?? $pool2->first();
-
-                    // Fallback: preloaded no-date-filter collection for media questions
-                    if (!$ans) {
-                        $fb = $noFilterRow[(int)$qId] ?? collect();
-                        $ans = $fb->whereStrict('parent_context_id', null)->sortByDesc('updated_at')->first()
-                            ?? $fb->sortByDesc('updated_at')->first();
+                        // Fallback: preloaded no-date-filter collection for media questions
+                        if (!$ans) {
+                            $ans = $this->pickContextAnswer(collect($noFilterRow[$qid] ?? [])->sortByDesc('updated_at'), null);
+                        }
                     }
 
-                    if ($ans) { $setAnswers[$qId] = $ans; $any_answer = 1; }
+                    if ($ans) { $setAnswers[$key] = $ans; $any_answer = 1; }
                 }
 
                 $answersInSet = collect($setAnswers);
                 if ($answersInSet->isNotEmpty()) {
-                    $firstAnswer = $answersInSet->first();
+                    // Verifier/location details from the first top-level answer (any answer when
+                    // the activity has only sub-questions)
+                    $firstAnswer = $answersInSet->first(fn($a, $key) => $columnInfo[$setIndex][$key]['pctx'] === null)
+                        ?? $answersInSet->first();
                     $firstUser   = $allUsers[$firstAnswer->user_id] ?? null;
                     if ($show_auditor == 1) {
                         $rowData[] = $firstUser->name   ?? '';
@@ -901,6 +785,7 @@ class ReportController extends Controller
                         ? $firstAnswer->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i') : '';
                     $rowData[] = $firstAnswer->latitude  ?? '';
                     $rowData[] = $firstAnswer->longitude ?? '';
+                    if ($this->openLocationEnabled()) { $rowData[] = $this->mapsLink($firstAnswer->latitude ?? '', $firstAnswer->longitude ?? ''); }
                     if ($show_user) {
                         $rowData[] = $firstUser ? $firstUser->name : "User (ID: {$firstAnswer->user_id}) has been deleted";
                     }
@@ -913,68 +798,15 @@ class ReportController extends Controller
                     if ($show_auditor == 1) { $rowData[] = ''; $rowData[] = ''; }
                     $rowData[] = ''; $rowData[] = ''; $rowData[] = '';
                     $rowData[] = ''; $rowData[] = ''; $rowData[] = '';
+                    if ($this->openLocationEnabled()) { $rowData[] = ''; }
                     if ($show_user) { $rowData[] = ''; }
                     if ($show_date || $show_time) { $rowData[] = ''; }
                 }
 
-                foreach ($questionSet as $questionId) {
-                    if (str_contains((string)$questionId, '|scanhead|')) {
-                        [, , $scanHeaderName] = explode('|', (string)$questionId, 3);
-                        $scanAnswer = $setAnswers[$questionId] ?? null;
-                        $rowData[] = $scanAnswer ? $this->scanAnswerHeaderValue($scanAnswer->user_answer, $scanHeaderName) : '';
-                        continue;
-                    }
-                    if (str_ends_with((string)$questionId, '|scanextra')) {
-                        $scanQid    = (int)$questionId;
-                        $scanAnswer = $setAnswers[$questionId] ?? null;
-                        $rowData[] = $scanAnswer
-                            ? $this->scanAnswerExtraValue($scanAnswer->user_answer, $scanExpectedHeaders[$scanQid] ?? [])
-                            : '';
-                        continue;
-                    }
-
-                    if (str_contains((string)$questionId, '|pctx|')) {
-                        [$childId, , $parentCtx] = explode('|', $questionId);
-                        $cId  = (int)$childId;
-                        $pCtx = (int)$parentCtx;
-                        // Use preloaded pctx collection — no per-question DB queries
-                        $pctxKey = $projectTemplate_data->id . '|' . $cId . '|' . $pCtx;
-                        $pctxPool = $allPctxAnswers[$pctxKey] ?? collect();
-                        $ans = $this->filterAnswersByInstanceGroup($pctxPool, $gid)->first();
-                        // Fallback: swapped storage (question_id = MR parent, parent_context_id =
-                        // sub-question) — a save-path bug (fixed separately) produced this for
-                        // Multi Response sub-questions in existing data.
-                        if (!$ans) {
-                            $swappedKey  = $projectTemplate_data->id . '|' . $pCtx . '|' . $cId;
-                            $swappedPool = $allPctxAnswers[$swappedKey] ?? collect();
-                            $ans = $this->filterAnswersByInstanceGroup($swappedPool, $gid)->first();
-                        }
-                        // Fallback: null parent_context_id (pre-migration answers)
-                        if (!$ans) {
-                            $nullKey  = $projectTemplate_data->id . '|' . $cId . '|';
-                            $nullPool = $allPctxAnswers[$nullKey] ?? collect();
-                            $ans = $this->filterAnswersByInstanceGroup($nullPool, $gid)->first();
-                        }
-                        if ($ans) {
-                            $qType = $questionTypeMap[$cId] ?? '';
-                            $rowData[] = in_array($qType, ['Image', 'File Upload', 'Audio'])
-                                ? $this->imageAnswerUrl($ans)
-                                : $this->formatAnswerValue($ans->user_answer, $qType);
-                        } else {
-                            $rowData[] = '';
-                        }
-                        continue;
-                    }
-
-                    if (isset($setAnswers[$questionId])) {
-                        $answer = $setAnswers[$questionId];
-                        $qType  = $questionTypeMap[(int)$questionId] ?? '';
-                        $rowData[] = in_array($qType, ['Image', 'File Upload', 'Audio'])
-                            ? $this->imageAnswerUrl($answer)
-                            : $this->formatAnswerValue($answer->user_answer, $qType);
-                    } else {
-                        $rowData[] = '';
-                    }
+                foreach ($questionSet as $key) {
+                    $rowData[] = isset($setAnswers[$key])
+                        ? $this->reportAnswerCell($setAnswers[$key], $columnInfo[$setIndex][$key], $questionTypeMap, $scanExpectedHeaders)
+                        : '';
                 }
             }
 
@@ -1017,9 +849,8 @@ class ReportController extends Controller
                 // Precompute no-filter index once per activity (not per instance)
                 $noFilterActAnswers = ($allAnswersNoFilter[$projectTemplate_data->id] ?? collect())
                     ->where('activity_id', $actId);
-                // Group by question_id for O(1) lookup; group by pctx for sub-questions
+                // Group by question_id for O(1) lookup
                 $noFilterByQ = $noFilterActAnswers->groupBy('question_id');
-                $noFilterByPctx = $noFilterActAnswers->groupBy(fn($a) => $a->question_id . '|' . $a->parent_context_id);
 
                 $actInstRows = [];
                 foreach ($groupIds as $instIdx => $gid) {
@@ -1040,40 +871,37 @@ class ReportController extends Controller
                     $instUser         = '';
                     $instDate         = '';
 
-                    foreach ($questionSet as $qId) {
-                        // Handle compound pctx key (Multi Response sub-question)
-                        if (str_contains((string)$qId, '|pctx|')) {
-                            [$cid, , $pctx] = explode('|', (string)$qId);
-                            $pctxPool = $noFilterByPctx[$cid . '|' . $pctx] ?? collect();
-                            // Fallback: swapped storage (question_id = MR parent, parent_context_id
-                            // = sub-question) — same save-path bug as the main sheet lookup above.
-                            if ($pctxPool->isEmpty()) {
-                                $pctxPool = $noFilterByPctx[$pctx . '|' . $cid] ?? collect();
-                            }
-                            $ans = $pctxPool->sortByDesc('updated_at')->first();
+                    foreach ($questionSet as $key) {
+                        $col = $columnInfo[$setIndex][$key];
+                        $qid = $col['qid'];
+
+                        if ($col['pctx'] !== null) {
+                            // Sub/conditional question: this instance's answer in its context, else
+                            // a media answer uploaded before the date range (same instance only)
+                            $ans = $pickPctxAnswer($rowPctx, $col, $gid)
+                                ?? $this->pickContextAnswer(
+                                    $this->filterAnswersByInstanceGroup($noFilterByQ[$qid] ?? collect(), $gid)->sortByDesc('updated_at'),
+                                    $col['pctx'], $contextsByQ[$qid] ?? []);
                         } else {
-                            $pool = $instByQ[(int)$qId] ?? collect();
-                            $ans  = $pool->whereStrict('parent_context_id', null)->first()
-                                ?? $pool->first();
+                            $ans = $this->pickContextAnswer($instByQ[$qid] ?? [], null);
 
                             // Fallback: preloaded no-date-filter collection (image uploaded before range).
                             // Must still be scoped to this instance group — otherwise a different
                             // instance's most-recently-updated media answer could bleed into this row.
                             if (!$ans) {
-                                $fb = $this->filterAnswersByInstanceGroup($noFilterByQ[(int)$qId] ?? collect(), $gid);
-                                $ans = $fb->whereStrict('parent_context_id', null)->sortByDesc('updated_at')->first()
-                                    ?? $fb->sortByDesc('updated_at')->first();
+                                $ans = $this->pickContextAnswer(
+                                    $this->filterAnswersByInstanceGroup($noFilterByQ[$qid] ?? collect(), $gid)->sortByDesc('updated_at'), null);
                             }
                         }
 
                         if ($ans) {
-                            if (!$auditDateForSheet) {
+                            if (!$auditDateForSheet && $ans->created_at) {
                                 $auditDateForSheet = $ans->created_at->setTimezone('Asia/Kolkata')->format('d-M-Y');
                             }
                             if (!$instUser && isset($ans->user_id)) {
                                 $u = $allUsers[$ans->user_id] ?? null;
                                 $instUser = $u ? $u->name : '';
-                                $instDate = $ans->created_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i');
+                                $instDate = $ans->created_at ? $ans->created_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i') : '';
                             }
                             if (!$instLatitude  && $ans->latitude)  { $instLatitude  = $ans->latitude; }
                             if (!$instLongitude && $ans->longitude)  { $instLongitude = $ans->longitude; }
@@ -1091,17 +919,7 @@ class ReportController extends Controller
                                 $instVerifDT = $ans->updated_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i');
                             }
 
-                            if (str_contains((string)$qId, '|scanhead|')) {
-                                [, , $scanHeaderName] = explode('|', (string)$qId, 3);
-                                $instRow[] = $this->scanAnswerHeaderValue($ans->user_answer, $scanHeaderName);
-                            } elseif (str_ends_with((string)$qId, '|scanextra')) {
-                                $instRow[] = $this->scanAnswerExtraValue($ans->user_answer, $scanExpectedHeaders[(int)$qId] ?? []);
-                            } else {
-                                $qType = $questionTypeMap[(int)$ans->question_id] ?? '';
-                                $instRow[] = in_array($qType, ['Image', 'File Upload', 'Audio'])
-                                    ? $this->imageAnswerUrl($ans)
-                                    : $this->formatAnswerValue($ans->user_answer, $qType);
-                            }
+                            $instRow[] = $this->reportAnswerCell($ans, $col, $questionTypeMap, $scanExpectedHeaders);
                         } else {
                             $instRow[] = '';
                         }
@@ -1113,6 +931,7 @@ class ReportController extends Controller
                     $instRow[] = $instVerifDT;
                     $instRow[] = $instLatitude;
                     $instRow[] = $instLongitude;
+                    if ($this->openLocationEnabled()) { $instRow[] = $this->mapsLink($instLatitude, $instLongitude); }
                     $instRow[] = $instUser;
                     $instRow[] = $instDate;
 
@@ -1188,24 +1007,73 @@ class ReportController extends Controller
             $actHeader[] = 'Verification Date & Time';
             $actHeader[] = 'latitude';
             $actHeader[] = 'longitude';
+            if ($this->openLocationEnabled()) { $actHeader[] = 'Open Location'; }
             $actHeader[] = 'User';
             $actHeader[] = 'Date';
 
             $instSheetRows[] = $actHeader;
+            $relationRows = [];
+            if ($withRelationRow) {
+                $relationRow = ['', '', '', ''];
+                foreach ($actData['questionSet'] as $qId) {
+                    $relationRow[] = $columnInfo[$actData['setIndex']][$qId]['relation'] ?? '';
+                }
+                $relationRows[] = count($instSheetRows);
+                $instSheetRows[] = array_pad($relationRow, count($actHeader), '');
+            }
             foreach ($actData['rows'] as $r) {
                 $instSheetRows[] = $r;
             }
 
-            $extraSheets[] = ['title' => $sheetTitle, 'rows' => $instSheetRows];
+            $extraSheets[] = ['title' => $sheetTitle, 'rows' => $instSheetRows, 'relation_rows' => $relationRows];
         }
 
         // ── Excel generation via PhpSpreadsheet ───────────────────────────────
         $baseUrl   = rtrim(config('app.url'), '/');
         $mainTitle = substr($projectName . ' ' . $templateName, 0, 31);
 
-        $xlsxTmp = $this->generateXlsxViaPHP($mainTitle, $mainSheetData, $extraSheets, $baseUrl);
+        // Report header block + header filters (REPORT_HEADER_ENABLED, default on; set
+        // REPORT_HEADER_ENABLED=false in .env, or restore ReportController.php.bak_before_report_header,
+        // to get the original layout back). Never for the copy a tool reads (Infiltration, Godrej):
+        // those read row 1 as the headers.
+        $reportMeta = null;
+        if ($withRelationRow && filter_var(env('REPORT_HEADER_ENABLED', true), FILTER_VALIDATE_BOOLEAN)) {
+            $companyName  = optional(\App\Models\Company::find(optional($projectTemplate->getProject)->company_id))->company_name;
+            $activityIds  = array_values(array_filter((array) $request->activity_id));
+            $activityMap  = \App\Models\Activity::whereIn('id', $activityIds)->pluck('activity_name', 'id');
+            $activityNames = collect($activityIds)->map(fn($id) => $activityMap[$id] ?? null)->filter()->unique()->implode(', ');
+            try {
+                $fromLabel = \Carbon\Carbon::parse($start_date)->format('d M Y');
+                $toLabel   = \Carbon\Carbon::parse($end_date)->format('d M Y');
+            } catch (\Throwable $e) {
+                $fromLabel = (string) $start_date;
+                $toLabel   = (string) $end_date;
+            }
+            $reportMeta = [
+                'company'  => (string) ($companyName ?: $projectName),
+                'activity' => (string) $activityNames,
+                'period'   => $fromLabel . ' - ' . $toLabel,
+            ];
+        }
+
+        $xlsxTmp = $this->generateXlsxViaPHP($mainTitle, $mainSheetData, $extraSheets, $baseUrl, $withRelationRow ? 2 : 1, $reportMeta);
 
         return ['path' => $xlsxTmp, 'file_name' => $fileName];
+    }
+
+    /** One Report Dump cell for an answer: link for media, scan header split, formatted value otherwise. */
+    private function reportAnswerCell($answer, array $col, $questionTypeMap, array $scanExpectedHeaders)
+    {
+        if ($col['scan'] === 'head') {
+            return $this->scanAnswerHeaderValue($answer->user_answer, $col['scan_header']);
+        }
+        if ($col['scan'] === 'extra') {
+            return $this->scanAnswerExtraValue($answer->user_answer, $scanExpectedHeaders[$col['qid']] ?? []);
+        }
+        $qType = $questionTypeMap[$col['qid']] ?? '';
+        return in_array($qType, ['Image', 'File Upload', 'Audio'])
+            ? $this->imageAnswerUrl($answer)
+            : $this->formatAnswerValue($answer->user_answer, $qType);
     }
 
     
@@ -1483,7 +1351,11 @@ class ReportController extends Controller
 
         $added = 0;
         foreach ($paths as $i => $path) {
-            $absPath = public_path(ltrim($path, '/'));
+            $rel     = ltrim($path, '/');
+            $absPath = public_path($rel);
+            if (!file_exists($absPath) && ($stamped = \App\Services\GeoStamp::stampedSibling($rel))) {
+                $absPath = public_path($stamped);
+            }
             if (file_exists($absPath)) {
                 $ext = strtolower(pathinfo($absPath, PATHINFO_EXTENSION)) ?: 'jpg';
                 $zip->addFile($absPath, 'image_' . ($i + 1) . '.' . $ext);
@@ -2147,13 +2019,6 @@ class ReportController extends Controller
             ->get()
             ->groupBy('activity_id');
 
-        // Preload QuestionSubQuestion links for all dist activity questions
-        $_allDistQIds = $allDistQuestions->flatten()->pluck('id')->toArray();
-        $_distSubLinksColl = QuestionSubQuestion::whereIn('parent_question_id', $_allDistQIds)
-            ->orWhereIn('child_question_id', $_allDistQIds)
-            ->get();
-        $distAllSubChildIds = $_distSubLinksColl->pluck('child_question_id')->unique()->toArray();
-
         // Preload Activity models
         $distActivityModels = Activity::whereIn('id', $dist_activites)->get()->keyBy('id');
 
@@ -2181,33 +2046,19 @@ class ReportController extends Controller
                 [$dist_project_template->getMainHeader->template_head_name, $main_header_val],
                 [$dist_project_template->getSubHeader->template_head_name, $sub_header_val],
                 ['Audit Date'],
-                ['Sr. No', 'Particular', 'Remark'] // Questions & Answers
+                ['Sr. No', 'Particular', 'Relation', 'Remark'] // Questions, how they hang from their parents, answers
             ];
 
             // Use preloaded questions
             $allQuestions = $allDistQuestions[$dist_activity] ?? collect();
 
-            // Use preloaded sub-child IDs (no per-activity BFS queries needed)
-            $subChildIds = $distAllSubChildIds;
-
-            // Build hierarchical structure (handles Outlet + old parent-child)
-            // Each entry: ['question' => Question, 'prefix' => string, 'is_outlet' => bool]
-            $questionsWithHierarchy = [];
-            foreach ($allQuestions as $question) {
-                if ($question->parent_question_id == null && !in_array($question->id, $subChildIds)) {
-                    if ($question->question_type === 'Multi Response') {
-                        $this->addOutletSubQuestionsFlat($question, $questionsWithHierarchy, $question->question);
-                    } else {
-                        $questionsWithHierarchy[] = ['question' => $question, 'prefix' => '', 'is_outlet' => false, 'mr_parent_id' => null];
-                        $children = $allQuestions->where('parent_question_id', $question->id);
-                        foreach ($children as $child) {
-                            // Conditional child — store parent's raw PK as pctx so the report
-                            // reads the answer stored with parent_context_id = parent.id
-                            $questionsWithHierarchy[] = ['question' => $child, 'prefix' => $question->question, 'is_outlet' => false, 'mr_parent_id' => $question->getKey()];
-                        }
-                    }
-                }
-            }
+            // Every answerable question at any depth (Multi Response sub-questions, conditional
+            // questions), each with the context its answer is saved under and its relation
+            $questionsWithHierarchy = array_map(
+                fn($item) => $item + ['prefix' => '', 'is_outlet' => false, 'mr_parent_id' => $item['pctx']],
+                $this->flattenActivityQuestions($allQuestions)
+            );
+            $distContextsByQ = $this->contextsByQuestion($questionsWithHierarchy);
 
             // Use preloaded answers — no DB query
             $check_if_activity_answered = collect($distAnsIdx[$activity->id] ?? [])->flatten(1)->first();
@@ -2265,8 +2116,9 @@ class ReportController extends Controller
                             continue;
                         }
 
-                        // Build display name from pre-computed prefix
-                        $displayQuestion = $qPrefix ? $qPrefix . ' → ' . $activity_question->question : $activity_question->question;
+                        // The question's own name; its parents go in the Relation column
+                        $displayQuestion = $activity_question->question;
+                        $qRelation       = $qItem['relation'];
 
                         // Original submission — filter by first activity_sequence (in-memory, no DB query)
                         if ($activity_question->question_type == 'Subjective') {
@@ -2308,7 +2160,7 @@ class ReportController extends Controller
                                     }
 
                                     $label = $isUrlOrPath ? $displayQ . ' - File' : $displayQ;
-                                    $activitySheetData[] = array_merge([$rowCounter++, $label, $origVal], $extraCols);
+                                    $activitySheetData[] = array_merge([$rowCounter++, $label, $qRelation, $origVal], $extraCols);
 
                                     // Capture metadata from first answer
                                     if ($answerIndex == 0) {
@@ -2331,7 +2183,7 @@ class ReportController extends Controller
                                     }
                                 }
                             } else {
-                                $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion, null], array_fill(0, $extraInstanceCount, null));
+                                $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion, $qRelation, null], array_fill(0, $extraInstanceCount, null));
                             }
                         } else {
                             // Non-subjective question — original submission (first same_answer_id group)
@@ -2343,10 +2195,9 @@ class ReportController extends Controller
                             $_qPool   = collect($distAnsIdx[$activity->id][$sqKey] ?? []);
                             $_seqColl = $distSeqFilter($_qPool, $firstSeq);
                             if ($mrPctxId !== null) {
-                                $user_answer = $_seqColl->firstWhere('parent_context_id', $mrPctxId)
-                                    ?? $_seqColl->first()
-                                    ?? $_qPool->firstWhere('parent_context_id', $mrPctxId)
-                                    ?? $_qPool->first();
+                                $_others = $distContextsByQ[$sqKey] ?? [];
+                                $user_answer = $this->pickContextAnswer($_seqColl, $mrPctxId, $_others)
+                                    ?? $this->pickContextAnswer($_qPool, $mrPctxId, $_others);
 
                                 // Fallback: swapped storage (question_id = MR parent, parent_context_id
                                 // = sub-question) — a save-path bug (fixed separately) produced this
@@ -2405,9 +2256,9 @@ class ReportController extends Controller
                                 }
 
                                 if (in_array($activity_question->question_type, ['File Upload', 'Image', 'Audio'])) {
-                                    $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion, $this->imageAnswerUrl($user_answer)], $extraCols);
+                                    $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion, $qRelation, $this->imageAnswerUrl($user_answer)], $extraCols);
                                 } elseif ($activity_question->question_type == 'Location' && empty($user_answer->user_answer) && $user_answer->latitude && $user_answer->longitude) {
-                                    $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion, $user_answer->latitude . ', ' . $user_answer->longitude], $extraCols);
+                                    $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion, $qRelation, $user_answer->latitude . ', ' . $user_answer->longitude], $extraCols);
                                 } elseif (in_array($activity_question->question_type, ['Barcode', 'QR Code', 'RFID'])) {
                                     // One row per configured expected header (matched scan data), plus
                                     // one more row for anything scanned that doesn't match a header —
@@ -2416,25 +2267,25 @@ class ReportController extends Controller
                                     $scanHeaders = $activity_question->getOptions->pluck('option')->map('trim')->filter()->values()->all();
                                     foreach ($scanHeaders as $scanHeader) {
                                         $activitySheetData[] = array_merge(
-                                            [$rowCounter++, $displayQuestion . ' → ' . $scanHeader, $this->scanAnswerHeaderValue($user_answer->user_answer, $scanHeader)],
+                                            [$rowCounter++, $displayQuestion . ' → ' . $scanHeader, $qRelation !== '' ? $qRelation . ' → ' . $scanHeader : '', $this->scanAnswerHeaderValue($user_answer->user_answer, $scanHeader)],
                                             $extraCols
                                         );
                                     }
                                     $activitySheetData[] = array_merge(
-                                        [$rowCounter++, $displayQuestion, $this->scanAnswerExtraValue($user_answer->user_answer, $scanHeaders)],
+                                        [$rowCounter++, $displayQuestion, $qRelation, $this->scanAnswerExtraValue($user_answer->user_answer, $scanHeaders)],
                                         $extraCols
                                     );
                                 } else {
-                                    $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion, $user_answer->user_answer], $extraCols);
+                                    $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion, $qRelation, $user_answer->user_answer], $extraCols);
                                 }
                             } elseif (in_array($activity_question->question_type, ['Barcode', 'QR Code', 'RFID'])) {
                                 $scanHeaders = $activity_question->getOptions->pluck('option')->map('trim')->filter()->values()->all();
                                 foreach ($scanHeaders as $scanHeader) {
-                                    $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion . ' → ' . $scanHeader, null], $extraCols);
+                                    $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion . ' → ' . $scanHeader, $qRelation !== '' ? $qRelation . ' → ' . $scanHeader : '', null], $extraCols);
                                 }
-                                $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion, null], $extraCols);
+                                $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion, $qRelation, null], $extraCols);
                             } else {
-                                $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion, null], $extraCols);
+                                $activitySheetData[] = array_merge([$rowCounter++, $displayQuestion, $qRelation, null], $extraCols);
                             }
                         }
                     }
@@ -2448,15 +2299,16 @@ class ReportController extends Controller
                             $outletLabel = $qPrefix ? $qPrefix . ' → ' . $activity_question->question : $activity_question->question;
                             $activitySheetData[] = [$rowCounter++, '— ' . $outletLabel . ' —', ''];
                         } else {
-                            $displayQuestion = $qItem['prefix'] ? $qItem['prefix'] . ' → ' . $activity_question->question : $activity_question->question;
+                            $displayQuestion = $activity_question->question;
+                            $qRelation       = $qItem['relation'];
                             if (in_array($activity_question->question_type, ['Barcode', 'QR Code', 'RFID'])) {
                                 $scanHeaders = $activity_question->getOptions->pluck('option')->map('trim')->filter()->values()->all();
                                 foreach ($scanHeaders as $scanHeader) {
-                                    $activitySheetData[] = [$rowCounter++, $displayQuestion . ' → ' . $scanHeader, null];
+                                    $activitySheetData[] = [$rowCounter++, $displayQuestion . ' → ' . $scanHeader, $qRelation !== '' ? $qRelation . ' → ' . $scanHeader : '', null];
                                 }
-                                $activitySheetData[] = [$rowCounter++, $displayQuestion, null];
+                                $activitySheetData[] = [$rowCounter++, $displayQuestion, $qRelation, null];
                             } else {
-                                $activitySheetData[] = [$rowCounter++, $displayQuestion, null];
+                                $activitySheetData[] = [$rowCounter++, $displayQuestion, $qRelation, null];
                             }
                         }
                     }
@@ -2483,8 +2335,9 @@ class ReportController extends Controller
             if (!$hasMultiInstance) {
                 // No multiple instances — use vertical (old format) sheet
                 $sheetData[] = [
-                    'header' => [mb_substr($activity->activity_name, 0, 31)],
-                    'data'   => $activitySheetData,
+                    'header'        => [mb_substr($activity->activity_name, 0, 31)],
+                    'data'          => $activitySheetData,
+                    'relation_cols' => [2],
                 ];
             }
 
@@ -2494,9 +2347,11 @@ class ReportController extends Controller
                 foreach ($questionsWithHierarchy as $qItem) {
                     if ($qItem['is_outlet']) continue;
                     $distInstQCols[] = [
-                        'name' => $qItem['prefix'] ? $qItem['prefix'] . ' → ' . $qItem['question']->question : $qItem['question']->question,
-                        'id'   => $qItem['question']->getKey(), // raw numeric PK
-                        'type' => $qItem['question']->question_type,
+                        'name'     => $qItem['question']->question,
+                        'relation' => $qItem['relation'],
+                        'pctx'     => $qItem['pctx'],
+                        'id'       => $qItem['question']->getKey(), // raw numeric PK
+                        'type'     => $qItem['question']->question_type,
                     ];
                 }
 
@@ -2529,8 +2384,7 @@ class ReportController extends Controller
                             })->toArray();
                             $instRow[] = implode(' | ', $vals) ?: null;
                         } else {
-                            $ans = $_instSeqd->filter(fn($a) => is_null($a->parent_context_id))->first()
-                                ?? $_instSeqd->first();
+                            $ans = $this->pickContextAnswer($_instSeqd, $col['pctx'], $distContextsByQ[$col['id']] ?? []);
                             if ($ans) {
                                 if (!$instAuditorName && $ans->getUser)    { $instAuditorName   = $ans->getUser->name; $instAuditDateTime = $ans->created_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i'); }
                                 if (!$instVerifierName && $ans->verified_by && $ans->getVerifier) { $instVerifierName  = $ans->getVerifier->name; }
@@ -2719,13 +2573,18 @@ class ReportController extends Controller
             $actHeader[] = 'Verification Date & Time';
 
             $instSheetRows[] = $actHeader;
+            $instSheetRows[] = array_pad(
+                array_merge(['', ''], array_column($actData['questions'], 'relation')),
+                count($actHeader), ''
+            );
             foreach ($actData['rows'] as $r) {
                 $instSheetRows[] = $r;
             }
 
             $sheetData[] = [
-                'header' => [$sheetTitle],
-                'data'   => $instSheetRows,
+                'header'        => [$sheetTitle],
+                'data'          => $instSheetRows,
+                'relation_rows' => [count($instSheetRows) - count($actData['rows']) - 1],
             ];
         }
 
@@ -2764,45 +2623,15 @@ class ReportController extends Controller
                         ->orderBy('question_sequence')
                         ->get();
 
-                    // BFS: collect sub-question child IDs for child activity (Outlet system)
-                    $childQIds = $allChildQuestions->pluck('id')->toArray();
-                    $childSubIds = [];
-                    $cProcess = $childQIds;
-                    while (!empty($cProcess)) {
-                        $cBatch = QuestionSubQuestion::whereIn('parent_question_id', $cProcess)->pluck('child_question_id')->toArray();
-                        $cNew = array_diff($cBatch, $childSubIds);
-                        if (empty($cNew)) break;
-                        $childSubIds = array_merge($childSubIds, $cNew);
-                        $cProcess = array_values($cNew);
+                    // Every answerable question at any depth (Multi Response sub-questions,
+                    // conditional questions): one column each, named by the question itself,
+                    // with its relation on the row under the header
+                    $childFlatQuestions = []; // for answer lookup: ['id', 'question', 'pctx', 'relation']
+                    foreach ($this->flattenActivityQuestions($allChildQuestions) as $fItem) {
+                        $childFlatQuestions[] = ['id' => $fItem['question']->id] + $fItem;
                     }
-
-                    // Build flat question list: ['question' => Question, 'prefix' => string, 'is_outlet' => bool]
-                    $childFlatItems = [];
-                    foreach ($allChildQuestions as $question) {
-                        if ($question->parent_question_id == null && !in_array($question->id, $childSubIds)) {
-                            if ($question->question_type === 'Multi Response') {
-                                // Outlet: no column itself — expand sub-questions with prefix
-                                $this->addOutletSubQuestionsFlat($question, $childFlatItems, $question->question);
-                            } else {
-                                $childFlatItems[] = ['question' => $question, 'prefix' => '', 'is_outlet' => false];
-                                $children = $allChildQuestions->where('parent_question_id', $question->id);
-                                foreach ($children as $child) {
-                                    $childFlatItems[] = ['question' => $child, 'prefix' => $question->question, 'is_outlet' => false];
-                                }
-                            }
-                        }
-                    }
-
-                    // Build headers array from flat items (skip Outlet section headers which have no column)
-                    $questionsArray = [];
-                    $childFlatQuestions = []; // for answer lookup: ['id', 'question']
-                    foreach ($childFlatItems as $fItem) {
-                        if (!$fItem['is_outlet']) {
-                            $hdr = $fItem['prefix'] ? $fItem['prefix'] . ' → ' . $fItem['question']->question : $fItem['question']->question;
-                            $questionsArray[] = $hdr;
-                            $childFlatQuestions[] = ['id' => $fItem['question']->id, 'question' => $fItem['question']];
-                        }
-                    }
+                    $childContextsByQ = $this->contextsByQuestion($childFlatQuestions);
+                    $questionsArray = array_map(fn($fq) => $fq['question']->question, $childFlatQuestions);
 
                     $activityQuesCount = count($questionsArray);
 
@@ -2810,6 +2639,11 @@ class ReportController extends Controller
                     array_push($questionsArray, 'Auditor Name', 'Audit Date & Time', 'Verification Status', 'Verifier Name', 'Verification Remark', 'Verification Date & Time');
 
                     $activitySheetData[] = $questionsArray;
+                    $outletRelationRow = count($activitySheetData);
+                    $activitySheetData[] = array_pad(
+                        array_merge(['', '', ''], array_column($childFlatQuestions, 'relation')),
+                        count($questionsArray), ''
+                    );
 
                     $child_main_header_id = $other_project_template->main_header;
                     $child_sub_header_id = $other_project_template->sub_header;
@@ -2971,7 +2805,7 @@ class ReportController extends Controller
                                                 $answers[] = '';
                                             }
                                         } else {
-                                            $user_answer = $_oPool->first();
+                                            $user_answer = $this->pickContextAnswer($_oPool, $flatQItem['pctx'], $childContextsByQ[$question->id] ?? []);
 
                                             if ($user_answer) {
                                                 if (!$auditorNameChild && $user_answer->getUser) {
@@ -3015,9 +2849,11 @@ class ReportController extends Controller
                                             $outletInstQCols = [];
                                             foreach ($childFlatQuestions as $fq) {
                                                 $outletInstQCols[] = [
-                                                    'name' => $fq['question']->question,
-                                                    'id'   => $fq['question']->id,
-                                                    'type' => $fq['question']->question_type,
+                                                    'name'     => $fq['question']->question,
+                                                    'relation' => $fq['relation'],
+                                                    'pctx'     => $fq['pctx'],
+                                                    'id'       => $fq['question']->id,
+                                                    'type'     => $fq['question']->question_type,
                                                 ];
                                             }
 
@@ -3039,7 +2875,7 @@ class ReportController extends Controller
                                                         }
                                                         $oRow[] = $oas->map(fn($a) => str_contains($a->user_answer, '/') ? $this->imageAnswerUrl($a) : $a->user_answer)->implode(' | ') ?: null;
                                                     } else {
-                                                        $oa = $_oInstSeqd->first();
+                                                        $oa = $this->pickContextAnswer($_oInstSeqd, $col['pctx'], $childContextsByQ[$col['id']] ?? []);
                                                         if ($oa) {
                                                             if (!$oAuditorName && $oa->getUser) { $oAuditorName = $oa->getUser->name; $oAuditDT = $oa->created_at->setTimezone('Asia/Kolkata')->format('d-M-Y H:i'); }
                                                             if (!$oVerifierName && $oa->verified_by && $oa->getVerifier) { $oVerifierName = $oa->getVerifier->name; }
@@ -3076,8 +2912,9 @@ class ReportController extends Controller
 
                     // Add this child activity's data as a new sheet
                     $sheetData[] = [
-                        'header' => [mb_substr($child_activity_info->activity_name, 0, 31)],
-                        'data' => $activitySheetData
+                        'header'        => [mb_substr($child_activity_info->activity_name, 0, 31)],
+                        'data'          => $activitySheetData,
+                        'relation_rows' => [$outletRelationRow],
                     ];
 
                     // One sheet per outlet per activity — only when that outlet has multiple instances.
@@ -3109,11 +2946,17 @@ class ReportController extends Controller
                         $oInstSheetRows[] = ['Outlet: ' . $oInstData['outletLabel']];
                         $oInstSheetRows[] = ['Activity: ' . $oInstData['activityName']];
                         $oInstSheetRows[] = $oActHeader;
+                        $oRelationRow = count($oInstSheetRows);
+                        $oInstSheetRows[] = array_pad(
+                            array_merge(['', ''], array_column($oInstData['questions'], 'relation')),
+                            count($oActHeader), ''
+                        );
                         foreach ($oInstData['rows'] as $r) { $oInstSheetRows[] = $r; }
 
                         $sheetData[] = [
-                            'header' => [$sheetTitle],
-                            'data'   => $oInstSheetRows,
+                            'header'        => [$sheetTitle],
+                            'data'          => $oInstSheetRows,
+                            'relation_rows' => [$oRelationRow],
                         ];
                     } // end foreach outletInstanceData
                 } // end foreach child_activites
@@ -3424,12 +3267,15 @@ class ReportController extends Controller
      * Generate XLSX via PhpSpreadsheet (reliable fallback — already installed).
      */
     /** Generate XLSX using FastXlsxWriter (no PhpSpreadsheet) — 10-50x faster. */
-    private function generateXlsxViaPHP(string $mainTitle, array $mainRows, array $extraSheets, string $baseUrl): string
+    private function generateXlsxViaPHP(string $mainTitle, array $mainRows, array $extraSheets, string $baseUrl, int $mainHeaderRows = 1, ?array $reportMeta = null): string
     {
         $writer  = new \App\Services\FastXlsxWriter($baseUrl);
-        $writer->addMainSheet($mainTitle, $mainRows);
+        if ($reportMeta !== null) {
+            $writer->enableReportHeader($reportMeta);
+        }
+        $writer->addMainSheet($mainTitle, $mainRows, $mainHeaderRows);
         foreach ($extraSheets as $sheet) {
-            $writer->addExtraSheet($sheet['title'], $sheet['rows']);
+            $writer->addExtraSheet($sheet['title'], $sheet['rows'], $sheet['relation_rows'] ?? []);
         }
         $xlsxTmp = tempnam(sys_get_temp_dir(), 'rpt_fast_') . '.xlsx';
         $writer->save($xlsxTmp);
@@ -3458,7 +3304,7 @@ class ReportController extends Controller
                     }
                 }
             }
-            $writer->addExtraSheet($sheet['header'][0], $rows);
+            $writer->addExtraSheet($sheet['header'][0], $rows, $sheet['relation_rows'] ?? [], $sheet['relation_cols'] ?? []);
         }
         $xlsxTmp = tempnam(sys_get_temp_dir(), 'rpt_dist_') . '.xlsx';
         $writer->save($xlsxTmp);

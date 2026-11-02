@@ -538,7 +538,8 @@ class ActivityController extends Controller
                         ->orWhere('question_type', 'like', "%{$search}%");
                 });
             })
-            ->orderBy($sortBy, $sortDir);
+            ->orderBy($sortBy, $sortDir)
+            ->orderBy('id');
 
         $parentQuestions = $parentQuery->paginate($perPage)->withQueryString();
 
@@ -563,6 +564,27 @@ class ActivityController extends Controller
     public function reorderQuestions($activity_id, \Illuminate\Http\Request $request)
     {
         $ids = $request->input('ids', []);
+
+        // Fix: the list is paginated, so the submitted ids are only one page. Place them into the
+        // slots they already occupy among ALL root questions, then renumber 1..N so pages never collide.
+        // Revertible via .env QUESTION_SEQ_FIX=false.
+        if (filter_var(env('QUESTION_SEQ_FIX', true), FILTER_VALIDATE_BOOLEAN)) {
+            $all = Question::where('activity_id', $activity_id)->where('is_parent', 1)
+                ->orderByRaw('question_sequence IS NULL')->orderBy('question_sequence')->orderBy('id')
+                ->pluck('id')->map(fn($v) => (int) $v)->all();
+            $ids   = array_map('intval', $ids);
+            $slots = array_keys(array_filter($all, fn($v) => in_array($v, $ids, true)));
+            foreach ($slots as $i => $pos) {
+                if (isset($ids[$i])) $all[$pos] = $ids[$i];
+            }
+            $map = [];
+            foreach ($all as $index => $id) {
+                Question::where('id', $id)->where('activity_id', $activity_id)->update(['question_sequence' => $index + 1]);
+                $map[$id] = $index + 1;
+            }
+            return response()->json(['status' => 'success', 'seq' => $map]);
+        }
+
         foreach ($ids as $index => $id) {
             Question::where('id', $id)
                 ->where('activity_id', $activity_id)

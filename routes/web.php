@@ -4,6 +4,9 @@ use App\Http\Controllers\Auth\CustomLoginController;
 use App\Http\Controllers\Auth\UserController;
 use App\Http\Controllers\Masters\ReportController;
 use App\Http\Controllers\Masters\InfiltrationReportController;
+use App\Http\Controllers\Masters\GokulReportController;
+use App\Http\Controllers\Masters\GodrejReportController;
+use App\Http\Controllers\Masters\AwlDepoAuditReportController;
 use App\Http\Controllers\Masters\ActivityController;
 use App\Http\Controllers\Masters\ActivityGroupController;
 use App\Http\Controllers\Masters\AuditorAssignedDataController;
@@ -57,6 +60,10 @@ Route::get('clear', function () {
 });
 
 Route::get('/backup/files', [BackupController::class, 'listFiles']);
+
+// Support page — no login required; at most 5 messages a minute from one visitor
+Route::get('/support', [\App\Http\Controllers\SupportRequestController::class, 'show'])->name('support.show');
+Route::post('/support', [\App\Http\Controllers\SupportRequestController::class, 'store'])->middleware('throttle:5,1')->name('support.store');
 
 // Public — no login required (embedded in Excel reports shared with external users)
 Route::get('/report/download-images-zip/{answer_id}',
@@ -330,6 +337,13 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
         Route::get('/get_all_template_data',                 'getNewProjectTemplateValues')->name('get_all_template_data');
     });
 
+    // ── Support Requests (messages from the public Support page) ──────────────
+    Route::prefix('support_requests')->controller(\App\Http\Controllers\SupportRequestController::class)
+        ->middleware('role:Super Admin')->group(function () {
+            Route::get('/',                        'index')->name('support_requests.index');
+            Route::post('/{supportRequest}/status', 'updateStatus')->name('support_requests.status');
+        });
+
     // ── Template Documents (files named / linked in file columns) ─────────────
     Route::prefix('template_documents')->controller(TemplateDocumentController::class)->group(function () {
         Route::middleware('permission:Upload Project Data')->group(function () {
@@ -389,12 +403,44 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     });
 
     // ── Infiltration Audit Report (external Python tool integration) ───────────
-    Route::prefix('infiltration-report')->controller(InfiltrationReportController::class)->group(function () {
+    Route::middleware('permission:Infiltration Report')->prefix('infiltration-report')->controller(InfiltrationReportController::class)->group(function () {
         Route::get('/',                          'index')->name('infiltration.index');
         Route::post('/generate',                 'generate')->name('infiltration.generate');
         Route::post('/download',                 'download')->name('infiltration.download');
         Route::post('/upload-onedrive-personal',  'uploadToPersonalOneDrive')->name('infiltration.upload_onedrive_personal');
         Route::post('/upload-onedrive-shared',    'uploadToSharedOneDrive')->name('infiltration.upload_onedrive_shared');
+    });
+
+    // ── Gokul distributor report (Excel + photo ZIP) ───────────────────────────
+    Route::middleware('permission:Gokul Report')->prefix('custom-reports/gokul')->controller(GokulReportController::class)->group(function () {
+        Route::get('/',                         'index')->name('gokul.index');
+        Route::get('/rows',                     'rows')->name('gokul.rows');
+        Route::get('/templates',                'templates')->name('gokul.templates');
+        Route::post('/generate',                'generate')->name('gokul.generate');
+        Route::post('/mapping',                 'saveMapping')->middleware('permission:Gokul Report Map Projects')->name('gokul.mapping');
+        Route::get('/run/{run}/status',         'status')->name('gokul.status');
+        Route::get('/run/{run}/download/{type}', 'download')->whereIn('type', ['report', 'zip'])->name('gokul.download');
+    });
+
+    // ── Godrej report (Required Format Excel + photo ZIP) ──────────────────────
+    Route::middleware('permission:Godrej Report')->prefix('custom-reports/godrej')->controller(GodrejReportController::class)->group(function () {
+        Route::get('/',                          'index')->name('godrej.index');
+        Route::get('/templates',                 'templates')->name('godrej.templates');
+        Route::post('/generate',                 'generate')->name('godrej.generate');
+        Route::get('/run/{run}/status',          'status')->name('godrej.status');
+        Route::get('/run/{run}/download/{type}', 'download')->whereIn('type', ['report', 'zip'])->name('godrej.download');
+    });
+
+    // ── AWL Depo Audit report ──────────────────────────────────────────────────
+    Route::middleware('permission:AWL Depo Audit Report')->prefix('custom-reports/awl-depo-audit')->controller(AwlDepoAuditReportController::class)->group(function () {
+        Route::get('/',                          'index')->name('awl_depo_audit.index');
+        Route::get('/rows',                      'rows')->name('awl_depo_audit.rows');
+        Route::get('/templates',                 'templates')->name('awl_depo_audit.templates');
+        Route::get('/distributors',              'distributors')->name('awl_depo_audit.distributors');
+        Route::post('/generate',                 'generate')->name('awl_depo_audit.generate');
+        Route::post('/mapping',                  'saveMapping')->middleware('permission:AWL Depo Audit Report Map Projects')->name('awl_depo_audit.mapping');
+        Route::get('/run/{run}/status',          'status')->name('awl_depo_audit.status');
+        Route::get('/run/{run}/download/{type}', 'download')->whereIn('type', ['report', 'pdf', 'styled', 'zip'])->name('awl_depo_audit.download');
     });
 
     // ── OneDrive (per-user delegated Graph API access, for the Infiltration Report's

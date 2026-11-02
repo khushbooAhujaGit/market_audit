@@ -1,0 +1,246 @@
+<title>Multi-level Questions App Guide</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column (~760px) with wide code/table blocks; level colours match the auditor web form */
+:root {
+  --bg: #fbfbf8; --surface: #ffffff; --fg: #1f2328; --muted: #5d6470; --line: #dfe1e5;
+  --accent: #1f5f8b; --accent-soft: #e8f0f6; --code-bg: #f3f4f1;
+  --l1: #1f2328; --l2: #4a6cf7; --l3: #22863a; --l4: #d96b10;
+  --ok: #22863a; --warn: #b35900;
+  --display: "Source Serif 4", Georgia, serif;
+  --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #15181c; --surface: #1c2026; --fg: #e6e8eb; --muted: #9aa3ad; --line: #30363d;
+  --accent: #7cb7e3; --accent-soft: #1d2a36; --code-bg: #1f242b;
+  --l1: #e6e8eb; --l2: #8ea2ff; --l3: #5cc777; --l4: #f2a05a; --ok: #5cc777; --warn: #f2a05a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #15181c; --surface: #1c2026; --fg: #e6e8eb; --muted: #9aa3ad; --line: #30363d;
+  --accent: #7cb7e3; --accent-soft: #1d2a36; --code-bg: #1f242b;
+  --l1: #e6e8eb; --l2: #8ea2ff; --l3: #5cc777; --l4: #f2a05a; --ok: #5cc777; --warn: #f2a05a; color-scheme: dark }
+
+body { background: var(--bg); color: var(--fg); font: 16px/1.6 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 40px 64px; }
+main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; line-height: 1.25; margin: 0; }
+h1 { font-size: 2.1rem; }
+h2 { font-size: 1.45rem; margin-top: 30px; padding-top: 18px; border-top: 1px solid var(--line); }
+h3 { font-size: 1.1rem; margin-top: 10px; }
+p, ul, ol { margin: 0; }
+ul, ol { padding-left: 1.3em; display: flex; flex-direction: column; gap: 4px; }
+.eyebrow { font-size: .78rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.lede { font-size: 1.1rem; color: var(--muted); }
+code { font-family: var(--mono); font-size: .86em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+pre { font-family: var(--mono); font-size: .82rem; line-height: 1.5; background: var(--code-bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 14px 16px; margin: 0; overflow-x: auto; }
+pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+th, td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+th { font-size: .78rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--code-bg); }
+tr:last-child td { border-bottom: 0; }
+.note { background: var(--accent-soft); border-radius: 8px; padding: 12px 16px; }
+.warn { color: var(--warn); font-weight: 600; }
+
+/* The question tree as the API sends it — one row per question, indented per level */
+.tree { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-x: auto;
+  font-size: .9rem; display: flex; flex-direction: column; gap: 3px; }
+.node { display: flex; gap: 10px; align-items: baseline; white-space: nowrap; }
+.node .code { font-family: var(--mono); font-weight: 600; font-size: .8rem; min-width: 64px; }
+.node .kind { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); min-width: 36px; }
+.node .key { font-family: var(--mono); font-size: .78rem; color: var(--muted); }
+.node .when { font-size: .78rem; color: var(--accent); }
+.lv1 { padding-left: 0; } .lv1 .code { color: var(--l1); }
+.lv2 { padding-left: 22px; } .lv2 .code { color: var(--l2); }
+.lv3 { padding-left: 44px; } .lv3 .code { color: var(--l3); }
+.lv4 { padding-left: 66px; } .lv4 .code { color: var(--l4); }
+.checklist li { list-style: none; position: relative; }
+.checklist { padding-left: 1.6em; }
+.checklist li::before { content: ""; position: absolute; left: -1.5em; top: .35em; width: .8em; height: .8em; border: 1.5px solid var(--accent); border-radius: 3px; }
+</style>
+
+<main>
+  <p class="eyebrow">Market Audit · App API · 31 Oct 2026</p>
+  <h1>Multi-level Questions App Guide</h1>
+  <p class="lede">What changed in the app API for the eight question nesting cases, and what the app has to change to draw, save and submit them.</p>
+
+  <div class="note">
+    <p><strong>Nothing breaks for the current app.</strong> Every field the app reads today is still sent with the same meaning. The API only adds fields and fills in the levels it used to leave out. Cases 1 to 4 keep working unchanged; cases 5 to 8 need the app changes below.</p>
+  </div>
+
+  <h2>The eight cases</h2>
+  <p>An activity can nest questions in these shapes only (max 2 Multi Response levels, 2 conditional levels, 4 levels in total). Full rules: <code>docs/Question Nesting Rules.html</code>.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>#</th><th>Structure</th><th>Levels</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Yes / No = Yes → any question</td><td>2</td></tr>
+      <tr><td>2</td><td>Dropdown = option → any question</td><td>2</td></tr>
+      <tr><td>3</td><td>Multi Response → sub-questions</td><td>2</td></tr>
+      <tr><td>4</td><td>Multi Response → Yes / No or Dropdown → any question</td><td>3</td></tr>
+      <tr><td>5</td><td>Yes / No or Dropdown → Yes / No or Dropdown → any question</td><td>3</td></tr>
+      <tr><td>6</td><td>Multi Response → Yes / No or Dropdown → Yes / No or Dropdown → any question</td><td>4</td></tr>
+      <tr><td>7</td><td>Multi Response → Multi Response → sub-questions</td><td>3</td></tr>
+      <tr><td>8</td><td>Multi Response → Multi Response → Yes / No or Dropdown → any question</td><td>4</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>1. getAllQuestion: the question tree</h2>
+  <p><code>GET /api/getAllQuestion?row_id=…&amp;activity_id=…</code> returns the same <code>data</code> array as before: root questions only, each child nested inside its parent. Two places hold children:</p>
+  <ul>
+    <li><code>sub_questions[].child_question</code>: members of a Multi Response group. They are always shown. A member can itself be a Multi Response (a child group) with its own <code>sub_questions</code>.</li>
+    <li><code>conditional_questions[]</code>: questions shown only when this question's answer matches their <code>trigger_value</code>. Every question now has this array (empty when it has none), at every level.</li>
+  </ul>
+  <p>This is the tree the API sends for a test activity that uses all eight cases. It is the same structure and the same codes the auditor web form shows:</p>
+  <div class="tree" role="figure" aria-label="Question tree example">
+    <div class="node lv1"><span class="code">Q001</span><span class="kind">root</span>Visit remark <span class="key">2634</span></div>
+    <div class="node lv1"><span class="code">Q002</span><span class="kind">root</span>Outlet open? (Yes / No) <span class="key">2635</span></div>
+    <div class="node lv2"><span class="code">Q002a</span><span class="kind">if</span>Stock level (Dropdown) <span class="when">when Yes</span> <span class="key">2636_pctx_2635</span></div>
+    <div class="node lv3"><span class="code">Q002aa</span><span class="kind">if</span>Low stock items <span class="when">when Low</span> <span class="key">2637_pctx_2636</span></div>
+    <div class="node lv3"><span class="code">Q002ab</span><span class="kind">if</span>Empty shelf photo <span class="when">when Empty</span> <span class="key">2638_pctx_2636</span></div>
+    <div class="node lv1"><span class="code">Q003</span><span class="kind">group</span>Audit (Multi Response) <span class="key">2639</span></div>
+    <div class="node lv2"><span class="code">Q003a</span><span class="kind">sub</span>Audit date &amp; time <span class="key">2640_pctx_2639</span></div>
+    <div class="node lv2"><span class="code">Q003b</span><span class="kind">group</span>Fridge (child Multi Response) <span class="key">2641_pctx_2639</span></div>
+    <div class="node lv3"><span class="code">Q003b1</span><span class="kind">sub</span>Fridge clean? (Yes / No) <span class="key">2642_pctx_2641</span></div>
+    <div class="node lv4"><span class="code">Q003b1a</span><span class="kind">if</span>Fridge photo <span class="when">when No</span> <span class="key">2643_pctx_2642</span></div>
+    <div class="node lv3"><span class="code">Q003b2</span><span class="kind">sub</span>Fridge brand <span class="key">2644_pctx_2641</span></div>
+    <div class="node lv2"><span class="code">Q003c</span><span class="kind">sub</span>Branding visible? (Yes / No) <span class="key">2645_pctx_2639</span></div>
+    <div class="node lv3"><span class="code">Q003ca</span><span class="kind">if</span>Branding place (Dropdown) <span class="when">when Yes</span> <span class="key">2646_pctx_2645</span></div>
+    <div class="node lv4"><span class="code">Q003caa</span><span class="kind">if</span>Outside branding photo <span class="when">when Outside</span> <span class="key">2647_pctx_2646</span></div>
+  </div>
+
+  <h3>New fields on every question, at every level</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>question_code</code></td><td>Code to show next to the question, the same as on the web form: <code>Q003</code>, a group member <code>Q003b</code>, a child group member <code>Q003b1</code>, a conditional question its parent's code plus a letter (<code>Q003b1a</code>). Before, only roots and first-level members had one.</td></tr>
+      <tr><td><code>level</code></td><td>1 for a root question, up to 4. Use it for indentation.</td></tr>
+      <tr><td><code>parent_context_id</code></td><td>The context this question's answer is saved under: <code>null</code> for a root question, the group's id for a group member, the parent's id for a conditional question. Send it back when saving.</td></tr>
+      <tr><td><code>answer_key</code></td><td>The same thing as one string: <code>"2634"</code> or <code>"2643_pctx_2642"</code>. Use it as the key of the app's local answer state and as the field name in <code>answerSubmit</code>.</td></tr>
+      <tr><td><code>conditional_questions</code></td><td>Now on every question, recursively. Each item also has <code>trigger_value</code> and <code>parent_question_name</code>.</td></tr>
+      <tr><td><code>on_click</code></td><td>Now on every question: <code>true</code> when one of its conditional questions shows on any answer.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Example: a level 3 question and its level 4 conditional question</h3>
+<pre><code>{
+  "id": 2642, "question": "Fridge clean?", "question_type": "Yes / No",
+  "question_code": "Q003b1", "level": 3, "answer_type": 1,
+  "parent_question_id": 2641, "parent_question_name": "Fridge (child Multi Response)",
+  "parent_context_id": 2641, "answer_key": "2642_pctx_2641",
+  "on_click": false,
+  "conditional_questions": [
+    {
+      "id": 2643, "question": "Fridge photo (not clean)", "question_type": "Image",
+      "question_code": "Q003b1a", "level": 4, "answer_type": 1,
+      "trigger_value": "No", "parent_question_name": "Fridge clean?",
+      "parent_context_id": 2642, "answer_key": "2643_pctx_2642",
+      "conditional_questions": []
+    }
+  ]
+}</code></pre>
+
+  <h3>Smaller corrections in the same response</h3>
+  <ul>
+    <li>A group member that is conditional on a sibling member is no longer sent twice. It appears only inside that sibling's <code>conditional_questions</code>. Its code is the same as on the web form, so codes after it in that group can move by one letter.</li>
+    <li>A question that is both a member of a group and "conditional" on that same group is sent only as a member.</li>
+    <li>A group link to a deleted question (empty <code>child_question</code>) is no longer sent.</li>
+    <li>Members of a child group now have <code>parent_question_id</code> set to the child group, as first-level members already had.</li>
+  </ul>
+
+  <h2>2. Drawing the form</h2>
+  <p>Draw the tree with one recursive function, so every level works the same way and no level is skipped:</p>
+<pre><code>// answers: { [answer_key]: value }   (local state, keyed by answer_key)
+function renderQuestion(q) {
+  if (q.question_type === 'Multi Response') {
+    drawGroupCard(q);                          // heading only: no input, never answered
+    q.sub_questions.forEach(link =&gt; renderQuestion(link.child_question));
+  } else {
+    drawQuestion(q);                           // code badge + text + input by question_type
+  }
+  q.conditional_questions
+    .filter(c =&gt; isTriggered(c, answers[q.answer_key]))
+    .forEach(c =&gt; renderQuestion(c));          // directly under the parent
+}
+
+function isTriggered(c, parentValue) {
+  const v = String(parentValue ?? '').trim();
+  const t = String(c.trigger_value ?? '').trim();
+  if (t === '' || t === '__non_empty__') return v !== '';   // "any answer"
+  return v.toLowerCase() === t.toLowerCase();
+}
+
+data.forEach(renderQuestion);</code></pre>
+  <ul>
+    <li><strong>Indent by <code>level</code></strong> (about 12 to 14 px per level), and show <code>question_code</code> as a small badge. The web form colours levels 2, 3 and 4 blue, green and orange.</li>
+    <li><strong>A child group</strong> (a Multi Response inside a Multi Response) is a card inside the parent group's card, with its own members inside it.</li>
+    <li><strong>Re-evaluate on every change.</strong> When an answer changes, redraw that question's conditional questions. A hidden question hides its whole branch, because <code>renderQuestion</code> never reaches the questions below it.</li>
+    <li><strong>Clear hidden answers.</strong> When a branch becomes hidden, clear its local answers and don't send them. The server also deletes answers of hidden branches when the activity is submitted, so a stale answer never reaches the verifier or reports.</li>
+    <li><strong>Required</strong> (<code>answer_type = 1</code>) applies only while a question is shown. Never block Submit on a hidden question.</li>
+  </ul>
+
+  <h2>3. Prefilling saved answers</h2>
+  <p><code>answer_data.original.answers[]</code> (and each instance's <code>answers</code>) already carry <code>question_id</code> and <code>parent_context_id</code>. Build the same key the questions use:</p>
+<pre><code>const keyOf = a =&gt; a.parent_context_id ? `${a.question_id}_pctx_${a.parent_context_id}` : `${a.question_id}`;
+const saved = Object.fromEntries(answerList.map(a =&gt; [keyOf(a), a.user_answer]));
+
+// Answers saved by older app versions have no context: fall back to the plain question id
+const prefill = q =&gt; saved[q.answer_key] ?? saved[String(q.id)];</code></pre>
+
+  <h2>4. Saving an answer</h2>
+  <p><code>POST /api/saveAnswer</code> (form-data), one answer per call, the same as today. The clearest way is the question id plus the new <code>parent_context_id</code> field:</p>
+<pre><code>row_id=408568
+activity_id=140
+activity_sequence=0
+latitude=19.0760            (required on the first answer of the instance)
+longitude=72.8777
+question_id=2643
+parent_context_id=2642      (the question's parent_context_id; leave it out for a root question)
+value=…                     (or the file in "file" for Image / Audio / Video / File Upload)</code></pre>
+  <ul>
+    <li>The existing key formats still work: <code>{answer_key}=value</code> (for example <code>2643_pctx_2642=…</code>), and the reversed <code>{group}_pctx_{question}</code> that some app versions send.</li>
+    <li>A <code>parent_context_id</code> that is neither the question's group nor its parent is refused with <code>422</code> and a message naming both ids.</li>
+    <li>If the same question was saved earlier without a context (older app versions did this for conditional questions), the server now updates that answer and gives it the context. It doesn't create a second copy.</li>
+    <li>The response's <code>data.parent_context_id</code> shows the context it was saved under.</li>
+  </ul>
+
+  <h2>5. Submitting</h2>
+  <p>No change in how the app calls Submit: <code>saveAnswer</code> without a <code>question_id</code>, or <code>POST /api/finalizeAnswers</code>. What the server now does on submit:</p>
+  <ol>
+    <li>Deletes the answers of every branch that is hidden by the current answers, at every level (the web form already did this).</li>
+    <li>Checks required questions at every level: root questions, group members at any depth, and conditional questions only while their whole parent chain is shown.</li>
+    <li>Marks the instance's answers as submitted (status 1), as before.</li>
+  </ol>
+  <p>A missing required answer returns <code>422</code> with the same <code>missing</code> list as before:</p>
+<pre><code>{ "status": 422, "message": "Please answer all required (*) questions.",
+  "missing": [ { "question_id": 2643, "question": "Fridge photo (not clean)" } ] }</code></pre>
+  <p class="warn">Behaviour change: finalizeAnswers used to skip conditional questions entirely. It now requires a shown conditional question that is marked required, exactly like saveAnswer's submit and the web form.</p>
+
+  <h2>6. Bulk answerSubmit</h2>
+  <p>If the app uses <code>POST /api/answerSubmit</code>, send each answer under its <code>answer_key</code> (for example <code>2637_pctx_2636=Milk</code>) and pre-uploaded images as <code>multi_images_{answer_key}[]</code>. Fixed on the server:</p>
+  <ul>
+    <li>Validation and saving used to read <code>_pctx_</code> keys in opposite orders, so group answers could be saved under the group's id. Both now read the key the same way, and the reversed order is detected.</li>
+    <li>An answer is updated per question and context. Before, one value overwrote the question in every context.</li>
+    <li>Required conditional questions are judged on the saved answers plus the values in this request. Before, a parent answered in the same request didn't count. Images sent as <code>multi_images_…</code> count as answered.</li>
+    <li>Hidden-branch answers are removed after saving.</li>
+  </ul>
+
+  <h2>Checklist for the app</h2>
+  <ul class="checklist">
+    <li>Render questions with one recursive function over <code>sub_questions</code> and <code>conditional_questions</code> (no fixed number of levels).</li>
+    <li>Key local answers by <code>answer_key</code>; prefill with the fallback to the plain question id.</li>
+    <li>Show <code>question_code</code> and indent by <code>level</code>; draw a child group as a card inside its group.</li>
+    <li>Show or hide conditional questions with <code>isTriggered</code>, re-run on every answer change, and clear answers of hidden branches.</li>
+    <li>Send <code>parent_context_id</code> (or use <code>answer_key</code> as the field name) on every saveAnswer call.</li>
+    <li>Treat required only for shown questions, and show the server's <code>missing</code> list on a 422 from Submit.</li>
+    <li>Test all eight cases: answer, change a parent answer to hide a branch, reopen the activity, submit.</li>
+  </ul>
+
+  <h2>Server files changed</h2>
+  <ul>
+    <li><code>app/Http/Controllers/API/TaskController.php</code>: getAllQuestion, saveAnswer, submit mode, finalizeAnswers, answerSubmit.</li>
+    <li><code>app/Services/ConditionalAnswers.php</code> (new): shared rules for which conditional questions are shown, hidden-branch cleanup and required questions.</li>
+    <li><code>app/Http/Controllers/Masters/TaskHandlerController.php</code>: the web form now uses the same shared rules.</li>
+  </ul>
+</main>

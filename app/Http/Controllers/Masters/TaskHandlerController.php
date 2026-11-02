@@ -2431,6 +2431,11 @@ class TaskHandlerController extends Controller
         $latitude    = $request->latitude ?? null;
         $longitude   = $request->longitude ?? null;
 
+        // Multi select sends its choices as an array: store them comma-separated, like the full save
+        if (is_array($value)) {
+            $value = implode(',', array_filter($value, fn($v) => trim((string) $v) !== ''));
+        }
+
         // Skip empty values — nothing to save
         if ($value === null || trim((string) $value) === '') {
             return response()->json(['saved' => false, 'reason' => 'empty']);
@@ -3527,45 +3532,8 @@ class TaskHandlerController extends Controller
      */
     private function removeHiddenConditionalAnswers(int $rowId, int $activityId, int $activitySequence): void
     {
-        $conditional = Question::where('activity_id', $activityId)
-            ->where('is_parent', 0)
-            ->whereNotNull('parent_question_id')
-            ->get(['id', 'parent_question_id', 'parent_value'])
-            ->keyBy('id');
-        if ($conditional->isEmpty()) return;
-
-        $parentTypes = Question::whereIn('id', $conditional->pluck('parent_question_id')->unique())->pluck('question_type', 'id');
-        $answerOf = TempUserActivityAnswersData::where('row_id', $rowId)
-            ->where('activity_id', $activityId)
-            ->where($this->activitySequenceFilter($activitySequence))
-            ->orderBy('id')
-            ->get(['question_id', 'user_answer'])
-            ->mapWithKeys(fn($a) => [$a->question_id => trim((string) $a->user_answer)]);   // latest per question
-
-        $shown = [];
-        $isShown = function ($questionId) use (&$isShown, &$shown, $conditional, $parentTypes, $answerOf) {
-            if (array_key_exists($questionId, $shown)) return $shown[$questionId];
-            $question = $conditional[$questionId] ?? null;
-            if (!$question) return $shown[$questionId] = true;   // not conditional: always shown
-            $shown[$questionId] = true;                            // guards a parent loop
-            $trigger = trim((string) $question->parent_value);
-            $parentType = $parentTypes[$question->parent_question_id] ?? null;
-            if ($trigger !== '__non_empty__' && !in_array($parentType, ['Yes / No', 'Dropdown'], true)) {
-                return $shown[$questionId] = true;                 // can't judge: keep
-            }
-            $parentAnswer = $answerOf[$question->parent_question_id] ?? '';
-            $matches = $trigger === '__non_empty__' ? $parentAnswer !== '' : ($parentAnswer !== '' && $parentAnswer === $trigger);
-            return $shown[$questionId] = $matches && $isShown($question->parent_question_id);
-        };
-
-        $hiddenIds = $conditional->keys()->reject(fn($id) => $isShown($id))->values()->all();
-        if ($hiddenIds) {
-            TempUserActivityAnswersData::where('row_id', $rowId)
-                ->where('activity_id', $activityId)
-                ->where($this->activitySequenceFilter($activitySequence))
-                ->whereIn('question_id', $hiddenIds)
-                ->delete();
-        }
+        // Shared with the app API (saveAnswer submit, finalizeAnswers, answerSubmit)
+        \App\Services\ConditionalAnswers::removeHidden($rowId, $activityId, $activitySequence);
     }
 
     /**

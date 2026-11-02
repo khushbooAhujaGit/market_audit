@@ -108,7 +108,13 @@
     @endif
 </div>
 
-<div class="section-title">Audit Details</div>
+{{-- Activity name beside the heading. Hide with PDF_SHOW_ACTIVITY_NAME=false in .env (or restore verify_template.blade.php.bak_before_activity_name) --}}
+@php
+    $pdfActivityName = filter_var(env('PDF_SHOW_ACTIVITY_NAME', true), FILTER_VALIDATE_BOOLEAN)
+        ? optional(optional($related_questions->first())->activity)->activity_name
+        : null;
+@endphp
+<div class="section-title">Audit Details{{ !empty($pdfActivityName) ? ' - ' . $pdfActivityName : '' }}{{ !empty($pdfActivityName) && !empty($instance_label) ? ' (' . $instance_label . ')' : '' }}</div>
 <table class="info-table-new">
     <tbody>
     <tr>

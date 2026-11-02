@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Question Nesting Rules</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  /* Layout: one reading column of a technical decision record; type-coloured chips draw each question path */
+  :root {
+    --bg: #f6f8f9;
+    --surface: #ffffff;
+    --fg: #1b2328;
+    --muted: #5b6a73;
+    --line: #dde4e8;
+    --accent: #0e6e6a;
+    --accent-soft: #e2f1ef;
+    --ok: #1f7a3d;      --ok-bg: #e3f3e8;
+    --warn: #8a5a00;    --warn-bg: #fbf0d9;
+    --no: #9b2c2c;      --no-bg: #fbe5e5;
+    --t-mr: #2f4b8f;    --t-mr-bg: #e4eaf8;
+    --t-choice: #6b3fa0; --t-choice-bg: #efe6f8;
+    --t-leaf: #405058;  --t-leaf-bg: #e9eef0;
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    --mono: "JetBrains Mono", Consolas, "Courier New", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #11171a; --surface: #182024; --fg: #e3e9ec; --muted: #9aaab2; --line: #2b363c;
+      --accent: #5cc6bd; --accent-soft: #173431;
+      --ok: #7fd49a; --ok-bg: #173323; --warn: #f0c46b; --warn-bg: #3a2e14; --no: #f29a9a; --no-bg: #3d1d1d;
+      --t-mr: #a9bdf2; --t-mr-bg: #1f2a45; --t-choice: #cfb3f2; --t-choice-bg: #2c2140; --t-leaf: #c3d0d6; --t-leaf-bg: #253035;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #11171a; --surface: #182024; --fg: #e3e9ec; --muted: #9aaab2; --line: #2b363c;
+    --accent: #5cc6bd; --accent-soft: #173431;
+    --ok: #7fd49a; --ok-bg: #173323; --warn: #f0c46b; --warn-bg: #3a2e14; --no: #f29a9a; --no-bg: #3d1d1d;
+    --t-mr: #a9bdf2; --t-mr-bg: #1f2a45; --t-choice: #cfb3f2; --t-choice-bg: #2c2140; --t-leaf: #c3d0d6; --t-leaf-bg: #253035;
+    color-scheme: dark;
+  }
+
+  body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 17px; line-height: 1.6; }
+  .page { max-width: 880px; margin: 0 auto; padding-block: 48px 72px;
+          padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .stack { display: flex; flex-direction: column; gap: 40px; }
+  section { display: flex; flex-direction: column; gap: 14px; }
+
+  h1, h2, h3 { font-family: var(--display); line-height: 1.2; text-wrap: balance; margin: 0; }
+  h1 { font-size: clamp(28px, 5vw, 40px); font-weight: 700; letter-spacing: -0.01em; }
+  h2 { font-size: 23px; font-weight: 600; padding-top: 18px; border-top: 1px solid var(--line); }
+  h3 { font-size: 17px; font-weight: 600; }
+  p { margin: 0; max-width: 68ch; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+  .lede { font-size: 19px; color: var(--muted); max-width: 64ch; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 14px; color: var(--muted); }
+  .meta b { color: var(--fg); font-weight: 600; }
+
+  .verdict { background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+             border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; }
+  .verdict p { max-width: none; }
+  .rule-line { display: flex; flex-wrap: wrap; gap: 10px; }
+  .rule { font-family: var(--mono); font-size: 13.5px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: 11px 14px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--display); font-weight: 600; font-size: 13px; letter-spacing: 0.02em; color: var(--muted); background: color-mix(in srgb, var(--line) 35%, var(--surface)); }
+  tr:last-child td { border-bottom: none; }
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); width: 2.5em; }
+  td.levels { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: center; }
+
+  .path { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .path .arrow { color: var(--muted); font-size: 14px; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; border-radius: 999px; padding: 2px 10px; white-space: nowrap; }
+  .chip.mr { color: var(--t-mr); background: var(--t-mr-bg); }
+  .chip.choice { color: var(--t-choice); background: var(--t-choice-bg); }
+  .chip.leaf { color: var(--t-leaf); background: var(--t-leaf-bg); }
+  .when { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .example { color: var(--muted); font-size: 14px; margin-top: 4px; }
+
+  .pill { display: inline-block; font-size: 12.5px; font-weight: 600; border-radius: 6px; padding: 2px 8px; white-space: nowrap; }
+  .pill.ok { color: var(--ok); background: var(--ok-bg); }
+  .pill.warn { color: var(--warn); background: var(--warn-bg); }
+  .pill.no { color: var(--no); background: var(--no-bg); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 14px; color: var(--muted); align-items: center; }
+
+  ol.issues { margin: 0; padding: 0; list-style: none; counter-reset: issue; display: flex; flex-direction: column; gap: 14px; }
+  ol.issues li { counter-increment: issue; display: grid; grid-template-columns: 2.2em 1fr; gap: 4px 12px; }
+  ol.issues li::before { content: counter(issue); font-family: var(--mono); font-weight: 600; color: var(--no); background: var(--no-bg); border-radius: 6px; text-align: center; height: 1.7em; line-height: 1.7em; font-size: 14px; }
+  ol.issues li > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  ol.issues h3 { font-size: 16px; }
+  ol.issues p { color: var(--fg); }
+  ol.issues .eg { color: var(--muted); font-size: 15px; }
+
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .card p { font-size: 15.5px; }
+  code { font-family: var(--mono); font-size: 0.86em; background: color-mix(in srgb, var(--line) 50%, transparent); border-radius: 4px; padding: 1px 5px; }
+  .math { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  footer { font-size: 14px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; }
+</style>
+</head>
+<body>
+<main class="page">
+  <div class="stack">
+
+    <header style="display:flex;flex-direction:column;gap:12px">
+      <span class="eyebrow">Market Audit · Activity questions · Design decision</span>
+      <h1>Question Nesting Rules</h1>
+      <p class="lede">Which multi-level question structures an activity may use, why exactly these eight cases are supported, and what unlimited nesting would break later.</p>
+      <div class="meta"><span><b>Applies to:</b> activity questions (admin), auditor web form, app API, verifier screen, reports</span><span><b>Date:</b> 29 Oct 2026</span></div>
+    </header>
+
+    <div class="verdict">
+      <span class="eyebrow">Decision</span>
+      <p>Activities may nest questions only in the eight shapes below. Every structure is built from two moves (a Multi Response group and its sub-questions, or a Yes / No or Dropdown answer and its conditional questions), within three limits:</p>
+      <div class="rule-line">
+        <span class="rule">max 2 Multi Response levels</span>
+        <span class="rule">max 2 conditional levels</span>
+        <span class="rule">max 4 levels overall</span>
+        <span class="rule">a child group has one parent</span>
+      </div>
+    </div>
+
+    <section>
+      <h2>How a question can go one level down</h2>
+      <p>The database can store any depth. What decides the shapes is what each question type can do.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Question type</th><th>Has an answer?</th><th>Can open questions below it?</th><th>Can sit inside a Multi Response?</th><th>Can be shown by an answer?</th></tr></thead>
+          <tbody>
+            <tr><td><span class="chip mr">Multi Response</span></td><td>No, it is a heading</td><td>Yes: its sub-questions, always visible</td><td>Yes, as a child group</td><td>No</td></tr>
+            <tr><td><span class="chip choice">Yes / No</span> <span class="chip choice">Dropdown</span></td><td>Yes, from a fixed list</td><td>Yes: conditional questions for a chosen answer</td><td>Yes</td><td>Yes</td></tr>
+            <tr><td><span class="chip leaf">Free Text · Image · Date · Date &amp; Time · Multi select · File Upload · Video · Audio · Location · Barcode / QR Code / RFID · Subjective</span></td><td>Yes</td><td>No (only the “any answer” trigger)</td><td>Yes</td><td>Yes</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Only <b>Yes / No</b> and <b>Dropdown</b> have fixed answers that can be matched exactly. Free text, a photo or a date has no fixed value to compare, so those types end a branch. A Multi Response has no answer of its own, so it can neither open conditional questions nor be shown by one.</p>
+    </section>
+
+    <section>
+      <h2>The eight supported cases</h2>
+      <div class="legend">
+        <span class="chip mr">group</span><span class="chip choice">choice question</span><span class="chip leaf">any answer type</span>
+        <span><span class="pill ok">Everywhere</span> web, app, verifier, reports</span>
+        <span><span class="pill warn">Web only</span> app, verifier and reports to follow</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>Structure and example</th><th>Levels</th><th>Today</th></tr></thead>
+          <tbody>
+            <tr><td class="num">1</td><td><div class="path"><span class="chip choice">Yes / No</span><span class="when">= Yes</span><span class="arrow">→</span><span class="chip leaf">any type</span></div><div class="example">Asset available? = Yes → Asset photo (Image)</div></td><td class="levels">2</td><td><span class="pill ok">Everywhere</span></td></tr>
+            <tr><td class="num">2</td><td><div class="path"><span class="chip choice">Dropdown</span><span class="when">= option</span><span class="arrow">→</span><span class="chip leaf">any type</span></div><div class="example">Outlet status = Open → Owner contact (Free Text)</div></td><td class="levels">2</td><td><span class="pill ok">Everywhere</span></td></tr>
+            <tr><td class="num">3</td><td><div class="path"><span class="chip mr">Multi Response</span><span class="arrow">→</span><span class="chip leaf">any types</span></div><div class="example">Asset details → Serial no, Brand, Photo</div></td><td class="levels">2</td><td><span class="pill ok">Everywhere</span></td></tr>
+            <tr><td class="num">4</td><td><div class="path"><span class="chip mr">Multi Response</span><span class="arrow">→</span><span class="chip choice">Yes / No or Dropdown</span><span class="arrow">→</span><span class="chip leaf">any type</span></div><div class="example">Asset details → Asset available? = No → Reason</div></td><td class="levels">3</td><td><span class="pill ok">Everywhere</span></td></tr>
+            <tr><td class="num">5</td><td><div class="path"><span class="chip choice">Yes / No or Dropdown</span><span class="arrow">→</span><span class="chip choice">Yes / No or Dropdown</span><span class="arrow">→</span><span class="chip leaf">any type</span></div><div class="example">Outlet status = Open → Asset available? = Yes → Asset photo</div></td><td class="levels">3</td><td><span class="pill warn">Web only</span></td></tr>
+            <tr><td class="num">6</td><td><div class="path"><span class="chip mr">Multi Response</span><span class="arrow">→</span><span class="chip choice">Yes / No or Dropdown</span><span class="arrow">→</span><span class="chip choice">Yes / No or Dropdown</span><span class="arrow">→</span><span class="chip leaf">any type</span></div><div class="example">Asset check → Condition = Damaged → Damage type = Major → Damage photo</div></td><td class="levels">4</td><td><span class="pill warn">Web only</span></td></tr>
+            <tr><td class="num">7</td><td><div class="path"><span class="chip mr">Multi Response</span><span class="arrow">→</span><span class="chip mr">Multi Response</span><span class="arrow">→</span><span class="chip leaf">any types</span></div><div class="example">Asset details → Cooler checks → Cooler working?, Cooler photo</div></td><td class="levels">3</td><td><span class="pill warn">Web only</span></td></tr>
+            <tr><td class="num">8</td><td><div class="path"><span class="chip mr">Multi Response</span><span class="arrow">→</span><span class="chip mr">Multi Response</span><span class="arrow">→</span><span class="chip choice">Yes / No or Dropdown</span><span class="arrow">→</span><span class="chip leaf">any type</span></div><div class="example">Asset details → Cooler checks → Cooler working? = No → Cooler issue</div></td><td class="levels">4</td><td><span class="pill warn">Web only</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Cases 5 to 8 work on the auditor web form today and were tested there end to end (showing, hiding, saving, reopening). The app API, the verifier screen and the Report Dump still need to be extended to them; until then they should be used only for activities filled on the web.</p>
+    </section>
+
+    <section>
+      <h2>Why exactly these eight</h2>
+      <div class="grid2">
+        <div class="card"><h3>They are every combination of the two moves</h3><p>A group opens sub-questions; a choice question opens conditional questions. Combining those two moves within the limits gives these eight shapes and no others.</p></div>
+        <div class="card"><h3>They cover real audits</h3><p>Across all 1,378 existing questions, the deepest structure in use is 3 levels. Four levels leaves room to grow without new risk.</p></div>
+        <div class="card"><h3>Every part can support them</h3><p>The web form, app, verifier screen and reports can each handle these shapes. Anything deeper would be saved by one part and lost by another.</p></div>
+        <div class="card"><h3>They stay readable</h3><p>Question codes stay short (<code>Q004d2a</code>), the form fits a phone screen, and report columns stay understandable.</p></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Structures that are not allowed</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Structure</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>A conditional question of type Multi Response</td><td>A heading shown by an answer would also have to show, hide, require and validate everything inside it.</td></tr>
+            <tr><td>Free Text, Image, Multi select or similar opening questions for a specific answer</td><td>They have no fixed answer to match. Only the “any answer” trigger is possible.</td></tr>
+            <tr><td>Multi Response → Multi Response → Multi Response</td><td>Over the limit of 2 group levels.</td></tr>
+            <tr><td>Conditional → conditional → conditional</td><td>Over the limit of 2 conditional levels.</td></tr>
+            <tr><td>The same child group under two parent groups</td><td>Answers are saved against the nearest group only, so both places would read and overwrite the same answers.</td></tr>
+            <tr><td>Anything deeper than 4 levels</td><td>Over the overall limit.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>What unlimited nesting would cause</h2>
+      <p>Unlimited nesting is technically possible: the database can hold it. These are the problems it would create later.</p>
+      <ol class="issues">
+        <li><div><h3>Answers that the app, verifier or reports never see</h3><p>Each part walks a fixed number of levels. A question deeper than a part supports is answered and saved in one place, but never reaches the app, never appears for the verifier, and gets no column in Excel.</p><p class="eg">Example today: a second-level conditional question has no column in the Report Dump.</p></div></li>
+        <li><div><h3>Changing one answer deletes a large branch</h3><p>When a top answer changes, every answer under the branch it hides is removed on Save, so reports stay correct. With deep trees one tap can wipe many answers, photos included.</p></div></li>
+        <li><div><h3>Auditors miss questions</h3><p>Deeper branches hide more questions behind earlier answers. Auditors cannot see what is coming, and one wrong early answer silently skips a whole section.</p></div></li>
+        <li><div><h3>The form stops fitting a phone</h3><p>Every level is indented. On a 360 to 400 px screen, five or six levels leave little width for the question and the answer field.</p></div></li>
+        <li><div><h3>Testing grows exponentially</h3><p>With three answers per question, the number of paths is 3 to the power of the depth: <span class="math">3⁴ = 81</span> at four levels, <span class="math">3⁶ = 729</span> at six. Each path has to work on the web, the app, the verifier screen and the reports.</p></div></li>
+        <li><div><h3>Reports become unreadable</h3><p>Every level adds columns that are empty for most outlets, and the relation text (Outlet status = Open → Asset available? = Yes → Condition = Damaged → …) becomes too long to use.</p></div></li>
+        <li><div><h3>Question codes lose their meaning</h3><p>Codes grow with depth (<code>Q004d2aab…</code>) and stop helping auditors, verifiers and support staff talk about a question.</p></div></li>
+        <li><div><h3>Loops can be created by mistake</h3><p>Without a limit, an admin can make A depend on B and B depend on A. The form would then never settle. A depth limit, with a loop check when questions are saved, prevents this.</p></div></li>
+        <li><div><h3>Shared groups overwrite each other’s answers</h3><p>Answers are keyed by the nearest parent. A child group reused under two parents would share one set of answers. Deep, unlimited trees make this much harder to notice.</p></div></li>
+        <li><div><h3>Slower forms, app and reports</h3><p>Each level adds database queries when the form loads, more data in the app’s question API, and more lookups when a report runs over thousands of outlets.</p></div></li>
+        <li><div><h3>Every new shape needs app work</h3><p>The app developer has to build each structure the API sends. A fixed set of shapes is a contract the app can rely on; unlimited nesting is not.</p></div></li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Where each part stands</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Part</th><th>Cases 1–4</th><th>Cases 5–8</th><th>Work needed for 5–8</th></tr></thead>
+          <tbody>
+            <tr><td>Auditor web form</td><td><span class="pill ok">Works</span></td><td><span class="pill ok">Works</span></td><td>None. Codes and hidden-branch cleanup done and tested.</td></tr>
+            <tr><td>App API (<code>getAllQuestion</code>)</td><td><span class="pill ok">Works</span></td><td><span class="pill no">Missing</span></td><td>Send conditional questions and child groups at every level, with codes.</td></tr>
+            <tr><td>App (APK)</td><td><span class="pill ok">Works</span></td><td><span class="pill no">Missing</span></td><td>Draw sub-questions and conditional questions recursively.</td></tr>
+            <tr><td>Verifier screen</td><td><span class="pill ok">Works</span></td><td><span class="pill warn">Partly</span></td><td>Show conditional chains below the first level.</td></tr>
+            <tr><td>Report Dump</td><td><span class="pill ok">Works</span></td><td><span class="pill warn">Partly</span></td><td>Add a column for every conditional level.</td></tr>
+            <tr><td>Creating questions (admin, Excel)</td><td><span class="pill ok">Works</span></td><td><span class="pill warn">No limit check</span></td><td>Block anything outside the eight shapes, with a clear message.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Recommendation</h2>
+      <p>Keep the eight cases and the limits above. Enforce them when questions are created, so an activity can never hold a structure that some part of the system cannot show, save, verify or report. Once the app API, verifier screen and reports handle every level, the limit becomes a single setting that can be raised if a real audit ever needs it.</p>
+    </section>
+
+    <footer>Prepared from the Market Audit codebase and local data (1,378 questions, 640 sub-question links, 86 conditional questions). Cases 5–8 were tested on the auditor web form with test projects “ZZ ML 1” to “ZZ ML 5”.</footer>
+  </div>
+</main>
+</body>
+</html>

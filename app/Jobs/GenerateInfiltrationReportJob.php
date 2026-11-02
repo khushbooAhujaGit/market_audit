@@ -115,7 +115,8 @@ class GenerateInfiltrationReportJob implements ShouldQueue
         //    Python tool only ever reads worksheets[0] and worksheets[1]).
         $this->step('building base report');
         $controller = app(\App\Http\Controllers\Masters\ReportController::class);
-        $result     = $controller->buildReportFile($this->request, $this->validated);
+        // No relation header row: the tool reads row 1 as headers and every later row as data
+        $result     = $controller->buildReportFile($this->request, $this->validated, false);
         $xlsxPath   = $result['path'];
         $this->step('base report built', [
             'xlsxPath' => $xlsxPath,

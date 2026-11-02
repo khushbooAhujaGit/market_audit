@@ -18,12 +18,32 @@ namespace App\Services;
  *   7 = meta value (purple bg)
  *   8 = activity section label (bold, blue bg)
  *   9 = column header row (bold, yellow bg)
+ *  16 = relation cell, extra sheets (italic, light yellow bg, border, wrap)
+ *  17 = relation cell, main sheet (italic, light yellow bg, wrap)
+ *  18-20 = report header block: company / activity / period (centred, no border)
  */
 class FastXlsxWriter
 {
     private string $baseUrl;
     private string $tmpDir;
     private array  $sheets = [];
+
+    /** Report header block (company / activity / period) + header-row filters. Null = original layout. */
+    private ?array $reportMeta = null;
+    /** 0-based index of the main sheet's column-header row (0 without the header block). */
+    private int $mainHeaderRow = 0;
+    /** Per-sheet auto-filter ranges (sheet index => 'A5:ZZ99'), for the workbook defined names. */
+    private array $filterRefs = [];
+
+    /**
+     * Turn on the professional report layout: a centred company / activity / period block above
+     * the main sheet's column headers, and header-row filters on every sheet. Without calling this
+     * the writer produces exactly the original layout.
+     */
+    public function enableReportHeader(array $meta): void
+    {
+        $this->reportMeta = $meta;
+    }
 
     public function __construct(string $baseUrl)
     {
@@ -32,16 +52,26 @@ class FastXlsxWriter
         mkdir($this->tmpDir, 0777, true);
     }
 
-    /** Add the main data sheet (row 0 = bold header). */
-    public function addMainSheet(string $title, array $rows): void
+    /**
+     * Add the main data sheet (row 0 = bold header). With $headerRows = 2, row 1 is the relation
+     * row (how each sub/conditional question hangs from its parents); both stay frozen.
+     */
+    public function addMainSheet(string $title, array $rows, int $headerRows = 1): void
     {
-        $this->sheets[] = ['title' => substr($title, 0, 31), 'rows' => $rows, 'type' => 'main'];
+        $this->sheets[] = ['title' => substr($title, 0, 31), 'rows' => $rows, 'type' => 'main',
+            'header_rows' => max(1, $headerRows), 'relation_rows' => [], 'relation_cols' => []];
     }
 
-    /** Add an instance/extra sheet with metadata rows and activity sections. */
-    public function addExtraSheet(string $title, array $rows): void
+    /**
+     * Add an instance/extra sheet with metadata rows and activity sections.
+     * $relationRows: row indexes styled as relation rows (a relation row right after the column
+     * header row is frozen with it). $relationCols: column indexes whose filled data cells hold
+     * a relation.
+     */
+    public function addExtraSheet(string $title, array $rows, array $relationRows = [], array $relationCols = []): void
     {
-        $this->sheets[] = ['title' => substr($title, 0, 31), 'rows' => $rows, 'type' => 'extra'];
+        $this->sheets[] = ['title' => substr($title, 0, 31), 'rows' => $rows, 'type' => 'extra',
+            'header_rows' => 6, 'relation_rows' => array_flip($relationRows), 'relation_cols' => array_flip($relationCols)];
     }
 
     /** Write the final XLSX to $outputPath and clean up temp files. */
@@ -55,9 +85,7 @@ class FastXlsxWriter
         $totalSheets = count($this->sheets);
 
         foreach ($this->sheets as $i => $sheet) {
-            [$xmlFile, $relsContent, $merges] = $this->buildSheet(
-                $sheet['rows'], $sheet['type'], $i + 1
-            );
+            [$xmlFile, $relsContent, $merges] = $this->buildSheet($sheet, $i + 1);
             $sheetXmls[] = ['file' => $xmlFile, 'merges' => $merges];
             $sheetRels[] = $relsContent;
         }
@@ -90,8 +118,21 @@ class FastXlsxWriter
 
     // ── Sheet builder ────────────────────────────────────────────────────────
 
-    private function buildSheet(array $rows, string $type, int $sheetNum): array
+    private function buildSheet(array $sheet, int $sheetNum): array
     {
+        $rows         = $sheet['rows'];
+        $type         = $sheet['type'];
+        $relationRows = $sheet['relation_rows'];
+        $relationCols = $sheet['relation_cols'];
+        // Main sheet: the header rows after the first one are relation rows
+        for ($ri = 1; $type === 'main' && $ri < $sheet['header_rows']; $ri++) {
+            $relationRows[$ri] = true;
+        }
+        $freezeAt = $sheet['header_rows'];
+        while ($type === 'extra' && isset($relationRows[$freezeAt])) {
+            $freezeAt++;
+        }
+
         // Strip trailing all-empty rows so dimension ends at last meaningful row.
         // Rows beyond the dimension appear with Excel's lighter default style (no styled borders).
         if ($type === 'extra') {
@@ -107,20 +148,46 @@ class FastXlsxWriter
         // Pass 1: compute column widths and max column count
         $colWidths = [];
         $maxCols   = 0;
-        foreach ($rows as $row) {
+        foreach ($rows as $ri => $row) {
             if (!is_array($row)) continue;
             $cnt = count($row);
             if ($cnt > $maxCols) $maxCols = $cnt;
+            $isRelationRow = isset($relationRows[$ri]);
             foreach ($row as $ci => $val) {
+                // A Google Maps cell shows its label, not the link
+                if (!$isRelationRow && str_starts_with((string) $val, self::MAPS_PREFIX)) {
+                    $val = $this->mapsParts((string) $val)[0];
+                }
                 // Use the longest line in multi-line values for width calculation
                 $lines = explode("\n", (string)($val ?? ''));
                 $len   = max(array_map('mb_strlen', $lines));
-                // Width = content length + padding, min 8, max 80 (prevents absurdly wide cols)
-                $w = min(max($len + 2, 8), 80);
+                // Width = content length + padding, min 8, max 80 (prevents absurdly wide cols).
+                // Relation text wraps, so it widens a column only up to 40.
+                $w = min(max($len + 2, 8), $isRelationRow || isset($relationCols[$ci]) ? 40 : 80);
                 if (!isset($colWidths[$ci]) || $w > $colWidths[$ci]) $colWidths[$ci] = $w;
             }
         }
         if ($maxCols < 2) $maxCols = 2;
+
+        // Report header block: company / activity / period, then a blank spacer row, above the
+        // column headers. Added after the width pass so long titles don't widen column A.
+        $metaRowCount = 0;
+        $this->mainHeaderRow = 0;
+        if ($type === 'main' && $this->reportMeta !== null) {
+            $metaRows = [
+                [(string)($this->reportMeta['company']  ?? '')],
+                [(string)($this->reportMeta['activity'] ?? '')],
+                [(string)($this->reportMeta['period']   ?? '')],
+                [''],
+            ];
+            $rows         = array_merge($metaRows, array_values($rows));
+            $metaRowCount = count($metaRows);
+            $this->mainHeaderRow = $metaRowCount;
+            // The relation row(s) and the frozen header move down with the column headers
+            $relationRows = array_fill_keys(array_map(fn($ri) => $ri + $metaRowCount, array_keys($relationRows)), true);
+            $freezeAt += $metaRowCount;
+        }
+        $metaSpan = min($maxCols, 8); // columns the header block is centred across
 
         $xmlFile    = $this->tmpDir . "/sheet{$sheetNum}.xml";
         $fh         = fopen($xmlFile, 'w');
@@ -142,16 +209,17 @@ class FastXlsxWriter
 
         // sheetViews — OOXML requires <selection pane="topLeft"/> BEFORE the active-pane selection
         if ($type === 'main') {
+            $firstData = 'A' . ($freezeAt + 1);
             fwrite($fh,
                 '<sheetViews><sheetView tabSelected="1" workbookViewId="0">'
-                . '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
+                . "<pane ySplit=\"{$freezeAt}\" topLeftCell=\"{$firstData}\" activePane=\"bottomLeft\" state=\"frozen\"/>"
                 . '<selection pane="topLeft"/>'
-                . '<selection pane="bottomLeft" activeCell="A2" sqref="A2"/>'
+                . "<selection pane=\"bottomLeft\" activeCell=\"{$firstData}\" sqref=\"{$firstData}\"/>"
                 . '</sheetView></sheetViews>'
             );
         } else {
-            // Extra sheets always freeze 6 rows (rows 1-6 = headers, row 7 = first data)
-            $freezeAt  = 6;
+            // Extra sheets freeze 6 rows (rows 1-6 = headers, row 7 = first data), plus a relation
+            // row that follows the column header row
             $firstData = 'A' . ($freezeAt + 1);
             fwrite($fh,
                 '<sheetViews><sheetView workbookViewId="0">'
@@ -192,9 +260,14 @@ class FastXlsxWriter
                 for ($ci = 0; $ci < $maxCols; $ci++) {
                     $val  = (string)($row[$ci] ?? '');
                     $ref  = $this->colLetter($ci) . $rowNum;
-                    $sIdx = $this->styleIndex($val, $ri, $ci, $type, $row);
+                    $isRelation = isset($relationRows[$ri]) || ($ri >= $freezeAt && $val !== '' && isset($relationCols[$ci]));
+                    if (!$isRelation && str_starts_with($val, self::MAPS_PREFIX)) {
+                        fwrite($fh, $this->mapsLinkCell($ref, $val));
+                        continue;
+                    }
+                    $sIdx = $isRelation ? 16 : $this->styleIndex($val, $ri, $ci, $type, $row);
 
-                    [$label, $url, $isZip] = $this->classifyCell($val);
+                    [$label, $url, $isZip] = $isRelation ? [$val, null, false] : $this->classifyCell($val);
                     if ($url) {
                         $hlCount++;
                         $relId            = "rId{$hlCount}";
@@ -212,15 +285,44 @@ class FastXlsxWriter
                         );
                     }
                 }
+            } elseif ($ri < $metaRowCount) {
+                // Header block rows: centred across the first columns WITHOUT merging
+                // (alignment "centerContinuous" needs the neighbouring cells empty, same style).
+                $heights = [0 => 26, 1 => 20, 2 => 18, 3 => 8];
+                fwrite($fh, "<row r=\"{$rowNum}\" ht=\"{$heights[$ri]}\" customHeight=\"1\">");
+                if ($ri < 3) {
+                    $sIdx = [18, 19, 20][$ri];
+                    $val  = (string)($row[0] ?? '');
+                    for ($ci = 0; $ci < $metaSpan; $ci++) {
+                        $ref = $this->colLetter($ci) . $rowNum;
+                        if ($ci === 0 && $val !== '') {
+                            fwrite($fh, "<c r=\"{$ref}\" t=\"inlineStr\" s=\"{$sIdx}\"><is><t xml:space=\"preserve\">" . $this->xe($val) . '</t></is></c>');
+                        } else {
+                            fwrite($fh, "<c r=\"{$ref}\" s=\"{$sIdx}\"/>");
+                        }
+                    }
+                }
             } else {
                 fwrite($fh, "<row r=\"{$rowNum}\">");
+                $isRelation = isset($relationRows[$ri]);
+                if ($isRelation) {
+                    // The relation row is highlighted across every column, empty cells included
+                    $row = array_pad($row, $maxCols, '');
+                }
                 foreach ($row as $ci => $val) {
                     $val = (string)($val ?? '');
-                    if ($val === '') continue;
                     $ref  = $this->colLetter($ci) . $rowNum;
-                    $sIdx = $this->styleIndex($val, $ri, $ci, $type, $row);
+                    if ($val === '') {
+                        if ($isRelation) fwrite($fh, "<c r=\"{$ref}\" s=\"17\"/>");
+                        continue;
+                    }
+                    if (!$isRelation && str_starts_with($val, self::MAPS_PREFIX)) {
+                        fwrite($fh, $this->mapsLinkCell($ref, $val));
+                        continue;
+                    }
+                    $sIdx = $isRelation ? 17 : $this->styleIndex($val, $ri, $ci, $type, $row);
 
-                    [$label, $url, $isZip] = $this->classifyCell($val);
+                    [$label, $url, $isZip] = $isRelation ? [$val, null, false] : $this->classifyCell($val);
                     if ($url) {
                         $hlCount++;
                         $relId            = "rId{$hlCount}";
@@ -239,6 +341,15 @@ class FastXlsxWriter
             fwrite($fh, '</row>');
         }
         fwrite($fh, '</sheetData>');
+
+        // Header-row filters (only with the report header layout; the original layout has none).
+        // On the last header row — the relation row when there is one — so sorting and filtering
+        // never move the header rows.
+        if ($this->reportMeta !== null && $totalRows >= $freezeAt) {
+            $filterRef = "A{$freezeAt}:{$lastColLetter}{$totalRows}";
+            $this->filterRefs[$sheetNum - 1] = $filterRef;
+            fwrite($fh, "<autoFilter ref=\"{$filterRef}\"/>");
+        }
 
         // mergeCells (must come after sheetData, only when we have real merges)
         if (!empty($merges)) {
@@ -283,7 +394,7 @@ class FastXlsxWriter
     private function styleIndex($val, int $ri, int $ci, string $type, array $row): int
     {
         if ($type === 'main') {
-            if ($ri === 0) return 14; // bold no-border header row
+            if ($ri === $this->mainHeaderRow) return 14; // bold no-border column-header row
             // Multi-line scan-answer "extra" cells get wrap text so each key:value pair
             // actually shows on its own line instead of running together.
             return str_contains((string)$val, "\n") ? 15 : 13;
@@ -315,6 +426,35 @@ class FastXlsxWriter
     // ── Cell URL classifier ──────────────────────────────────────────────────
 
     private static array $EXT_RE_CACHE = [];
+
+    private const MAPS_PREFIX = 'https://www.google.com/maps?q=';
+    private const MAPS_LABEL_SEP = "\t";
+
+    /** Cell value for a Google Maps link that shows $label instead of the link ('' = the link). */
+    public static function mapsValue(string $url, string $label): string
+    {
+        return $label === '' ? $url : $url . self::MAPS_LABEL_SEP . $label;
+    }
+
+    /** [text shown, link] of a Google Maps cell value (see mapsValue()). */
+    private function mapsParts(string $val): array
+    {
+        [$url, $label] = array_pad(explode(self::MAPS_LABEL_SEP, $val, 2), 2, '');
+        return [$label !== '' ? $label : $url, $url];
+    }
+
+    /**
+     * Google Maps link cell. Written as a HYPERLINK() formula: still clickable, but it doesn't
+     * count towards Excel's ~65k hyperlinks-per-sheet limit, so large reports that already carry
+     * image/ZIP links keep opening cleanly.
+     */
+    private function mapsLinkCell(string $ref, string $val): string
+    {
+        [$label, $url] = $this->mapsParts($val);
+        $q = fn($s) => str_replace('"', '""', $s);
+        return "<c r=\"{$ref}\" t=\"str\" s=\"2\"><f>" . $this->xe("HYPERLINK(\"{$q($url)}\",\"{$q($label)}\")") . '</f>'
+            . '<v>' . $this->xe($label) . '</v></c>';
+    }
 
     private function classifyCell(string $val): array
     {
@@ -425,7 +565,23 @@ class FastXlsxWriter
             . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
             . ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
             . "<sheets>{$sheetEls}</sheets>"
+            . $this->definedNames($sheets)
             . '</workbook>';
+    }
+
+    /** Hidden _FilterDatabase names so Excel shows the auto-filter buttons on open. */
+    private function definedNames(array $sheets): string
+    {
+        if (empty($this->filterRefs)) return '';
+        $out = '<definedNames>';
+        foreach ($this->filterRefs as $idx => $ref) {
+            $title = str_replace("'", "''", $sheets[$idx]['title']);
+            [$from, $to] = explode(':', $ref);
+            $abs = fn($c) => preg_replace('/^([A-Z]+)(\d+)$/', '\$$1\$$2', $c);
+            $target = htmlspecialchars("'{$title}'!" . $abs($from) . ':' . $abs($to), ENT_XML1 | ENT_QUOTES, 'UTF-8');
+            $out .= "<definedName name=\"_xlnm._FilterDatabase\" localSheetId=\"{$idx}\" hidden=\"1\">{$target}</definedName>";
+        }
+        return $out . '</definedNames>';
     }
 
     private function workbookRels(int $n): string
@@ -448,7 +604,9 @@ class FastXlsxWriter
     private function styles(): string
     {
         // fonts: 0=normal 1=bold 2=white-16px 3=link-blue 4=link-green 5=title-19px 6=bold12 7=bold14(title)
-        $fonts = '<fonts count="8">'
+        //        8=italic grey (relation) 9=report company title (bold 16 navy) 10=report activity
+        //        (bold 12 dark grey) 11=report period (11 grey)
+        $fonts = '<fonts count="12">'
             . '<font><b val="0"/><sz val="11"/><color rgb="FF000000"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>'
             . '<font><b/><sz val="11"/><color rgb="FF000000"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>'
             . '<font><sz val="16"/><color rgb="FFFFFFFF"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>'
@@ -457,10 +615,14 @@ class FastXlsxWriter
             . '<font><sz val="19"/><color rgb="FF000000"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>'
             . '<font><b/><sz val="12"/><color rgb="FF000000"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>'
             . '<font><b/><sz val="14"/><color rgb="FF000000"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>'
+            . '<font><i/><sz val="10"/><color rgb="FF595959"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>'
+            . '<font><b/><sz val="16"/><color rgb="FF1F3864"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>'
+            . '<font><b/><sz val="12"/><color rgb="FF404040"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>'
+            . '<font><sz val="11"/><color rgb="FF595959"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>'
             . '</fonts>';
 
-        // fills: 0=none 1=gray125 2=dark-purple 3=light-purple 4=light-blue 5=yellow 6=white
-        $fills = '<fills count="7">'
+        // fills: 0=none 1=gray125 2=dark-purple 3=light-purple 4=light-blue 5=yellow 6=white 7=light-yellow
+        $fills = '<fills count="8">'
             . '<fill><patternFill patternType="none"/></fill>'
             . '<fill><patternFill patternType="gray125"/></fill>'
             . '<fill><patternFill patternType="solid"><fgColor rgb="FF403151"/><bgColor indexed="64"/></patternFill></fill>'
@@ -468,6 +630,7 @@ class FastXlsxWriter
             . '<fill><patternFill patternType="solid"><fgColor rgb="FFBDD7EE"/><bgColor indexed="64"/></patternFill></fill>'
             . '<fill><patternFill patternType="solid"><fgColor rgb="FFFFFF00"/><bgColor indexed="64"/></patternFill></fill>'
             . '<fill><patternFill patternType="none"/></fill>'
+            . '<fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill>'
             . '</fills>';
 
         // borders: 0=none, 1=thin all sides
@@ -495,7 +658,7 @@ class FastXlsxWriter
             . '</cellStyleXfs>';
 
         // All cellXfs MUST declare applyFont/applyFill/applyAlignment when they differ from base
-        $cellXfs = '<cellXfs count="16">'
+        $cellXfs = '<cellXfs count="21">'
             // 0: normal + border
             . '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/>'
             // 1: header — bold white text, dark-blue fill, centered, wrap + border
@@ -536,6 +699,16 @@ class FastXlsxWriter
             //     multiple "key:value" lines (unmatched Barcode/QR Code/RFID header data)
             . '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1">'
             . '<alignment wrapText="1" vertical="top"/></xf>'
+            // 16: relation cell on extra sheets — italic grey, light yellow fill, border, wrap
+            . '<xf numFmtId="0" fontId="8" fillId="7" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1">'
+            . '<alignment wrapText="1" vertical="top"/></xf>'
+            // 17: relation cell on the main sheet — same, without border (its header row has none)
+            . '<xf numFmtId="0" fontId="8" fillId="7" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1">'
+            . '<alignment wrapText="1" vertical="top"/></xf>'
+            // 18-20: report header block — centred across selection (no merge), no border
+            . '<xf numFmtId="0" fontId="9" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="centerContinuous" vertical="center"/></xf>'
+            . '<xf numFmtId="0" fontId="10" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="centerContinuous" vertical="center"/></xf>'
+            . '<xf numFmtId="0" fontId="11" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="centerContinuous" vertical="center"/></xf>'
             . '</cellXfs>';
 
         $cellStyles = '<cellStyles count="1">'

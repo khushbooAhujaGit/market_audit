@@ -1,3 +1,5 @@
+{{-- Footer hidden. Show it again with SHOW_FOOTER_COPYRIGHT=true in .env (or restore footer.blade.php.bak_before_footer_removal) --}}
+@if (filter_var(env('SHOW_FOOTER_COPYRIGHT', false), FILTER_VALIDATE_BOOLEAN))
 {{-- Footer Start--}}
 <footer class="footer">
     <div class="container-fluid">
@@ -13,3 +15,4 @@
         </div>
     </div>
 </footer>
+@endif
